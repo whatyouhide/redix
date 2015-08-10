@@ -1,9 +1,17 @@
-defmodule Recs.Parser do
+defmodule Recs.RESP do
   defmodule ParseError do
     defexception [:message]
   end
 
   @crlf "\r\n"
+
+  def pack(strings) when is_list(strings) do
+    packed = for str <- strings, str = to_string(str) do
+      [?$, Integer.to_string(byte_size(str)), @crlf, str, @crlf]
+    end
+
+    [?*, to_string(length(strings)), @crlf, packed]
+  end
 
   def parse("$-1" <> @crlf <> rest), do: {:ok, nil, rest}
   def parse("*-1" <> @crlf <> rest), do: {:ok, nil, rest}

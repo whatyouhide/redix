@@ -1,8 +1,31 @@
-defmodule Recs.ParserTest do
-  use ExUnit.Case
+defmodule Recs.RESPTest do
+  use ExUnit.Case, async: true
 
-  import Recs.Parser
-  alias Recs.Parser.ParseError
+  import Recs.RESP
+  alias Recs.RESP.ParseError
+
+  test "pack/1: empty array" do
+    assert b(pack([])) == "*0\r\n"
+  end
+
+  test "pack/1: regular strings" do
+    assert b(pack(["foo", "bar"])) == "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
+    assert b(pack(["with spaces "])) == "*1\r\n$12\r\nwith spaces \r\n"
+  end
+
+  test "pack/1: unicode" do
+    str = "føø"
+    size = byte_size(str)
+    assert b(pack([str])) == "*1\r\n$#{size}\r\n#{str}\r\n"
+  end
+
+  test "pack/1: raw bytes (non printable)" do
+    assert b(pack([<<1, 2>>])) == <<"*1\r\n$2\r\n", 1, 2, "\r\n">>
+  end
+
+  defp b(bin) do
+    IO.iodata_to_binary(bin)
+  end
 
   test "parse/1: simple strings" do
     assert parse("+OK\r\n") == {:ok, "OK", ""}
