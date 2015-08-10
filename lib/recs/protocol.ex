@@ -28,6 +28,7 @@ defmodule Recs.Protocol do
   def parse(":" <> rest), do: parse_integer(rest)
   def parse("$" <> rest), do: parse_bulk_string(rest)
   def parse("*" <> rest), do: parse_array(rest)
+  def parse(""), do: {:error, :incomplete}
   def parse(_), do: raise(ParseError, message: "no type specifier")
 
   @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
