@@ -1,2 +1,5 @@
 %{"benchfella": {:git, "git://github.com/alco/benchfella.git", "9513b94538fd3df28d12e3b999d397658146c005", []},
+  "connection": {:hex, :connection, "1.0.0-rc.1"},
+  "dialyze": {:hex, :dialyze, "0.2.0"},
+  "eredis": {:git, "git://github.com/wooga/eredis.git", "770f828918db710d0c0958c6df63e90a4d341ed7", []},
   "redo": {:git, "git://github.com/heroku/redo.git", "936a3c5dcadc8319b349fcad3e5b4c64e98db4d6", []}}

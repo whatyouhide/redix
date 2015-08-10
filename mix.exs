@@ -5,7 +5,7 @@ defmodule Recs.Mixfile do
     [app: :recs,
      version: "0.0.1",
      elixir: "~> 1.0",
-     build_embedded: Mix.env == :prod,
+     build_embedded: Mix.env in [:prod, :bench],
      start_permanent: Mix.env == :prod,
      deps: deps]
   end
@@ -16,8 +16,11 @@ defmodule Recs.Mixfile do
 
   defp deps do
     [
-      {:benchfella, github: "alco/benchfella", only: :dev},
-      {:redo, github: "heroku/redo", only: :dev}, # just for benchmarks
+      {:connection, "~> 1.0.0-rc.1"},
+      {:dialyze, "~> 0.2", only: :dev},
+      {:benchfella, github: "alco/benchfella", only: :bench},
+      {:redo, github: "heroku/redo", only: :bench}, # just for benchmarks
+      {:eredis, github: "wooga/eredis", only: :bench}, # just for benchmarks
     ]
   end
 end
