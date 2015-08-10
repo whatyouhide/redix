@@ -1,10 +1,13 @@
-defmodule Recs.RESP do
+defmodule Recs.Protocol do
   defmodule ParseError do
     defexception [:message]
   end
 
+  @type redis_value :: binary | integer | nil | [redis_value]
+
   @crlf "\r\n"
 
+  @spec pack([binary]) :: iodata
   def pack(strings) when is_list(strings) do
     packed = for str <- strings, str = to_string(str) do
       [?$, Integer.to_string(byte_size(str)), @crlf, str, @crlf]
@@ -13,14 +16,37 @@ defmodule Recs.RESP do
     [?*, to_string(length(strings)), @crlf, packed]
   end
 
+  @spec parse(binary) :: {:ok, redis_value, binary} | {:error, term}
+  def parse(data)
+
   def parse("$-1" <> @crlf <> rest), do: {:ok, nil, rest}
   def parse("*-1" <> @crlf <> rest), do: {:ok, nil, rest}
+  def parse("$-1" <> _), do: {:error, :incomplete}
+  def parse("*-1" <> _), do: {:error, :incomplete}
   def parse("+" <> rest), do: parse_simple_string(rest)
   def parse("-" <> rest), do: parse_error(rest)
   def parse(":" <> rest), do: parse_integer(rest)
   def parse("$" <> rest), do: parse_bulk_string(rest)
   def parse("*" <> rest), do: parse_array(rest)
   def parse(_), do: raise(ParseError, message: "no type specifier")
+
+  @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
+  def parse_multi(data, n) do
+    parse_multi(data, n, [])
+  end
+
+  def parse_multi(data, 0, acc) do
+    {:ok, Enum.reverse(acc), data}
+  end
+
+  def parse_multi(data, n, acc) do
+    case parse(data) do
+      {:ok, val, rest} ->
+        parse_multi(rest, n - 1, [val|acc])
+      {:error, _} = error ->
+        error
+    end
+  end
 
   defp parse_simple_string(data) do
     until_crlf(data)
@@ -66,20 +92,17 @@ defmodule Recs.RESP do
     end
   end
 
-  defp until_crlf(@crlf <> rest) do
-    {:ok, <<>>, rest}
+  defp until_crlf(data, acc \\ "")
+
+  defp until_crlf(@crlf <> rest, acc) do
+    {:ok, acc, rest}
   end
 
-  defp until_crlf(<<h, rest :: binary>>) do
-    case until_crlf(rest) do
-      {:ok, str, rest} ->
-        {:ok, <<h, str :: binary>>, rest}
-      {:error, _} = err ->
-        err
-    end
+  defp until_crlf(<<h, rest :: binary>>, acc) do
+    until_crlf(rest, <<acc :: binary, h>>)
   end
 
-  defp until_crlf(<<>>) do
+  defp until_crlf(<<>>, _acc) do
     {:error, :incomplete}
   end
 

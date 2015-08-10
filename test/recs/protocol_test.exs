@@ -1,8 +1,8 @@
-defmodule Recs.RESPTest do
+defmodule Recs.ProtocolTest do
   use ExUnit.Case, async: true
 
-  import Recs.RESP
-  alias Recs.RESP.ParseError
+  import Recs.Protocol
+  alias Recs.Protocol.ParseError
 
   test "pack/1: empty array" do
     assert b(pack([])) == "*0\r\n"
