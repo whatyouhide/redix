@@ -91,6 +91,10 @@ defmodule Recs.ProtocolTest do
     assert parse("$2\r\n" <> <<1, 2>> <> "\r\n") == {:ok, <<1, 2>>, ""}
   end
 
+  test "parse/1 with a bulk string whose length is malformed" do
+    assert parse("$2") == {:error, :incomplete}
+  end
+
   test "parse/1 with an empty array" do
     assert parse("*0\r\n") == {:ok, [], ""}
   end
@@ -120,6 +124,18 @@ defmodule Recs.ProtocolTest do
     # Null values (of different types) in the array.
     arr = "*4\r\n$3\r\nfoo\r\n$-1\r\n$3\r\nbar\r\n*-1\r\n"
     assert parse(arr) == {:ok, ["foo", nil, "bar", nil], ""}
+  end
+
+  test "parse/1 with arrays whose length is incomplete" do
+    assert parse("*1") == {:error, :incomplete}
+  end
+
+  test "parse/1 with arrays that contain incomplete elements" do
+    assert parse("*1\r\n+OK") == {:error, :incomplete}
+  end
+
+  test "parse/1 with arrays with not enough elements" do
+    assert parse("*2\r\n+OK\r\n") == {:error, :incomplete}
   end
 
   test "parse/1 when the binary value has no type specifier" do
@@ -156,5 +172,21 @@ defmodule Recs.ProtocolTest do
   test "parse/1 with malformed bulk strings" do
     # says it has 4 bytes, only has 3
     assert parse("$4\r\nops\r\n") == {:error, :incomplete}
+  end
+
+  test "parse_multi/2 with enough elements" do
+    data = "+OK\r\n+OK\r\n+OK\r\n"
+    assert parse_multi(data, 3) == {:ok, ~w(OK OK OK), ""}
+    assert parse_multi(data, 2) == {:ok, ~w(OK OK), "+OK\r\n"}
+  end
+
+  test "parse_multi/2 with not enough data" do
+    data = "+OK\r\n+OK\r\n"
+    assert parse_multi(data, 3) == {:error, :incomplete}
+  end
+
+  test "parse_multi/2 when the data ends abruptedly" do
+    data = "+OK\r\n+OK"
+    assert parse_multi(data, 2) == {:error, :incomplete}
   end
 end
