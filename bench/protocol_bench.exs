@@ -2,9 +2,10 @@ defmodule RespBench do
   use Benchfella
 
   @simple_string "+Operation against a key holding the wrong kind of"
-    <> "value. Ut eu efficitur nisl. Aliquam.\r\n"
-    <> "value. Ut eu efficitur nisl. Aliquam.\r\n"
-    <> "value. Ut eu efficitur nisl. Aliquam.\r\n"
+    <> "value. Ut eu efficitur nisl. Aliquam."
+    <> "value. Ut eu efficitur nisl. Aliquam."
+    <> "value. Ut eu efficitur nisl. Aliquam."
+    <> "\r\n"
 
   @error "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
 
