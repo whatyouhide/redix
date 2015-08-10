@@ -1,11 +1,17 @@
 defmodule Recs do
   @type command :: [binary]
 
+  @default_opts [
+    host: "localhost",
+    port: 6379,
+  ]
+
   @redis_opts ~w(host port password database)a
 
   @spec start_link(Keyword.t) :: GenServer.on_start
-  def start_link(opts) do
+  def start_link(opts \\ []) do
     {_redis_opts, connection_opts} = Keyword.split(opts, @redis_opts)
+    opts = Keyword.merge(@default_opts, opts)
     Connection.start_link(Recs.Connection, opts, connection_opts)
   end
 
