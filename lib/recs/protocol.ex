@@ -7,15 +7,50 @@ defmodule Recs.Protocol do
 
   @crlf "\r\n"
 
+  @doc ~S"""
+  Packs a list of Elixir terms to a Redis (RESP) array.
+
+  This function returns an iodata (instead of a binary) because the packed
+  result is usually sent to Redis through `:gen_tcp.send/2` or similar. It can
+  be converted to a binary with `IO.iodata_to_binary/1`.
+
+  All elements of `elems` are converted to strings with `to_string/1`, hence
+  this function supports integers, atoms, string, char lists and whatnot. Since
+  `to_string/1` uses the `String.Chars` protocol, running this with consolidated
+  protocols makes it quite faster (even if this is probably not the bottleneck
+  of your application).
+
+  ## Examples
+
+      iex> iodata = Recs.Protocol.pack ["SET", "mykey", 1]
+      iex> IO.iodata_to_binary(iodata)
+      "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$1\r\n1\r\n"
+
+  """
   @spec pack([binary]) :: iodata
-  def pack(strings) when is_list(strings) do
-    packed = for str <- strings, str = to_string(str) do
+  def pack(elems) when is_list(elems) do
+    packed = for el <- elems, str = to_string(el) do
       [?$, Integer.to_string(byte_size(str)), @crlf, str, @crlf]
     end
 
-    [?*, to_string(length(strings)), @crlf, packed]
+    [?*, to_string(length(elems)), @crlf, packed]
   end
 
+  @doc ~S"""
+  Parses a RESP-encoded value from the given `binary`.
+
+  Returns `{:ok, value, rest}` if a value is parsed successfully, `{:error,
+  :reason}` otherwise.
+
+  ## Examples
+
+      iex> Recs.Protocol.parse "+OK\r\ncruft"
+      {:ok, "OK", "cruft"}
+
+      iex> Recs.Protocol.parse "+OK"
+      {:error, :incomplete}
+
+  """
   @spec parse(binary) :: {:ok, redis_value, binary} | {:error, term}
   def parse(data)
 
@@ -31,6 +66,22 @@ defmodule Recs.Protocol do
   def parse(""), do: {:error, :incomplete}
   def parse(_), do: raise(ParseError, message: "no type specifier")
 
+  @doc ~S"""
+  Parses `n` RESP-encoded values from the given `data`.
+
+  Each element is parsed as described in `parse/1`. If there's an error in
+  parsing any of the elements or there are less than `n` elements, `{:error,
+  reason}` is returned. Otherwise, `{:ok, values, rest}` is returned.
+
+  ## Examples
+
+      iex> parse_multi("+OK\r\n+COOL\r\n", 2)
+      {:ok, ["OK", "COOL"], ""}
+
+      iex> parse_multi("+OK\r\n", 2)
+      {:error, :incomplete}
+
+  """
   @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
   def parse_multi(data, n) do
     parse_multi(data, n, [])

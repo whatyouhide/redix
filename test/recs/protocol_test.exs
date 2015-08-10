@@ -4,6 +4,8 @@ defmodule Recs.ProtocolTest do
   import Recs.Protocol
   alias Recs.Protocol.ParseError
 
+  doctest Recs.Protocol
+
   test "pack/1: empty array" do
     assert b(pack([])) == "*0\r\n"
   end
