@@ -7,6 +7,7 @@ defmodule Recs.Mixfile do
      elixir: "~> 1.0",
      build_embedded: Mix.env in [:prod, :bench],
      start_permanent: Mix.env == :prod,
+     test_coverage: [tool: Coverex.Task],
      deps: deps]
   end
 
@@ -21,6 +22,7 @@ defmodule Recs.Mixfile do
       {:benchfella, github: "alco/benchfella", only: :bench},
       {:redo, github: "heroku/redo", only: :bench}, # just for benchmarks
       {:eredis, github: "wooga/eredis", only: :bench}, # just for benchmarks
+      {:coverex, "~> 1.4", only: :test},
     ]
   end
 end
