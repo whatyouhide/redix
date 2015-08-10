@@ -1,9 +1,19 @@
 defmodule RecsTest do
   use ExUnit.Case, async: true
 
-  setup do
-    {:ok, conn} = Recs.start_link(host: "localhost", port: 6379)
-    {:ok, %{conn: conn}}
+  setup context do
+    if context[:no_setup] do
+      {:ok, %{}}
+    else
+      {:ok, conn} = Recs.start_link
+      {:ok, %{conn: conn}}
+    end
+  end
+
+  @tag :no_setup
+  test "start_link/1: returns a pid" do
+    assert {:ok, pid} = Recs.start_link
+    assert is_pid(pid)
   end
 
   test "command/2", %{conn: c} do
