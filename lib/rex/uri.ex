@@ -1,4 +1,4 @@
-defmodule Recs.URI do
+defmodule Rex.URI do
   defmodule URIError do
     defexception [:message]
   end

@@ -1,9 +1,9 @@
-defmodule Recs.Connection do
+defmodule Rex.Connection do
   @moduledoc false
 
   use Connection
 
-  alias Recs.Protocol
+  alias Rex.Protocol
 
   @initial_state %{
     socket: nil,
@@ -63,6 +63,10 @@ defmodule Recs.Connection do
   @doc false
   def handle_call(operation, from, s)
 
+  def handle_call(:s, _, s) do
+    {:reply, s, s}
+  end
+
   def handle_call({:command, args}, from, %{queue: queue} = s) do
     s
     |> enqueue({:command, from})
@@ -95,7 +99,7 @@ defmodule Recs.Connection do
   ## Helper functions
 
   defp new_data(s, <<>>) do
-    s
+    %{s | tail: <<>>}
   end
 
   defp new_data(s, data) do

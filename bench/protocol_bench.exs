@@ -1,15 +1,59 @@
-defmodule RespBench do
+defmodule ProtocolBench do
   use Benchfella
 
-  @simple_string "+Operation against a key holding the wrong kind of"
+
+  @to_serialize ["foo", "bar", "baz", 1, 2, 3, 'foo', 'bar', 'baz', :bong]
+
+  bench "[Rex] packing" do
+    Rex.Protocol.pack(@to_serialize)
+  end
+  bench "[:redo] packing" do
+    :redo_redis_proto.package(@to_serialize)
+  end
+
+
+  @simple_string_longish "+Operation against a key holding the wrong kind of"
     <> "value. Ut eu efficitur nisl. Aliquam."
     <> "value. Ut eu efficitur nisl. Aliquam."
     <> "value. Ut eu efficitur nisl. Aliquam."
     <> "\r\n"
 
-  @error "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+  bench "[Rex] parsing - simple string (long-ish)" do
+    Rex.Protocol.parse(@simple_string_longish)
+  end
+  bench "[:redo] parsing - simple string (long-ish)" do
+    :redo_redis_proto.parse([], {:raw, @simple_string_longish})
+  end
+  bench "[:eredis] parsing - simple string (long-ish)" do
+    :eredis_parser.parse(:eredis_parser.init(), @simple_string_longish)
+  end
+
+
+  @simple_string_short "+OK\r\n"
+
+  bench "[Rex] parsing - simple string (short)" do
+    Rex.Protocol.parse(@simple_string_short)
+  end
+  bench "[:redo] parsing - simple string (short)" do
+    :redo_redis_proto.parse([], {:raw, @simple_string_short})
+  end
+  bench "[:eredis] parsing - simple string (short)" do
+    :eredis_parser.parse(:eredis_parser.init(), @simple_string_short)
+  end
+
 
   @integer ":1023\r\n"
+
+  bench "[Rex] parsing - integer" do
+    Rex.Protocol.parse(@integer)
+  end
+  bench "[:redo] parsing - integer" do
+    :redo_redis_proto.parse([], {:raw, @integer})
+  end
+  bench "[:eredis] parsing - integer" do
+    :eredis_parser.parse(:eredis_parser.init(), @integer)
+  end
+
 
   str = """
   $Integer tortor felis, blandit facilisis fermentum sit amet, sollicitudin quis
@@ -27,54 +71,40 @@ defmodule RespBench do
   """
   @bulk_string "$#{byte_size(str)}\r\n#{String.strip(str)}\r\n"
 
-  @array "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
-
-  @to_serialize ~w(Nam suscipit vehicula volutpat Ut Proin sodales blandit elit sed)
-
-  bench "packing (Recs)" do
-    Recs.Protocol.pack(@to_serialize)
+  bench "[Rex] parsing - bulk string" do
+    Rex.Protocol.parse(@bulk_string)
   end
-  bench "packing (:redo)" do
-    :redo_redis_proto.package(@to_serialize)
-  end
-
-  bench "parsing - simple string (Recs)" do
-    Recs.Protocol.parse(@simple_string)
-  end
-  bench "parsing - simple string (:redo)" do
-    :redo_redis_proto.parse([], {:raw, @simple_string})
-  end
-  bench "parsing - simple string (:eredis)" do
-    :eredis_parser.parse(:eredis_parser.init(), @simple_string)
-  end
-
-  bench "parsing - integer (Recs)" do
-    Recs.Protocol.parse(@integer)
-  end
-  bench "parsing - integer (:redo)" do
-    :redo_redis_proto.parse([], {:raw, @integer})
-  end
-  bench "parsing - integer (:eredis)" do
-    :eredis_parser.parse(:eredis_parser.init(), @integer)
-  end
-
-  bench "parsing - bulk string (Recs)" do
-    Recs.Protocol.parse(@bulk_string)
-  end
-  bench "parsing - bulk string (:redo)" do
+  bench "[:redo] parsing - bulk string" do
     :redo_redis_proto.parse([], {:raw, @bulk_string})
   end
-  bench "parsing - bulk string (:eredis)" do
+  bench "[:eredis] parsing - bulk string" do
     :eredis_parser.parse(:eredis_parser.init(), @bulk_string)
   end
 
-  bench "parsing - array (Recs)" do
-    Recs.Protocol.parse(@array)
+
+  @array_short "*2\r\n$3\r\nfoo\r\n+OK\r\n"
+
+  bench "[Rex] parsing - array (short)" do
+    Rex.Protocol.parse(@array_short)
   end
-  bench "parsing - array (:redo)" do
-    :redo_redis_proto.parse([], {:raw, @array})
+  bench "[:redo] parsing - array (short)" do
+    :redo_redis_proto.parse([], {:raw, @array_short})
   end
-  bench "parsing - array (:eredis)" do
-    :eredis_parser.parse(:eredis_parser.init(), @array)
+  bench "[:eredis] parsing - array (short)" do
+    :eredis_parser.parse(:eredis_parser.init(), @array_short)
+  end
+
+
+  @array_long_nelems 50_000
+  @array_long "*#{@array_long_nelems}\r\n" <> String.duplicate("$1\r\na\r\n", @array_long_nelems)
+
+  bench "[Rex] parsing - array (long)" do
+    Rex.Protocol.parse(@array_long)
+  end
+  bench "[:redo] parsing - array (long)" do
+    :redo_redis_proto.parse([], {:raw, @array_long})
+  end
+  bench "[:eredis] parsing - array (long)" do
+    :eredis_parser.parse(:eredis_parser.init(), @array_long)
   end
 end

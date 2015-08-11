@@ -1,4 +1,4 @@
-defmodule Recs.Protocol do
+defmodule Rex.Protocol do
   defmodule ParseError do
     defexception [:message]
   end
@@ -22,7 +22,7 @@ defmodule Recs.Protocol do
 
   ## Examples
 
-      iex> iodata = Recs.Protocol.pack ["SET", "mykey", 1]
+      iex> iodata = Rex.Protocol.pack ["SET", "mykey", 1]
       iex> IO.iodata_to_binary(iodata)
       "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$1\r\n1\r\n"
 
@@ -44,10 +44,10 @@ defmodule Recs.Protocol do
 
   ## Examples
 
-      iex> Recs.Protocol.parse "+OK\r\ncruft"
+      iex> Rex.Protocol.parse "+OK\r\ncruft"
       {:ok, "OK", "cruft"}
 
-      iex> Recs.Protocol.parse "+OK"
+      iex> Rex.Protocol.parse "+OK"
       {:error, :incomplete}
 
   """

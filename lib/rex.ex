@@ -1,4 +1,4 @@
-defmodule Recs do
+defmodule Rex do
   @type command :: [binary]
 
   @default_opts [
@@ -13,21 +13,21 @@ defmodule Recs do
   def start_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri) do
-    uri |> Recs.URI.opts_from_uri |> start_link
+    uri |> Rex.URI.opts_from_uri |> start_link
   end
 
   def start_link(opts) do
     {_redis_opts, connection_opts} = Keyword.split(opts, @redis_opts)
     opts = merge_with_default_opts(opts)
-    Connection.start_link(Recs.Connection, opts, connection_opts)
+    Connection.start_link(Rex.Connection, opts, connection_opts)
   end
 
-  @spec command(pid, command) :: Recs.Protocol.redis_value
+  @spec command(pid, command) :: Rex.Protocol.redis_value
   def command(conn, args) do
     Connection.call(conn, {:command, args})
   end
 
-  @spec pipeline(pid, [command]) :: [Recs.Protocol.redis_value]
+  @spec pipeline(pid, [command]) :: [Rex.Protocol.redis_value]
   def pipeline(conn, commands) do
     Connection.call(conn, {:pipeline, commands})
   end
