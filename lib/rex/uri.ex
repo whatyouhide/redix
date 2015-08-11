@@ -1,4 +1,6 @@
 defmodule Rex.URI do
+  @moduledoc false
+
   defmodule URIError do
     defexception [:message]
   end
