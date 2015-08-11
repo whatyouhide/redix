@@ -20,9 +20,10 @@ defmodule Recs.Mixfile do
       {:connection, "~> 1.0.0-rc.1"},
       {:dialyze, "~> 0.2", only: :dev},
       {:benchfella, github: "alco/benchfella", only: :bench},
-      {:redo, github: "heroku/redo", only: :bench}, # just for benchmarks
-      {:eredis, github: "wooga/eredis", only: :bench}, # just for benchmarks
+      {:redo, github: "heroku/redo", only: :bench},
+      {:eredis, github: "wooga/eredis", only: :bench},
       {:coverex, "~> 1.4", only: :test},
+      {:ex_doc, ">= 0.0.0", only: :docs},
     ]
   end
 end

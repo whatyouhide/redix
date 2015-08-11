@@ -5,3 +5,4 @@ erl_crash.dump
 /bench/snapshots/
 /bench/graphs/index.html
 /cover
+/doc
