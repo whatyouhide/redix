@@ -63,10 +63,6 @@ defmodule Rex.Connection do
   @doc false
   def handle_call(operation, from, s)
 
-  def handle_call(:s, _, s) do
-    {:reply, s, s}
-  end
-
   def handle_call({:command, args}, from, %{queue: queue} = s) do
     s
     |> enqueue({:command, from})
