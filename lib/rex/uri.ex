@@ -5,6 +5,7 @@ defmodule Rex.URI do
     defexception [:message]
   end
 
+  @spec opts_from_uri(binary) :: Keyword.t
   def opts_from_uri(uri) when is_binary(uri) do
     uri = URI.parse(uri)
     ensure_scheme_is_redis!(uri)
