@@ -22,28 +22,23 @@ defmodule Recs.Connection do
   end
 
   @doc false
+  def connect(info, s)
+
   def connect(_info, %{opts: opts} = s) do
     {host, port, socket_opts} = tcp_connection_opts(opts)
 
     case :gen_tcp.connect(host, port, socket_opts) do
       {:ok, socket} ->
-        s = %{s | socket: socket}
-
-        {:ok, s} = case auth(s) do
-          {:ok, s} ->
-            select_db(s)
-        end
-
-        reactivate_socket(s)
         setup_socket_buffers(socket)
-
-        {:ok, s}
+        auth_and_select_db(%{s | socket: socket})
       {:error, reason} ->
         {:stop, reason, s}
     end
   end
 
   @doc false
+  def disconnect(reason, s)
+
   def disconnect(:stop, %{socket: nil} = s) do
     {:stop, :normal, s}
   end
@@ -61,7 +56,8 @@ defmodule Recs.Connection do
 
     # Backoff with 0 to churn through all the commands in the mailbox before
     # reconnecting.
-    {:backoff, 0, Dict.merge(s, @initial_state)}
+    s = %{s | socket: nil, queue: :queue.new, tail: ""}
+    {:backoff, 0, s}
   end
 
   @doc false
@@ -82,10 +78,18 @@ defmodule Recs.Connection do
   @doc false
   def handle_info(msg, s)
 
-  def handle_info({:tcp, socket, data}, s) do
+  def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
     reactivate_socket(s)
     s = new_data(s, s.tail <> data)
     {:noreply, s}
+  end
+
+  def handle_info({:tcp_closed, socket}, %{socket: socket} = s) do
+    {:disconnect, {:error, :tcp_closed}, s}
+  end
+
+  def handle_info({:tcp_error, socket, reason}, %{socket: socket} = s) do
+    {:disconnect, {:error, reason}, s}
   end
 
   ## Helper functions
@@ -116,26 +120,6 @@ defmodule Recs.Connection do
       {:empty, _} ->
         raise "still got data but the queue is empty"
     end
-  end
-
-  defp auth(%{opts: opts, socket: socket} = s) do
-    if password = opts[:password] do
-      :ok = pack_and_send(s, ["AUTH", password])
-      {:ok, data} = :gen_tcp.recv(s, 0)
-      {:ok, "OK", rest} = Protocol.parse(data)
-    end
-
-    {:ok, s}
-  end
-
-  defp select_db(%{opts: opts, socket: socket} = s) do
-    if db = opts[:database] do
-      :ok = pack_and_send(s, ["SELECT", db])
-      {:ok, data} = :gen_tcp.recv(s, 0)
-      {:ok, _, rest} = Protocol.parse(data)
-    end
-
-    {:ok, s}
   end
 
   defp send_noreply(%{socket: socket} = s, data) do
@@ -182,4 +166,74 @@ defmodule Recs.Connection do
 
   defp extract_client_from_queued_item({:command, from}), do: from
   defp extract_client_from_queued_item({:pipeline, from, _}), do: from
+
+  defp auth_and_select_db(s) do
+    case auth(s, s.opts[:password]) do
+      {:ok, s} ->
+        case select_db(s, s.opts[:database]) do
+          {:ok, s} ->
+            reactivate_socket(s)
+            {:ok, s}
+          o ->
+            o
+        end
+      o ->
+        o
+    end
+  end
+
+  defp auth(s, nil) do
+    {:ok, s}
+  end
+
+  defp auth(%{socket: socket} = s, password) when is_binary(password) do
+    case :gen_tcp.send(socket, Protocol.pack(["AUTH", password])) do
+      :ok ->
+        case wait_for_response(s) do
+          {:ok, "OK", s} ->
+            {:ok, s}
+          {:ok, error, s} ->
+            {:stop, error, s}
+          {:error, reason} ->
+            {:stop, reason, s}
+        end
+      {:error, reason} ->
+        {:stop, reason, s}
+    end
+  end
+
+  defp auth(s, nil) do
+    {:ok, s}
+  end
+
+  defp select_db(%{socket: socket} = s, db) do
+    case :gen_tcp.send(socket, Protocol.pack(["SELECT", db])) do
+      :ok ->
+        case wait_for_response(s) do
+          {:ok, "OK", s} ->
+            {:ok, s}
+          {:ok, error, s} ->
+            {:stop, error, s}
+          {:error, reason} ->
+            {:stop, reason, s}
+        end
+      {:error, reason} ->
+        {:stop, reason, s}
+    end
+  end
+
+  defp wait_for_response(%{socket: socket} = s) do
+    case :gen_tcp.recv(socket, 0) do
+      {:ok, data} ->
+        data = s.tail <> data
+        case Protocol.parse(data) do
+          {:ok, value, rest} ->
+            {:ok, value, %{s | tail: rest}}
+          {:error, :incomplete} ->
+            wait_for_response(%{s | tail: data})
+        end
+      {:error, _} = err ->
+        err
+    end
+  end
 end
