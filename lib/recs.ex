@@ -4,6 +4,7 @@ defmodule Recs do
   @default_opts [
     host: "localhost",
     port: 6379,
+    socket_opts: [],
   ]
 
   @redis_opts ~w(host port password database)a

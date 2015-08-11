@@ -23,15 +23,18 @@ defmodule Recs.Connection do
 
   @doc false
   def connect(_info, %{opts: opts} = s) do
-    case :gen_tcp.connect(to_char_list(opts[:host]), opts[:port], @socket_opts) do
+    {host, port, socket_opts} = tcp_connection_opts(opts)
+
+    case :gen_tcp.connect(host, port, socket_opts) do
       {:ok, socket} ->
         s = %{s | socket: socket}
+
         {:ok, s} = case auth(s) do
           {:ok, s} ->
             select_db(s)
         end
 
-        :inet.setopts(socket, active: :once)
+        reactivate_socket(s)
         setup_socket_buffers(socket)
 
         {:ok, s}
@@ -41,23 +44,46 @@ defmodule Recs.Connection do
   end
 
   @doc false
+  def disconnect(:stop, %{socket: nil} = s) do
+    {:stop, :normal, s}
+  end
+
+  def disconnect(:stop, %{socket: socket} = s) do
+    :gen_tcp.close(socket)
+    {:stop, :normal, %{s | socket: nil}}
+  end
+
+  def disconnect({:error, _} = error, %{socket: socket, queue: queue} = s) do
+    queue
+    |> :queue.to_list
+    |> Stream.map(&extract_client_from_queued_item/1)
+    |> Enum.map(&Connection.reply(&1, error))
+
+    # Backoff with 0 to churn through all the commands in the mailbox before
+    # reconnecting.
+    {:backoff, 0, Dict.merge(s, @initial_state)}
+  end
+
+  @doc false
   def handle_call(operation, from, s)
 
   def handle_call({:command, args}, from, %{queue: queue} = s) do
-    s = %{s | queue: :queue.in({:command, from}, queue)}
-    send_noreply(s, Protocol.pack(args))
+    s
+    |> enqueue({:command, from})
+    |> send_noreply(Protocol.pack(args))
   end
 
   def handle_call({:pipeline, commands}, from, %{queue: queue} = s) do
-    s = %{s | queue: :queue.in({:pipeline, from, length(commands)}, queue)}
-    send_noreply(s, Enum.map(commands, &Protocol.pack/1))
+    s
+    |> enqueue({:pipeline, from, length(commands)})
+    |> send_noreply(Enum.map(commands, &Protocol.pack/1))
   end
 
   @doc false
   def handle_info(msg, s)
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
-    :inet.setopts(socket, active: :once)
+  def handle_info({:tcp, socket, data}, s) do
+    reactivate_socket(s)
     s = new_data(s, s.tail <> data)
     {:noreply, s}
   end
@@ -125,6 +151,27 @@ defmodule Recs.Connection do
     :gen_tcp.send(socket, Protocol.pack(args))
   end
 
+  # Enqueues `val` in the state.
+  defp enqueue(%{queue: queue} = s, val) do
+    %{s | queue: :queue.in(val, queue)}
+  end
+
+  # Extracts the TCP connection options (host, port and socket opts) from the
+  # given `opts`.
+  defp tcp_connection_opts(opts) do
+    host = to_char_list(Keyword.fetch!(opts, :host))
+    port = Keyword.fetch!(opts, :port)
+    socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
+
+    {host, port, socket_opts}
+  end
+
+  # Reactivates the socket with `active: :once`.
+  defp reactivate_socket(%{socket: socket} = _s) do
+    :ok = :inet.setopts(socket, active: :once)
+  end
+
+  # Setups the `:buffer` option of the given socket.
   defp setup_socket_buffers(socket) do
     {:ok, [sndbuf: sndbuf, recbuf: recbuf, buffer: buffer]} =
       :inet.getopts(socket, [:sndbuf, :recbuf, :buffer])
@@ -132,4 +179,7 @@ defmodule Recs.Connection do
     buffer = buffer |> max(sndbuf) |> max(recbuf)
     :ok = :inet.setopts(socket, [buffer: buffer])
   end
+
+  defp extract_client_from_queued_item({:command, from}), do: from
+  defp extract_client_from_queued_item({:pipeline, from, _}), do: from
 end
