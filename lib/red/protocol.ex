@@ -1,5 +1,10 @@
-defmodule Rex.Protocol do
+defmodule Red.Protocol do
   defmodule ParseError do
+    @moduledoc """
+    This error represents an error in parsing data according to the
+    [RESP](http://redis.io/topics/protocol) protocol.
+    """
+
     defexception [:message]
   end
 
@@ -22,7 +27,7 @@ defmodule Rex.Protocol do
 
   ## Examples
 
-      iex> iodata = Rex.Protocol.pack ["SET", "mykey", 1]
+      iex> iodata = Red.Protocol.pack ["SET", "mykey", 1]
       iex> IO.iodata_to_binary(iodata)
       "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$1\r\n1\r\n"
 
@@ -44,10 +49,10 @@ defmodule Rex.Protocol do
 
   ## Examples
 
-      iex> Rex.Protocol.parse "+OK\r\ncruft"
+      iex> Red.Protocol.parse "+OK\r\ncruft"
       {:ok, "OK", "cruft"}
 
-      iex> Rex.Protocol.parse "+OK"
+      iex> Red.Protocol.parse "+OK"
       {:error, :incomplete}
 
   """

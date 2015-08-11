@@ -1,4 +1,8 @@
-defmodule Rex do
+defmodule Red do
+  @moduledoc """
+  This module provides the main API to interface with Redis.
+  """
+
   @type command :: [binary]
 
   @default_opts [
@@ -53,11 +57,11 @@ defmodule Rex do
     * `:port` - (integer) the port on which the Redis server is
       running. Defaults to `6379`.
     * `:password` - (string) the password used to connect to Redis. Defaults to
-      `nil`, meaning no password is used. When this option is provided, all Rex
+      `nil`, meaning no password is used. When this option is provided, all Red
       does is issue an `AUTH` command to Redis in order to authenticate.
     * `:database` - (integer or string) the database to connect to. Defaults to
       `nil`, meaning don't connect to any database (Redis connects to database
-      `0` by default). When this option is provided, all Rex does is issue a
+      `0` by default). When this option is provided, all Red does is issue a
       `SELECT` command to Redis in order to select the given database.
 
   The following options can be specified in the list of options or as a second
@@ -66,25 +70,25 @@ defmodule Rex do
     * `:socket_opts` - (list of options) this option specifies a list of options
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
-      overridden by Rex so that it functions properly.
+      overridden by Red so that it functions properly.
 
   In addition to these options, all options accepted by `GenServer.start_link/3`
-  are forwarded to it. For example, a Rex connection can be registered with a
+  are forwarded to it. For example, a Red connection can be registered with a
   name:
 
-      Rex.start_link(name: :rex)
-      Process.whereis(:rex)
+      Red.start_link(name: :red)
+      Process.whereis(:red)
       #=> #PID<...>
 
   ## Examples
 
-      iex> Rex.start_link
+      iex> Red.start_link
       {:ok, #PID<...>}
 
-      iex> Rex.start_link(host: "example.com", port: 9999, password: "secret")
+      iex> Red.start_link(host: "example.com", port: 9999, password: "secret")
       {:ok, #PID<...>}
 
-      iex> Rex.start_link(database: 3, name: :rex_3)
+      iex> Red.start_link(database: 3, name: :red_3)
       {:ok, #PID<...>}
 
   """
@@ -92,13 +96,13 @@ defmodule Rex do
   def start_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri) do
-    uri |> Rex.URI.opts_from_uri |> start_link
+    uri |> Red.URI.opts_from_uri |> start_link
   end
 
   def start_link(opts) do
     {_redis_opts, connection_opts} = Keyword.split(opts, @redis_opts)
     opts = merge_with_default_opts(opts)
-    Connection.start_link(Rex.Connection, opts, connection_opts)
+    Connection.start_link(Red.Connection, opts, connection_opts)
   end
 
   @doc """
@@ -110,13 +114,13 @@ defmodule Rex do
 
   ## Examples
 
-      iex> Rex.start_link("redis://foo.com/2", name: :rex_foo)
+      iex> Red.start_link("redis://foo.com/2", name: :red_foo)
       {:ok, #PID<...>}
 
   """
   @spec start_link(binary, Keyword.t) :: GenServer.on_start
   def start_link(uri, opts) when is_binary(uri) and is_list(opts) do
-    uri |> Rex.URI.opts_from_uri |> Keyword.merge(opts) |> start_link
+    uri |> Red.URI.opts_from_uri |> Keyword.merge(opts) |> start_link
   end
 
   @doc """
@@ -127,7 +131,7 @@ defmodule Rex do
 
   ## Examples
 
-      iex> Rex.stop(conn)
+      iex> Red.stop(conn)
       :ok
 
   """
@@ -140,18 +144,18 @@ defmodule Rex do
   Issues a command on the Redis server.
 
   This function sends `command` to the Redis server and returns the response
-  returned by Redis. `pid` must be the pid of a Rex connection. `command` must
+  returned by Redis. `pid` must be the pid of a Red connection. `command` must
   be a list of strings making up the Redis command and its arguments.
 
   ## Examples
 
-      iex> Rex.command(conn, ["SET", "mykey", "foo"])
+      iex> Red.command(conn, ["SET", "mykey", "foo"])
       "OK"
-      iex> Rex.command(conn, ["GET", "mykey"])
+      iex> Red.command(conn, ["GET", "mykey"])
       "foo"
 
   """
-  @spec command(pid, command) :: Rex.Protocol.redis_value
+  @spec command(pid, command) :: Red.Protocol.redis_value
   def command(conn, args) do
     Connection.call(conn, {:command, args})
   end
@@ -166,11 +170,11 @@ defmodule Rex do
 
   ## Examples
 
-      iex> Rex.command(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
+      iex> Red.command(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
       [1, 2, 1]
 
   """
-  @spec pipeline(pid, [command]) :: [Rex.Protocol.redis_value]
+  @spec pipeline(pid, [command]) :: [Red.Protocol.redis_value]
   def pipeline(conn, commands) do
     Connection.call(conn, {:pipeline, commands})
   end

@@ -1,9 +1,9 @@
-defmodule Rex.Connection do
+defmodule Red.Connection do
   @moduledoc false
 
   use Connection
 
-  alias Rex.Protocol
+  alias Red.Protocol
 
   @initial_state %{
     socket: nil,

@@ -1,13 +1,13 @@
-defmodule Rex.Mixfile do
+defmodule Red.Mixfile do
   use Mix.Project
 
   def project do
-    [app: :rex,
+    [app: :red,
      version: "0.0.1",
      elixir: "~> 1.0",
      build_embedded: Mix.env in [:prod, :bench],
      start_permanent: Mix.env == :prod,
-     test_coverage: [tool: Coverex.Task],
+     test_coverage: [tool: Covered.Task],
      deps: deps]
   end
 

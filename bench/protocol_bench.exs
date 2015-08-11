@@ -4,8 +4,8 @@ defmodule ProtocolBench do
 
   @to_serialize ["foo", "bar", "baz", 1, 2, 3, 'foo', 'bar', 'baz', :bong]
 
-  bench "[Rex] packing" do
-    Rex.Protocol.pack(@to_serialize)
+  bench "[Red] packing" do
+    Red.Protocol.pack(@to_serialize)
   end
   bench "[:redo] packing" do
     :redo_redis_proto.package(@to_serialize)
@@ -18,8 +18,8 @@ defmodule ProtocolBench do
     <> "value. Ut eu efficitur nisl. Aliquam."
     <> "\r\n"
 
-  bench "[Rex] parsing - simple string (long-ish)" do
-    Rex.Protocol.parse(@simple_string_longish)
+  bench "[Red] parsing - simple string (long-ish)" do
+    Red.Protocol.parse(@simple_string_longish)
   end
   bench "[:redo] parsing - simple string (long-ish)" do
     :redo_redis_proto.parse([], {:raw, @simple_string_longish})
@@ -31,8 +31,8 @@ defmodule ProtocolBench do
 
   @simple_string_short "+OK\r\n"
 
-  bench "[Rex] parsing - simple string (short)" do
-    Rex.Protocol.parse(@simple_string_short)
+  bench "[Red] parsing - simple string (short)" do
+    Red.Protocol.parse(@simple_string_short)
   end
   bench "[:redo] parsing - simple string (short)" do
     :redo_redis_proto.parse([], {:raw, @simple_string_short})
@@ -44,8 +44,8 @@ defmodule ProtocolBench do
 
   @integer ":1023\r\n"
 
-  bench "[Rex] parsing - integer" do
-    Rex.Protocol.parse(@integer)
+  bench "[Red] parsing - integer" do
+    Red.Protocol.parse(@integer)
   end
   bench "[:redo] parsing - integer" do
     :redo_redis_proto.parse([], {:raw, @integer})
@@ -71,8 +71,8 @@ defmodule ProtocolBench do
   """
   @bulk_string "$#{byte_size(str)}\r\n#{String.strip(str)}\r\n"
 
-  bench "[Rex] parsing - bulk string" do
-    Rex.Protocol.parse(@bulk_string)
+  bench "[Red] parsing - bulk string" do
+    Red.Protocol.parse(@bulk_string)
   end
   bench "[:redo] parsing - bulk string" do
     :redo_redis_proto.parse([], {:raw, @bulk_string})
@@ -84,8 +84,8 @@ defmodule ProtocolBench do
 
   @array_short "*2\r\n$3\r\nfoo\r\n+OK\r\n"
 
-  bench "[Rex] parsing - array (short)" do
-    Rex.Protocol.parse(@array_short)
+  bench "[Red] parsing - array (short)" do
+    Red.Protocol.parse(@array_short)
   end
   bench "[:redo] parsing - array (short)" do
     :redo_redis_proto.parse([], {:raw, @array_short})
@@ -98,8 +98,8 @@ defmodule ProtocolBench do
   @array_long_nelems 50_000
   @array_long "*#{@array_long_nelems}\r\n" <> String.duplicate("$1\r\na\r\n", @array_long_nelems)
 
-  bench "[Rex] parsing - array (long)" do
-    Rex.Protocol.parse(@array_long)
+  bench "[Red] parsing - array (long)" do
+    Red.Protocol.parse(@array_long)
   end
   bench "[:redo] parsing - array (long)" do
     :redo_redis_proto.parse([], {:raw, @array_long})

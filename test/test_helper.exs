@@ -1,6 +1,6 @@
 ExUnit.start()
 
-defmodule Rex.TestHelpers do
+defmodule Red.TestHelpers do
   def capture_log(fun) do
     Logger.remove_backend :console
     fun.()

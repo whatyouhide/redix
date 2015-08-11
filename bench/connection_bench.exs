@@ -2,11 +2,11 @@ defmodule ConnectionBench do
   use Benchfella
 
   before_each_bench _ do
-    {:ok, recs} = Rex.start_link(host: "localhost", port: 6379)
+    {:ok, recs} = Red.start_link(host: "localhost", port: 6379)
     {:ok, redo} = :redo.start_link(:undefined, [])
     {:ok, eredis} = :eredis.start_link
 
-    Rex.command(recs, ["SET", "k", "1"])
+    Red.command(recs, ["SET", "k", "1"])
 
     context = %{
       recs: recs,
@@ -19,8 +19,8 @@ defmodule ConnectionBench do
     {:ok, context}
   end
 
-  bench "[Rex] single command (GET)", [recs: bench_context[:recs]] do
-    Rex.command(recs, ~w(GET k))
+  bench "[Red] single command (GET)", [recs: bench_context[:recs]] do
+    Red.command(recs, ~w(GET k))
   end
   bench "[:redo] single command (GET)", [redo: bench_context[:redo]] do
     :redo.cmd(redo, ~w(GET k))
@@ -30,7 +30,7 @@ defmodule ConnectionBench do
   end
 
   bench "[Recs] few pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_few]] do
-    Rex.pipeline(recs, cmds)
+    Red.pipeline(recs, cmds)
   end
   bench "[:redo] few pipelined commands", [redo: bench_context[:redo], cmds: bench_context[:pipeline_cmds_few]] do
     :redo.cmd(redo, cmds)
@@ -39,8 +39,8 @@ defmodule ConnectionBench do
     :eredis.qp(eredis, cmds)
   end
 
-  bench "[Rex] lots of pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_lots]] do
-    Rex.pipeline(recs, cmds)
+  bench "[Red] lots of pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_lots]] do
+    Red.pipeline(recs, cmds)
   end
   bench "[:redo] lots of pipelined commands", [redo: bench_context[:redo], cmds: bench_context[:pipeline_cmds_lots]] do
     :redo.cmd(redo, cmds)
@@ -49,8 +49,8 @@ defmodule ConnectionBench do
     :eredis.qp(eredis, cmds)
   end
 
-  bench "[Rex] lots of commands, one after the other", [recs: bench_context[:recs]] do
-    Enum.each 1..1000, fn(_) -> Rex.command(recs, ["GET", "k"]) end
+  bench "[Red] lots of commands, one after the other", [recs: bench_context[:recs]] do
+    Enum.each 1..1000, fn(_) -> Red.command(recs, ["GET", "k"]) end
   end
   bench "[:redo] lots of commands, one after the other", [redo: bench_context[:redo]] do
     Enum.each 1..1000, fn(_) -> :redo.cmd(redo, ["GET", "k"]) end

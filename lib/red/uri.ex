@@ -1,4 +1,4 @@
-defmodule Rex.URI do
+defmodule Red.URI do
   @moduledoc false
 
   defmodule URIError do
