@@ -55,6 +55,16 @@ defmodule RexTest do
     assert Rex.command(pid, ["PING"]) == "PONG"
   end
 
+  @tag :no_setup
+  test "stop/1" do
+    assert {:ok, pid} = Rex.start_link "redis://localhost:6379/3"
+    assert Rex.command(pid, ["PING"]) == "PONG"
+    assert Rex.stop(pid) == :ok
+
+    Process.flag :trap_exit, true
+    assert_receive {:EXIT, ^pid, :normal}, 500
+  end
+
   test "command/2", %{conn: c} do
     assert Rex.command(c, ["PING"]) == "PONG"
   end

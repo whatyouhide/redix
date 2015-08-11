@@ -22,6 +22,11 @@ defmodule Rex do
     Connection.start_link(Rex.Connection, opts, connection_opts)
   end
 
+  @spec stop(pid) :: :ok
+  def stop(conn) do
+    Connection.cast(conn, :stop)
+  end
+
   @spec command(pid, command) :: Rex.Protocol.redis_value
   def command(conn, args) do
     Connection.call(conn, {:command, args})

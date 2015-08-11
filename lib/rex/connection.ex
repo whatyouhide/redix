@@ -80,6 +80,13 @@ defmodule Rex.Connection do
   end
 
   @doc false
+  def handle_cast(operation, s)
+
+  def handle_cast(:stop, s) do
+    {:disconnect, :stop, s}
+  end
+
+  @doc false
   def handle_info(msg, s)
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
