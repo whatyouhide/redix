@@ -1,4 +1,6 @@
 defmodule Recs.Connection do
+  @moduledoc false
+
   use Connection
 
   alias Recs.Protocol
