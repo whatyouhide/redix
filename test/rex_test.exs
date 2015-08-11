@@ -65,6 +65,13 @@ defmodule RexTest do
     assert_receive {:EXIT, ^pid, :normal}, 500
   end
 
+  @tag :no_setup
+  test "start_link/1: name registration" do
+    assert {:ok, pid} = Rex.start_link(name: :rex_server)
+    assert is_pid(pid)
+    assert Process.whereis(:rex_server) == pid
+  end
+
   test "command/2", %{conn: c} do
     assert Rex.command(c, ["PING"]) == "PONG"
   end
