@@ -87,11 +87,11 @@ defmodule Recs.Protocol do
     parse_multi(data, n, [])
   end
 
-  def parse_multi(data, 0, acc) do
+  defp parse_multi(data, 0, acc) do
     {:ok, Enum.reverse(acc), data}
   end
 
-  def parse_multi(data, n, acc) do
+  defp parse_multi(data, n, acc) do
     case parse(data) do
       {:ok, val, rest} ->
         parse_multi(rest, n - 1, [val|acc])
