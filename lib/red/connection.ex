@@ -52,8 +52,8 @@ defmodule Red.Connection do
     {:stop, :normal, %{s | socket: nil}}
   end
 
-  def disconnect({:error, reason} = error, %{socket: socket, queue: queue} = s) do
-    Logger.error "[Red] Disconnected from Redis (#{inspect reason})"
+  def disconnect({:error, reason} = error, %{queue: queue} = s) do
+    Logger.error "Disconnected from Redis (#{host_for_logging(s)}): #{inspect reason}"
 
     queue
     |> :queue.to_list
