@@ -110,7 +110,12 @@ defmodule Red.Protocol do
   end
 
   defp parse_error(data) do
-    until_crlf(data)
+    case until_crlf(data) do
+      {:ok, message, rest} ->
+        {:ok, %Red.Error{message: message}, rest}
+      o ->
+        o
+    end
   end
 
   defp parse_integer(rest) do

@@ -3,6 +3,7 @@ defmodule Red.ProtocolTest do
 
   import Red.Protocol
   alias Red.Protocol.ParseError
+  alias Red.Error, as: Err
 
   doctest Red.Protocol
 
@@ -49,18 +50,18 @@ defmodule Red.ProtocolTest do
   end
 
   test "parse/1 with error values that have no ERRORTYPE" do
-    assert parse("-Error!\r\n") == {:ok, "Error!", ""}
-    assert parse("-\r\n") == {:ok, "", ""}
-    assert parse("-Error message\r\n") == {:ok, "Error message", ""}
-    assert parse("-üniçø∂e\r\n") == {:ok, "üniçø∂e", ""}
-    assert parse("-  whitespace  \r\n") == {:ok, "  whitespace  ", ""}
+    assert parse("-Error!\r\n") == {:ok, %Err{message: "Error!"}, ""}
+    assert parse("-\r\n") == {:ok, %Err{message: ""}, ""}
+    assert parse("-Error message\r\n") == {:ok, %Err{message: "Error message"}, ""}
+    assert parse("-üniçø∂e\r\n") == {:ok, %Err{message: "üniçø∂e"}, ""}
+    assert parse("-  whitespace  \r\n") == {:ok, %Err{message: "  whitespace  "}, ""}
   end
 
   test "parse/1 with error values that have an ERRORTYPE" do
-    assert parse("-ODDSPACES \r \n\r\n") == {:ok, "ODDSPACES \r \n", ""}
-    assert parse("-UNICODE ø\r\n") == {:ok, "UNICODE ø", ""}
-    assert parse("-ERR   Message\r\n") == {:ok, "ERR   Message", ""}
-    assert parse("-WRONGTYPE foo bar\r\n") == {:ok, "WRONGTYPE foo bar", ""}
+    assert parse("-ODDSPACES \r \n\r\n") == {:ok, %Err{message: "ODDSPACES \r \n"}, ""}
+    assert parse("-UNICODE ø\r\n") == {:ok, %Err{message: "UNICODE ø"}, ""}
+    assert parse("-ERR   Message\r\n") == {:ok, %Err{message: "ERR   Message"}, ""}
+    assert parse("-WRONGTYPE foo bar\r\n") == {:ok, %Err{message: "WRONGTYPE foo bar"}, ""}
   end
 
   test "parse/1 with integer values" do
@@ -119,7 +120,7 @@ defmodule Red.ProtocolTest do
 
   test "parse/1 with nested array values" do
     arr = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-ERR Bar\r\n"
-    assert parse(arr) == {:ok, [[1, 2, 3], ["Foo", "ERR Bar"]], ""}
+    assert parse(arr) == {:ok, [[1, 2, 3], ["Foo", %Err{message: "ERR Bar"}]], ""}
   end
 
   test "parse/1 with arrays that contain null values" do
