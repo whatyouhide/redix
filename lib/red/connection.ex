@@ -70,13 +70,13 @@ defmodule Red.Connection do
     {:reply, {:error, :closed}, s}
   end
 
-  def handle_call({:command, args}, from, %{queue: queue} = s) do
+  def handle_call({:command, args}, from, s) do
     s
     |> enqueue({:command, from})
     |> send_noreply(Protocol.pack(args))
   end
 
-  def handle_call({:pipeline, commands}, from, %{queue: queue} = s) do
+  def handle_call({:pipeline, commands}, from, s) do
     s
     |> enqueue({:pipeline, from, length(commands)})
     |> send_noreply(Enum.map(commands, &Protocol.pack/1))
