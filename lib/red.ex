@@ -13,6 +13,8 @@ defmodule Red do
 
   @redis_opts ~w(host port password database)a
 
+  @default_timeout 5000
+
   @doc """
   Starts a connection to Redis.
 
@@ -168,9 +170,9 @@ defmodule Red do
       {:error, :closed}
 
   """
-  @spec command(pid, command) :: Red.Protocol.redis_value
-  def command(conn, args) do
-    Connection.call(conn, {:command, args})
+  @spec command(pid, command, Keyword.t) :: Red.Protocol.redis_value
+  def command(conn, args, opts \\ []) do
+    Connection.call(conn, {:command, args}, opts[:timeout] || @default_timeout)
   end
 
   @doc """
@@ -189,9 +191,9 @@ defmodule Red do
       {:ok, [1, 2, 1]}
 
   """
-  @spec pipeline(pid, [command]) :: [Red.Protocol.redis_value]
-  def pipeline(conn, commands) do
-    Connection.call(conn, {:pipeline, commands})
+  @spec pipeline(pid, [command], Keyword.t) :: [Red.Protocol.redis_value]
+  def pipeline(conn, commands, opts \\ []) do
+    Connection.call(conn, {:pipeline, commands}, opts[:timeout] || @default_timeout)
   end
 
   defp merge_with_default_opts(opts) do

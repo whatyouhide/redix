@@ -184,6 +184,14 @@ defmodule RedTest do
     assert Red.command(c, ~w(INCR errs)) == {:error, %Error{message: msg}}
   end
 
+  test "command/2: timeout", %{conn: c} do
+    assert {:timeout, _} = catch_exit(Red.command(c, ~w(PING), timeout: 0))
+  end
+
+  test "pipeline/2: timeout", %{conn: c} do
+    assert {:timeout, _} = catch_exit(Red.pipeline(c, [["PING"], ["PING"]], timeout: 0))
+  end
+
   test "client suicide and reconnections", %{conn: c} do
     capture_log fn ->
       assert {:ok, _} = Red.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
