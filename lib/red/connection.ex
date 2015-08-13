@@ -13,6 +13,8 @@ defmodule Red.Connection do
     queue: :queue.new,
   }
 
+  @default_timeout 5000
+
   @socket_opts [:binary, active: false]
 
   ## Callbacks
@@ -25,15 +27,16 @@ defmodule Red.Connection do
   @doc false
   def connect(info, s)
 
-  def connect(_info, %{opts: opts} = s) do
-    {host, port, socket_opts} = tcp_connection_opts(opts)
+  def connect(info, %{opts: opts} = s) do
+    {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
-    case :gen_tcp.connect(host, port, socket_opts) do
+    case :gen_tcp.connect(host, port, socket_opts, timeout) do
       {:ok, socket} ->
         setup_socket_buffers(socket)
         auth_and_select_db(%{s | socket: socket})
       {:error, reason} ->
-        {:stop, reason, s}
+        Logger.error "Error connecting to Redis (#{host_for_logging(s)}): #{inspect reason}"
+        handle_connection_error(s, info, reason)
     end
   end
 
@@ -156,8 +159,9 @@ defmodule Red.Connection do
     host = to_char_list(Keyword.fetch!(opts, :host))
     port = Keyword.fetch!(opts, :port)
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
+    timeout = opts[:timeout] || @default_timeout
 
-    {host, port, socket_opts}
+    {host, port, socket_opts, timeout}
   end
 
   # Reactivates the socket with `active: :once`.
@@ -249,4 +253,17 @@ defmodule Red.Connection do
         err
     end
   end
+
+  defp host_for_logging(%{opts: opts} = _s) do
+    Enum.join [opts[:host], opts[:port]], ":"
+  end
+
+  # If `info` is :backoff then this is a *reconnection* attempt, so if
+  # there's an error let's trye to just reconnect after a backoff time. If
+  # `info` is :init, then this is the first connection attempt so if it
+  # fails let's just die.
+  defp handle_connection_error(s, :backoff, _reason),
+    do: {:backoff, s.opts[:backoff], s}
+  defp handle_connection_error(s, :init, reason),
+    do: {:stop, reason, s}
 end

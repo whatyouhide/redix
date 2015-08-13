@@ -9,6 +9,7 @@ defmodule Red do
     host: "localhost",
     port: 6379,
     socket_opts: [],
+    backoff: 2000,
   ]
 
   @redis_opts ~w(host port password database)a

@@ -192,11 +192,16 @@ defmodule RedTest do
     assert {:timeout, _} = catch_exit(Red.pipeline(c, [["PING"], ["PING"]], timeout: 0))
   end
 
-  test "client suicide and reconnections", %{conn: c} do
+  @tag :no_setup
+  test "client suicide and reconnections" do
+    {:ok, c} = Red.start_link(backoff: 80)
+
     capture_log fn ->
       assert {:ok, _} = Red.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
-    end
+      assert {:error, :closed} = Red.command(c, ~w(PING))
 
-    assert {:error, :closed} = Red.command(c, ~w(CLIENT LIST))
+      :timer.sleep(100)
+      assert {:ok, "PONG"} = Red.command(c, ~w(PING))
+    end
   end
 end
