@@ -147,12 +147,25 @@ defmodule Red do
   returned by Redis. `pid` must be the pid of a Red connection. `command` must
   be a list of strings making up the Redis command and its arguments.
 
+  The return value is `{:ok, response}` if the request is successful and the
+  response is not a Redis error. `{:error, reason}` is returned in case there's
+  an error in sending the response or in case the response is a Redis error. In
+  the latter case, `reason` will be the error returned by Redis.
+
   ## Examples
 
       iex> Red.command(conn, ["SET", "mykey", "foo"])
-      "OK"
+      {:ok, "OK"}
       iex> Red.command(conn, ["GET", "mykey"])
-      "foo"
+      {:ok, "foo"}
+
+      iex> Red.command(conn, ["INCR", "mykey"])
+      {:error, "ERR value is not an integer or out of range"}
+
+  If Redis goes down:
+
+      iex> Red.command(conn, ["GET", "mykey"])
+      {:error, :closed}
 
   """
   @spec command(pid, command) :: Red.Protocol.redis_value
@@ -168,10 +181,12 @@ defmodule Red do
   "block" to Redis, and a list of ordered responses (one for each command) will
   be returned.
 
+  The return value is `{:ok, response}` if the request is successful and the response has
+
   ## Examples
 
       iex> Red.command(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
-      [1, 2, 1]
+      {:ok, [1, 2, 1]}
 
   """
   @spec pipeline(pid, [command]) :: [Red.Protocol.redis_value]

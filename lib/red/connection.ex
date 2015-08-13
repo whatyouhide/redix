@@ -4,6 +4,7 @@ defmodule Red.Connection do
   use Connection
 
   alias Red.Protocol
+  require Logger
 
   @initial_state %{
     socket: nil,
@@ -48,7 +49,9 @@ defmodule Red.Connection do
     {:stop, :normal, %{s | socket: nil}}
   end
 
-  def disconnect({:error, _} = error, %{socket: socket, queue: queue} = s) do
+  def disconnect({:error, reason} = error, %{socket: socket, queue: queue} = s) do
+    Logger.error "[Red] Disconnected from Redis (#{inspect reason})"
+
     queue
     |> :queue.to_list
     |> Stream.map(&extract_client_from_queued_item/1)
@@ -62,6 +65,10 @@ defmodule Red.Connection do
 
   @doc false
   def handle_call(operation, from, s)
+
+  def handle_call(_operation, _from, %{socket: nil} = s) do
+    {:reply, {:error, :closed}, s}
+  end
 
   def handle_call({:command, args}, from, %{queue: queue} = s) do
     s
@@ -110,7 +117,7 @@ defmodule Red.Connection do
 
     case parser.(data) do
       {:ok, resp, rest} ->
-        Connection.reply(from, resp)
+        Connection.reply(from, format_resp(resp))
         s = %{s | queue: new_queue}
         new_data(s, rest)
       {:error, :incomplete} ->
@@ -173,6 +180,9 @@ defmodule Red.Connection do
 
   defp extract_client_from_queued_item({:command, from}), do: from
   defp extract_client_from_queued_item({:pipeline, from, _}), do: from
+
+  defp format_resp(%Red.Error{} = err), do: {:error, err}
+  defp format_resp(resp), do: {:ok, resp}
 
   defp auth_and_select_db(s) do
     case auth(s, s.opts[:password]) do
