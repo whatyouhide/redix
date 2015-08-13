@@ -145,10 +145,6 @@ defmodule Red.Connection do
     end
   end
 
-  defp pack_and_send(%{socket: socket}, args) do
-    :gen_tcp.send(socket, Protocol.pack(args))
-  end
-
   # Enqueues `val` in the state.
   defp enqueue(%{queue: queue} = s, val) do
     %{s | queue: :queue.in(val, queue)}
