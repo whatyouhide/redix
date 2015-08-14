@@ -7,7 +7,7 @@ defmodule Red.Mixfile do
      elixir: "~> 1.0",
      build_embedded: Mix.env in [:prod, :bench],
      start_permanent: Mix.env == :prod,
-     test_coverage: [tool: Covered.Task],
+     test_coverage: [tool: Coverex.Task],
      deps: deps]
   end
 
