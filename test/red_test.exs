@@ -32,7 +32,7 @@ defmodule RedTest do
 
   @tag :no_setup
   test "start_link/1: specifying a password" do
-    capture_log fn ->
+    silence_log fn ->
       Process.flag :trap_exit, true
       assert {:ok, pid} = Red.start_link password: "foo"
       assert is_pid(pid)
@@ -44,7 +44,7 @@ defmodule RedTest do
 
   @tag :no_setup
   test "start_link/1: when unable to connect to Redis" do
-    capture_log fn ->
+    silence_log fn ->
       Process.flag :trap_exit, true
       assert {:ok, pid} = Red.start_link host: "nonexistent"
       assert_receive {:EXIT, ^pid, :nxdomain}, 500
@@ -208,7 +208,7 @@ defmodule RedTest do
   test "client suicide and reconnections" do
     {:ok, c} = Red.start_link(backoff: 80)
 
-    capture_log fn ->
+    silence_log fn ->
       assert {:ok, _} = Red.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
       assert {:error, :closed} = Red.command(c, ~w(PING))
 
