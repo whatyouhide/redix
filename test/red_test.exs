@@ -58,6 +58,12 @@ defmodule RedTest do
   end
 
   @tag :no_setup
+  test "start_link/2: passing options along with a Redis URI" do
+    assert {:ok, _pid} = Red.start_link("redis://localhost:6379", name: :red_uri)
+    assert (:red_uri |> Process.whereis |> Process.alive?)
+  end
+
+  @tag :no_setup
   test "stop/1" do
     assert {:ok, pid} = Red.start_link "redis://localhost:6379/3"
     assert Red.command(pid, ["PING"]) == {:ok, "PONG"}
