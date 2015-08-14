@@ -64,6 +64,10 @@ defmodule Red.ProtocolTest do
     assert parse("-WRONGTYPE foo bar\r\n") == {:ok, %Err{message: "WRONGTYPE foo bar"}, ""}
   end
 
+  test "parse/1 with incomplete error values" do
+    assert parse("-Error") == {:error, :incomplete}
+  end
+
   test "parse/1 with integer values" do
     assert parse(":42\r\n") == {:ok, 42, ""}
     assert parse(":1234567890\r\n") == {:ok, 1234567890, ""}
