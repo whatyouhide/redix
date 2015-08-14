@@ -190,6 +190,12 @@ defmodule RedTest do
     assert Red.command(c, ~w(INCR errs)) == {:error, %Error{message: msg}}
   end
 
+  test "pipeline/2: Redis errors in the response", %{conn: c} do
+    msg = "ERR value is not an integer or out of range"
+    assert {:ok, resp} = Red.pipeline(c, [~w(SET pipeline_errs foo), ~w(INCR pipeline_errs)])
+    assert resp == ["OK", %Error{message: msg}]
+  end
+
   test "command/2: timeout", %{conn: c} do
     assert {:timeout, _} = catch_exit(Red.command(c, ~w(PING), timeout: 0))
   end
