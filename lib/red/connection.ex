@@ -219,7 +219,7 @@ defmodule Red.Connection do
     end
   end
 
-  defp auth(s, nil) do
+  defp select_db(s, nil) do
     {:ok, s}
   end
 
