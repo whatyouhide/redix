@@ -1,6 +1,36 @@
 defmodule Red do
   @moduledoc """
   This module provides the main API to interface with Redis.
+
+  ## Overview
+
+  `start_link/1` and `start_link/2` start a process that connects to Redis. Each
+  Elixir process started with these functions maps to a client connection to the
+  specified Redis server.
+
+  The architecture is very simple: when you issue commands to Redis (via
+  `command/3` or `pipeline/3`), the Red process sends the command to Redis right
+  away and is immediately able to send new commands. When a response arrives
+  from Redis, only then the Red process replies to the caller with the
+  response. This pattern avoids blocking the Red process for each request (until
+  a response arrives), increasing the performance of this driver.
+
+  ## Reconnections
+
+  Red tries to be as resilient as possible: it tries to recover automatically
+  from most network errors. For example, if the connection to Redis drops, then
+  the Red process will try to periodically reconnect at a given interval. This
+  interval can be specified with the `:backoff` option passed to `start_link/1`
+  or `start_link/2` (by default it's `2000` milliseconds).
+
+  These reconnections attempts only happen when the connection to Redis has been
+  established at least once before. If a connection error happens when
+  connecting to Redis for the first time, the Red process will just crash with
+  the proper error (see `start_link/1`, `start_link/2`).
+
+  All this behaviour is implemented using the
+  [connection](https://github.com/fishcakez/connection) library (a dependency of
+  Red).
   """
 
   @type command :: [binary]
