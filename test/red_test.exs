@@ -95,6 +95,7 @@ defmodule RedTest do
     assert {:ok, pid} = Red.start_link(name: :red_server)
     assert is_pid(pid)
     assert Process.whereis(:red_server) == pid
+    assert Red.command(:red_server, ["PING"]) == {:ok, "PONG"}
   end
 
   test "command/2", %{conn: c} do
