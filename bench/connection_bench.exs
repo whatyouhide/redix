@@ -29,7 +29,7 @@ defmodule ConnectionBench do
     :eredis.q(eredis, ~w(GET k))
   end
 
-  bench "[Recs] few pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_few]] do
+  bench "[Red] few pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_few]] do
     Red.pipeline(recs, cmds)
   end
   bench "[:redo] few pipelined commands", [redo: bench_context[:redo], cmds: bench_context[:pipeline_cmds_few]] do
