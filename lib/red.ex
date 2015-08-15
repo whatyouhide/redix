@@ -6,7 +6,7 @@ defmodule Red do
   @type command :: [binary]
 
   @default_opts [
-    host: "localhost",
+    host: 'localhost',
     port: 6379,
     socket_opts: [],
     backoff: 2000,
