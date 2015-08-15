@@ -1,18 +1,42 @@
 defmodule Red.Mixfile do
   use Mix.Project
 
+  @description """
+  Superfast, pipelined, resilient Redis driver for Elixir.
+  """
+
+  @version "0.1.0-dev"
+
   def project do
-    [app: :red,
-     version: "0.0.1",
-     elixir: "~> 1.0",
-     build_embedded: Mix.env in [:prod, :bench],
-     start_permanent: Mix.env == :prod,
-     test_coverage: [tool: Coverex.Task],
-     deps: deps]
+    [
+      app: :red,
+      version: @version,
+      elixir: "~> 1.0",
+      build_embedded: Mix.env in [:prod, :bench],
+      start_permanent: Mix.env == :prod,
+      test_coverage: [tool: Coverex.Task],
+      deps: deps,
+
+      # Hex
+      package: package,
+      description: @description,
+
+      # Docs
+      name: "Red",
+      source_url: "https://github.com/whatyouhide/red",
+    ]
   end
 
   def application do
-    [applications: [:logger]]
+    [applications: [:logger, :connection]]
+  end
+
+  defp package do
+    [
+      contributors: "Andrea Leopardi",
+      licenses: ["MIT"],
+      links: %{"GitHub" => "https://github.com/whatyouhide/red"},
+    ]
   end
 
   defp deps do
