@@ -255,11 +255,11 @@ defmodule Red.Connection do
   end
 
   defp host_for_logging(%{opts: opts} = _s) do
-    Enum.join [opts[:host], opts[:port]], ":"
+    "#{opts[:host]}:#{opts[:port]}"
   end
 
   # If `info` is :backoff then this is a *reconnection* attempt, so if
-  # there's an error let's trye to just reconnect after a backoff time. If
+  # there's an error let's try to just reconnect after a backoff time. If
   # `info` is :init, then this is the first connection attempt so if it
   # fails let's just die.
   defp handle_connection_error(s, :backoff, _reason),
