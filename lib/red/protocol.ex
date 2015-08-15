@@ -1,4 +1,9 @@
 defmodule Red.Protocol do
+  @moduledoc """
+  This module provides functions to work with the [Redis binary
+  protocol](http://redis.io/topics/protocol).
+  """
+
   defmodule ParseError do
     @moduledoc """
     This error represents an error in parsing data according to the
@@ -8,7 +13,7 @@ defmodule Red.Protocol do
     defexception [:message]
   end
 
-  @type redis_value :: binary | integer | nil | [redis_value]
+  @type redis_value :: binary | integer | nil | Red.Error.t | [redis_value]
 
   @crlf "\r\n"
 
@@ -42,15 +47,18 @@ defmodule Red.Protocol do
   end
 
   @doc ~S"""
-  Parses a RESP-encoded value from the given `binary`.
+  Parses a RESP-encoded value from the given `data`.
 
   Returns `{:ok, value, rest}` if a value is parsed successfully, `{:error,
-  :reason}` otherwise.
+  reason}` otherwise.
 
   ## Examples
 
       iex> Red.Protocol.parse "+OK\r\ncruft"
       {:ok, "OK", "cruft"}
+
+      iex> Red.Protocol.parse "-ERR wrong type\r\n"
+      {:ok, %Red.Error{message: "ERR wrong type"}, ""}
 
       iex> Red.Protocol.parse "+OK"
       {:error, :incomplete}
