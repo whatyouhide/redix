@@ -31,13 +31,24 @@ defmodule RedTest do
   end
 
   @tag :no_setup
-  test "start_link/1: specifying a password" do
+  test "start_link/1: specifying a password when no password is set" do
     silence_log fn ->
       Process.flag :trap_exit, true
       assert {:ok, pid} = Red.start_link password: "foo"
       assert is_pid(pid)
 
       error = %Error{message: "ERR Client sent AUTH, but no password is set"}
+      assert_receive {:EXIT, ^pid, ^error}, 500
+    end
+  end
+
+  @tag :no_setup
+  test "start_link/1: specifying a non existing database" do
+    silence_log fn ->
+      Process.flag :trap_exit, true
+      assert {:ok, pid} = Red.start_link(database: 1_000)
+
+      error = %Error{message: "ERR invalid DB index"}
       assert_receive {:EXIT, ^pid, ^error}, 500
     end
   end
