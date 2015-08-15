@@ -74,6 +74,8 @@ defmodule Red do
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
       overridden by Red so that it functions properly.
+    * `:backoff` - the time (in milliseconds) to wait before trying to reconnect
+      when a network error occurs.
 
   In addition to these options, all options accepted by `GenServer.start_link/3`
   are forwarded to it. For example, a Red connection can be registered with a
