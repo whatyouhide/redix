@@ -138,7 +138,7 @@ defmodule Red do
       :ok
 
   """
-  @spec stop(pid) :: :ok
+  @spec stop(GenServer.server) :: :ok
   def stop(conn) do
     Connection.cast(conn, :stop)
   end
@@ -171,7 +171,7 @@ defmodule Red do
       {:error, :closed}
 
   """
-  @spec command(pid, command, Keyword.t) :: Red.Protocol.redis_value
+  @spec command(GenServer.server, command, Keyword.t) :: Red.Protocol.redis_value
   def command(conn, args, opts \\ []) do
     Connection.call(conn, {:command, args}, opts[:timeout] || @default_timeout)
   end
@@ -192,7 +192,7 @@ defmodule Red do
       {:ok, [1, 2, 1]}
 
   """
-  @spec pipeline(pid, [command], Keyword.t) :: [Red.Protocol.redis_value]
+  @spec pipeline(GenServer.server, [command], Keyword.t) :: [Red.Protocol.redis_value]
   def pipeline(conn, commands, opts \\ []) do
     Connection.call(conn, {:pipeline, commands}, opts[:timeout] || @default_timeout)
   end
