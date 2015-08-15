@@ -1,4 +1,4 @@
-defmodule Red.URI do
+defmodule Redix.URI do
   @moduledoc false
 
   defmodule URIError do

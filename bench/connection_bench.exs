@@ -2,14 +2,14 @@ defmodule ConnectionBench do
   use Benchfella
 
   before_each_bench _ do
-    {:ok, recs} = Red.start_link(host: "localhost", port: 6379)
+    {:ok, redix} = Redix.start_link(host: "localhost", port: 6379)
     {:ok, redo} = :redo.start_link(:undefined, [])
     {:ok, eredis} = :eredis.start_link
 
-    Red.command(recs, ["SET", "k", "1"])
+    Redix.command(redix, ["SET", "k", "1"])
 
     context = %{
-      recs: recs,
+      redix: redix,
       redo: redo,
       eredis: eredis,
       pipeline_cmds_lots: List.duplicate(~w(GET k), 10_000),
@@ -19,8 +19,8 @@ defmodule ConnectionBench do
     {:ok, context}
   end
 
-  bench "[Red] single command (GET)", [recs: bench_context[:recs]] do
-    Red.command(recs, ~w(GET k))
+  bench "[Redix] single command (GET)", [redix: bench_context[:redix]] do
+    Redix.command(redix, ~w(GET k))
   end
   bench "[:redo] single command (GET)", [redo: bench_context[:redo]] do
     :redo.cmd(redo, ~w(GET k))
@@ -29,8 +29,8 @@ defmodule ConnectionBench do
     :eredis.q(eredis, ~w(GET k))
   end
 
-  bench "[Red] few pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_few]] do
-    Red.pipeline(recs, cmds)
+  bench "[Redix] few pipelined commands", [redix: bench_context[:redix], cmds: bench_context[:pipeline_cmds_few]] do
+    Redix.pipeline(redix, cmds)
   end
   bench "[:redo] few pipelined commands", [redo: bench_context[:redo], cmds: bench_context[:pipeline_cmds_few]] do
     :redo.cmd(redo, cmds)
@@ -39,8 +39,8 @@ defmodule ConnectionBench do
     :eredis.qp(eredis, cmds)
   end
 
-  bench "[Red] lots of pipelined commands", [recs: bench_context[:recs], cmds: bench_context[:pipeline_cmds_lots]] do
-    Red.pipeline(recs, cmds)
+  bench "[Redix] lots of pipelined commands", [redix: bench_context[:redix], cmds: bench_context[:pipeline_cmds_lots]] do
+    Redix.pipeline(redix, cmds)
   end
   bench "[:redo] lots of pipelined commands", [redo: bench_context[:redo], cmds: bench_context[:pipeline_cmds_lots]] do
     :redo.cmd(redo, cmds)
@@ -49,8 +49,8 @@ defmodule ConnectionBench do
     :eredis.qp(eredis, cmds)
   end
 
-  bench "[Red] lots of commands, one after the other", [recs: bench_context[:recs]] do
-    Enum.each 1..1000, fn(_) -> Red.command(recs, ["GET", "k"]) end
+  bench "[Redix] lots of commands, one after the other", [redix: bench_context[:redix]] do
+    Enum.each 1..1000, fn(_) -> Redix.command(redix, ["GET", "k"]) end
   end
   bench "[:redo] lots of commands, one after the other", [redo: bench_context[:redo]] do
     Enum.each 1..1000, fn(_) -> :redo.cmd(redo, ["GET", "k"]) end

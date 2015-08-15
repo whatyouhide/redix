@@ -1,4 +1,4 @@
-defmodule Red.Mixfile do
+defmodule Redix.Mixfile do
   use Mix.Project
 
   @description """
@@ -9,7 +9,7 @@ defmodule Red.Mixfile do
 
   def project do
     [
-      app: :red,
+      app: :redix,
       version: @version,
       elixir: "~> 1.0",
       build_embedded: Mix.env in [:prod, :bench],
@@ -22,8 +22,8 @@ defmodule Red.Mixfile do
       description: @description,
 
       # Docs
-      name: "Red",
-      source_url: "https://github.com/whatyouhide/red",
+      name: "Redix",
+      source_url: "https://github.com/whatyouhide/redix",
     ]
   end
 
@@ -35,7 +35,7 @@ defmodule Red.Mixfile do
     [
       contributors: "Andrea Leopardi",
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/whatyouhide/red"},
+      links: %{"GitHub" => "https://github.com/whatyouhide/redix"},
     ]
   end
 

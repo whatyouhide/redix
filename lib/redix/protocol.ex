@@ -1,4 +1,4 @@
-defmodule Red.Protocol do
+defmodule Redix.Protocol do
   @moduledoc """
   This module provides functions to work with the [Redis binary
   protocol](http://redis.io/topics/protocol).
@@ -13,7 +13,7 @@ defmodule Red.Protocol do
     defexception [:message]
   end
 
-  @type redis_value :: binary | integer | nil | Red.Error.t | [redis_value]
+  @type redis_value :: binary | integer | nil | Redix.Error.t | [redis_value]
 
   @crlf "\r\n"
 
@@ -32,7 +32,7 @@ defmodule Red.Protocol do
 
   ## Examples
 
-      iex> iodata = Red.Protocol.pack ["SET", "mykey", 1]
+      iex> iodata = Redix.Protocol.pack ["SET", "mykey", 1]
       iex> IO.iodata_to_binary(iodata)
       "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$1\r\n1\r\n"
 
@@ -54,13 +54,13 @@ defmodule Red.Protocol do
 
   ## Examples
 
-      iex> Red.Protocol.parse "+OK\r\ncruft"
+      iex> Redix.Protocol.parse "+OK\r\ncruft"
       {:ok, "OK", "cruft"}
 
-      iex> Red.Protocol.parse "-ERR wrong type\r\n"
-      {:ok, %Red.Error{message: "ERR wrong type"}, ""}
+      iex> Redix.Protocol.parse "-ERR wrong type\r\n"
+      {:ok, %Redix.Error{message: "ERR wrong type"}, ""}
 
-      iex> Red.Protocol.parse "+OK"
+      iex> Redix.Protocol.parse "+OK"
       {:error, :incomplete}
 
   """
@@ -107,7 +107,7 @@ defmodule Red.Protocol do
   defp parse_error(data) do
     case until_crlf(data) do
       {:ok, message, rest} ->
-        {:ok, %Red.Error{message: message}, rest}
+        {:ok, %Redix.Error{message: message}, rest}
       o ->
         o
     end

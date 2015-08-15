@@ -1,6 +1,6 @@
 ExUnit.start()
 
-defmodule Red.TestHelpers do
+defmodule Redix.TestHelpers do
   def silence_log(fun) do
     Logger.remove_backend :console
     fun.()

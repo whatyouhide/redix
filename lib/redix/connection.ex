@@ -1,9 +1,9 @@
-defmodule Red.Connection do
+defmodule Redix.Connection do
   @moduledoc false
 
   use Connection
 
-  alias Red.Protocol
+  alias Redix.Protocol
   require Logger
 
   @initial_state %{
@@ -181,7 +181,7 @@ defmodule Red.Connection do
   defp extract_client_from_queued_item({:command, from}), do: from
   defp extract_client_from_queued_item({:pipeline, from, _}), do: from
 
-  defp format_resp(%Red.Error{} = err), do: {:error, err}
+  defp format_resp(%Redix.Error{} = err), do: {:error, err}
   defp format_resp(resp), do: {:ok, resp}
 
   defp auth_and_select_db(s) do

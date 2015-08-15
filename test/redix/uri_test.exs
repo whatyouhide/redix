@@ -1,8 +1,8 @@
-defmodule Red.URITest do
+defmodule Redix.URITest do
   use ExUnit.Case, async: true
 
-  import Red.URI
-  alias Red.URI.URIError
+  import Redix.URI
+  alias Redix.URI.URIError
 
   test "opts_from_uri/1: invalid scheme" do
     msg = "scheme is not redis:// but 'foo://'"
