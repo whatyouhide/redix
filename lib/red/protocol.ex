@@ -89,20 +89,7 @@ defmodule Red.Protocol do
   """
   @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
   def parse_multi(data, n) do
-    parse_multi(data, n, [])
-  end
-
-  defp parse_multi(data, 0, acc) do
-    {:ok, Enum.reverse(acc), data}
-  end
-
-  defp parse_multi(data, n, acc) do
-    case parse(data) do
-      {:ok, val, rest} ->
-        parse_multi(rest, n - 1, [val|acc])
-      {:error, _} = error ->
-        error
-    end
+    take_n_elems(data, n, [])
   end
 
   defp parse_simple_string(data) do
