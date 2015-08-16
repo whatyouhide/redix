@@ -203,7 +203,9 @@ defmodule Redix do
       {:error, :closed}
 
   """
-  @spec command(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value
+  @spec command(GenServer.server, command, Keyword.t) ::
+    {:ok, Redix.Protocol.redis_value} |
+    {:error, atom | Redix.Error.t}
   def command(conn, args, opts \\ []) do
     Connection.call(conn, {:command, args}, opts[:timeout] || @default_timeout)
   end
@@ -224,7 +226,9 @@ defmodule Redix do
       {:ok, [1, 2, 1]}
 
   """
-  @spec pipeline(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value]
+  @spec pipeline(GenServer.server, [command], Keyword.t) ::
+    {:ok, [Redix.Protocol.redis_value]} |
+    {:error, atom}
   def pipeline(conn, commands, opts \\ []) do
     Connection.call(conn, {:pipeline, commands}, opts[:timeout] || @default_timeout)
   end
