@@ -256,37 +256,8 @@ defmodule RedixTest do
 
     silence_log fn ->
       assert {:ok, _} = Redix.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
-      assert {:error, :closed} = Redix.command(c, ~w(PING))
-      assert {:error, :closed} = Redix.pipeline(c, [~w(PING)])
-
       :timer.sleep(100)
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
-    end
-  end
-
-  @tag :no_setup
-  test "command!/3: raising a network error when the connection is closed" do
-    {:ok, c} = Redix.start_link
-
-    silence_log fn ->
-      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
-
-      assert_raise Redix.NetworkError, ":closed", fn ->
-        Redix.command!(c, ~w(PING))
-      end
-    end
-  end
-
-  @tag :no_setup
-  test "pipeline!/3: raising a network error when the connection is closed" do
-    {:ok, c} = Redix.start_link
-
-    silence_log fn ->
-      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
-
-      assert_raise Redix.NetworkError, ":closed", fn ->
-        Redix.pipeline!(c, [~w(PING), ~w(PING)]) |> IO.inspect
-      end
     end
   end
 
