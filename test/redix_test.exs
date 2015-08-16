@@ -214,6 +214,34 @@ defmodule RedixTest do
     assert resp == ["OK", %Error{message: msg}]
   end
 
+  test "command!/2: simple commands", %{conn: c} do
+    assert Redix.command!(c, ["PING"]) == "PONG"
+    assert Redix.command!(c, ["SET", "bang", "foo"]) == "OK"
+    assert Redix.command!(c, ["GET", "bang"]) == "foo"
+  end
+
+  test "command!/2: Redis errors", %{conn: c} do
+    assert_raise Redix.Error, "ERR unknown command 'NONEXISTENT'", fn ->
+      Redix.command!(c, ["NONEXISTENT"])
+    end
+
+    "OK" = Redix.command!(c, ["SET", "bang_errors", "foo"])
+    assert_raise Redix.Error, "ERR value is not an integer or out of range", fn ->
+      Redix.command!(c, ["INCR", "bang_errors"])
+    end
+  end
+
+  test "pipeline!/2: simple commands", %{conn: c} do
+    assert Redix.pipeline!(c, [~w(SET ppbang foo), ~w(GET ppbang)]) == ~w(OK foo)
+  end
+
+  test "pipeline!/2: Redis errors in the list of results", %{conn: c} do
+    commands = [~w(SET ppbang_errors foo), ~w(INCR ppbang_errors)]
+
+    msg = "ERR value is not an integer or out of range"
+    assert Redix.pipeline!(c, commands) == ["OK", %Redix.Error{message: msg}]
+  end
+
   test "command/2: timeout", %{conn: c} do
     assert {:timeout, _} = catch_exit(Redix.command(c, ~w(PING), timeout: 0))
   end

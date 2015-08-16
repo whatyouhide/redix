@@ -211,6 +211,46 @@ defmodule Redix do
   end
 
   @doc """
+  Issues a command on the Redis server, raising if there's an error.
+
+  This function works exactly like `command/3` but:
+
+    * if the command is successful, then the result is returned not wrapped in a
+      `{:ok, result}` tuple.
+    * if there's a Redis error, a `Redix.Error` error is raised (with the
+      original message).
+    * if there's a network error (e.g., `{:error, :closed}`) a `Redix.Network`
+      error is raised.
+
+  This function accepts the same options as `command/3`.
+
+  ## Examples
+
+      iex> Redix.command!(conn, ["SET", "mykey", "foo"])
+      "OK"
+
+      iex> Redix.command!(conn, ["INCR", "mykey"])
+      ** (Redix.Error) ERR value is not an integer or out of range
+
+  If Redis goes down (before a reconnection happens):
+
+      iex> Redix.command!(conn, ["GET", "mykey"])
+      ** (Redix.NetworkError) :closed
+
+  """
+  @spec command!(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value
+  def command!(conn, args, opts \\ []) do
+    case command(conn, args, opts) do
+      {:ok, resp} ->
+        resp
+      {:error, %Redix.Error{} = error} ->
+        raise error
+      {:error, error} ->
+        raise Redix.NetworkError, error
+    end
+  end
+
+  @doc """
   Issues a pipeline of commands on the Redis server.
 
   `commands` must be a list of commands, where each command is a list of strings
@@ -246,6 +286,46 @@ defmodule Redix do
     {:error, atom}
   def pipeline(conn, commands, opts \\ []) do
     Connection.call(conn, {:pipeline, commands}, opts[:timeout] || @default_timeout)
+  end
+
+  @doc """
+  Issues a pipeline of commands to the Redis server, raising if there's an error.
+
+  This function works similarly to `pipeline/3`, except:
+
+    * if there are no errors in issuing the commands (even if there are one or
+      more Redis errors in the results), the results are returned directly (not
+      wrapped in a `{:ok, results}` tuple).
+    * if there's a connection error then a `Redix.NetworkError` exception is raised.
+
+  For more information on why nothing is raised if there are one or more Redis
+  errors (`Redix.Error` structs) in the list of results, look at the
+  documentation for `pipeline/3`.
+
+  This function accepts the same options as `pipeline/3`.
+
+  ## Examples
+
+      iex> Redix.pipeline!(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
+      [1, 2, 1]
+
+      iex> Redix.pipeline!(conn, [~w(SET k foo), ~w(INCR k), ~(GET k)])
+      ["OK", %Redix.Error{message: "ERR value is not an integer or out of range"}, "foo"]
+
+  If Redis goes down (before a reconnection happens):
+
+      iex> Redix.pipeline!(conn, [~w(SET mykey foo), ~w(GET mykey)])
+      ** (Redix.NetworkError) :closed
+
+  """
+  @spec pipeline!(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value]
+  def pipeline!(conn, commands,  opts \\ []) do
+    case pipeline(conn, commands, opts) do
+      {:ok, resp} ->
+        resp
+      {:error, error} ->
+        raise Redix.NetworkError, error
+    end
   end
 
   defp merge_with_default_opts(opts) do
