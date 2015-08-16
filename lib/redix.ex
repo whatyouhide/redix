@@ -218,12 +218,27 @@ defmodule Redix do
   "block" to Redis, and a list of ordered responses (one for each command) will
   be returned.
 
-  The return value is `{:ok, response}` if the request is successful and the response has
+  The return value is `{:ok, results}` if the request is successful, `{:error,
+  reason}` otherwise.
+
+  Note that `{:ok, results}` is returned even if `results` contains one or more
+  Redis errors (`Redix.Error` structs). This is done to avoid having to walk the
+  list of results (a `O(n)` operation) to look for errors, leaving the
+  responsibility to the user. That said, errors other than Redis errors (like
+  network errors) always cause the return value to be `{:error, reason}`.
 
   ## Examples
 
-      iex> Redix.command(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
+      iex> Redix.pipeline(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
       {:ok, [1, 2, 1]}
+
+      iex> Redix.pipeline(conn, [~w(SET k foo), ~w(INCR k), ~(GET k)])
+      {:ok, ["OK", %Redix.Error{message: "ERR value is not an integer or out of range"}, "foo"]}
+
+  If Redis goes down (before a reconnection happens):
+
+      iex> Redix.pipeline(conn, [~w(SET mykey foo), ~w(GET mykey)])
+      {:error, :closed}
 
   """
   @spec pipeline(GenServer.server, [command], Keyword.t) ::
