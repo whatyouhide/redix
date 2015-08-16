@@ -18,10 +18,16 @@ defmodule Redix do
   ## Reconnections
 
   Redix tries to be as resilient as possible: it tries to recover automatically
-  from most network errors. For example, if the connection to Redis drops, then
-  the Redix process will try to periodically reconnect at a given interval. This
-  interval can be specified with the `:backoff` option passed to `start_link/1`
-  or `start_link/2` (by default it's `2000` milliseconds).
+  from most network errors.
+
+  If there's a network error sending data to Redis or if the connection to Redis
+  drops, this happens:
+
+    * a reconnection attempt is made right away.
+    * if this attempt fails, reconnections are attempted at a given "backoff"
+      interval. The duratio of this interval can be specified with the
+      `:backoff` option passed to `start_link/1` or `start_link/2`. The default
+      is `2000` milliseconds.
 
   These reconnections attempts only happen when the connection to Redis has been
   established at least once before. If a connection error happens when
