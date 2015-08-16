@@ -108,6 +108,8 @@ defmodule Redix.ProtocolTest do
 
   test "parse/1 with a null array" do
     assert parse("*-1\r\n") == {:ok, nil, ""}
+    assert parse("*-1\r\nrest") == {:ok, nil, "rest"}
+    assert parse("*-1\r") == {:error, :incomplete}
   end
 
   test "parse/1 with regular array values" do
