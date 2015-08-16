@@ -197,7 +197,7 @@ defmodule Redix do
       iex> Redix.command(conn, ["INCR", "mykey"])
       {:error, "ERR value is not an integer or out of range"}
 
-  If Redis goes down:
+  If Redis goes down (before a reconnection happens):
 
       iex> Redix.command(conn, ["GET", "mykey"])
       {:error, :closed}
