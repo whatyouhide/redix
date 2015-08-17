@@ -25,7 +25,7 @@ defmodule Redix do
 
     * a reconnection attempt is made right away.
     * if this attempt fails, reconnections are attempted at a given "backoff"
-      interval. The duratio of this interval can be specified with the
+      interval. The duration of this interval can be specified with the
       `:backoff` option passed to `start_link/1` or `start_link/2`. The default
       is `2000` milliseconds.
 
