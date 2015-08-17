@@ -1,5 +1,7 @@
 # Redix
 
+[![Build Status](https://travis-ci.org/whatyouhide/redix.svg?branch=v0.1.0)](https://travis-ci.org/whatyouhide/redix)
+
 > Superfast, pipelined, resilient Redis client for Elixir.
 
 Redix is a [Redis][redis] client written in pure Elixir with focus on speed,
