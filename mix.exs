@@ -23,7 +23,9 @@ defmodule Redix.Mixfile do
 
       # Docs
       name: "Redix",
-      source_url: "https://github.com/whatyouhide/redix",
+      docs: [readme: "README.md", main: "README",
+             source_ref: "v#{@version}",
+             source_url: "https://github.com/whatyouhide/redix"],
     ]
   end
 
