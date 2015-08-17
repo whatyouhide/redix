@@ -2,6 +2,9 @@ defmodule Redix.URI do
   @moduledoc false
 
   defmodule URIError do
+    @moduledoc """
+    Error in parsing a Redis URI or error in the content of the URI.
+    """
     defexception [:message]
   end
 

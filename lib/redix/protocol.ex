@@ -6,7 +6,7 @@ defmodule Redix.Protocol do
 
   defmodule ParseError do
     @moduledoc """
-    This error represents an error in parsing data according to the
+    Error in parsing data according to the
     [RESP](http://redis.io/topics/protocol) protocol.
     """
 
