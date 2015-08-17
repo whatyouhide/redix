@@ -62,7 +62,9 @@ Redix.pipeline(conn, [~w(INCR foo), ~w(INCR foo), ~w(INCR foo 2)])
 #=> {:ok, [1, 2, 4]}
 ```
 
-`command/2-3` and `pipeline/2-3` always return `{:ok, result}` or `{:error, reason}`. If you want to access the result directly and raise in case there's an error, bang! variants are provided:
+`command/2-3` and `pipeline/2-3` always return `{:ok, result}` or `{:error,
+reason}`. If you want to access the result directly and raise in case there's an
+error, bang! variants are provided:
 
 ```elixir
 Redix.command!(conn, ["PING"])
@@ -72,7 +74,9 @@ Redix.pipeline!(conn, [~w(SET mykey foo), ~w(GET mykey)])
 #=> ["OK", "foo"]
 ```
 
-A note about Redis errors: in the non-bang functions, they're returned as `Redix.Error` structs with a `:message` field which contains the original error message.
+A note about Redis errors: in the non-bang functions, they're returned as
+`Redix.Error` structs with a `:message` field which contains the original error
+message.
 
 ```elixir
 Redix.command(conn, ~w(FOO))
@@ -95,6 +99,19 @@ Redix.command!(conn, ~w(FOO))
 `command!/2-3` and `pipeline!/2-3` raise `Redix.NetworkError` in case there's an
 error related to the Redis connection (e.g., the connection is closed while
 Redix is waiting to reconnect).
+
+Transactions are supported naturally as they're just made up of commands:
+
+```elixir
+Redix.command(conn, ~w(MULTI))
+#=> {:ok, "OK"}
+Redix.command(conn, ~w(INCR counter))
+#=> {:ok, "QUEUED"}
+Redix.command(conn, ~w(INCR counter))
+#=> {:ok, "QUEUED"}
+Redix.command(conn, ~w(EXEC))
+#=> {:ok, [1, 2]}
+```
 
 #### Resiliency
 
