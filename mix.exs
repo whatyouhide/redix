@@ -5,6 +5,8 @@ defmodule Redix.Mixfile do
   Superfast, pipelined, resilient Redis driver for Elixir.
   """
 
+  @repo_url "https://github.com/whatyouhide/redix"
+
   @version "0.1.0-dev"
 
   def project do
@@ -25,7 +27,7 @@ defmodule Redix.Mixfile do
       name: "Redix",
       docs: [readme: "README.md", main: "README",
              source_ref: "v#{@version}",
-             source_url: "https://github.com/whatyouhide/redix"],
+             source_url: @repo_url],
     ]
   end
 
@@ -37,7 +39,7 @@ defmodule Redix.Mixfile do
     [
       contributors: "Andrea Leopardi",
       licenses: ["MIT"],
-      links: %{"GitHub" => "https://github.com/whatyouhide/redix"},
+      links: %{"GitHub" => @repo_url},
     ]
   end
 
