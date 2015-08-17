@@ -7,7 +7,7 @@ defmodule Redix.Mixfile do
 
   @repo_url "https://github.com/whatyouhide/redix"
 
-  @version "0.1.0-dev"
+  @version "0.1.0"
 
   def project do
     [
