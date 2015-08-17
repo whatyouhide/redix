@@ -96,7 +96,7 @@ Redix.command!(conn, ~w(FOO))
 error related to the Redis connection (e.g., the connection is closed while
 Redix is waiting to reconnect).
 
-### Resiliency
+#### Resiliency
 
 Redix takes full advantage of the [connection][connection] library by James
 Fish to provide a resilient behaviour when dealing with the network connection
