@@ -50,6 +50,7 @@ defmodule Redix.Mixfile do
       {:benchfella, github: "alco/benchfella", only: :bench},
       {:redo, github: "heroku/redo", only: :bench},
       {:eredis, github: "wooga/eredis", only: :bench},
+      {:yar, github: "dantswain/yar", only: :bench},
       {:coverex, "~> 1.4", only: :test},
       {:ex_doc, ">= 0.0.0", only: :docs},
     ]

@@ -9,4 +9,6 @@
   "idna": {:hex, :idna, "1.0.2"},
   "poison": {:hex, :poison, "1.4.0"},
   "redo": {:git, "git://github.com/heroku/redo.git", "936a3c5dcadc8319b349fcad3e5b4c64e98db4d6", []},
-  "ssl_verify_hostname": {:hex, :ssl_verify_hostname, "1.0.5"}}
+  "socket": {:hex, :socket, "0.3.0"},
+  "ssl_verify_hostname": {:hex, :ssl_verify_hostname, "1.0.5"},
+  "yar": {:git, "git://github.com/dantswain/yar.git", "211522131e5a85b1d7cb406194f3dfda7814bc03", []}}
