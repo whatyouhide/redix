@@ -98,7 +98,7 @@ Redix.command!(conn, ~w(FOO))
 #=> ** (Redix.Error) ERR unknown command 'FOO'
 ```
 
-`command!/2-3` and `pipeline!/2-3` raise `Redix.NetworkError` in case there's an
+`command!/2-3` and `pipeline!/2-3` raise `Redix.ConnectionError` in case there's an
 error related to the Redis connection (e.g., the connection is closed while
 Redix is waiting to reconnect).
 

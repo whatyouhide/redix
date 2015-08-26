@@ -251,7 +251,7 @@ defmodule Redix do
   If Redis goes down (before a reconnection happens):
 
       iex> Redix.command!(conn, ["GET", "mykey"])
-      ** (Redix.NetworkError) :closed
+      ** (Redix.ConnectionError) :closed
 
   """
   @spec command!(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value
@@ -262,7 +262,7 @@ defmodule Redix do
       {:error, %Redix.Error{} = error} ->
         raise error
       {:error, error} ->
-        raise Redix.NetworkError, error
+        raise Redix.ConnectionError, error
     end
   end
 
@@ -312,7 +312,7 @@ defmodule Redix do
     * if there are no errors in issuing the commands (even if there are one or
       more Redis errors in the results), the results are returned directly (not
       wrapped in a `{:ok, results}` tuple).
-    * if there's a connection error then a `Redix.NetworkError` exception is raised.
+    * if there's a connection error then a `Redix.ConnectionError` exception is raised.
 
   For more information on why nothing is raised if there are one or more Redis
   errors (`Redix.Error` structs) in the list of results, look at the
@@ -331,7 +331,7 @@ defmodule Redix do
   If Redis goes down (before a reconnection happens):
 
       iex> Redix.pipeline!(conn, [~w(SET mykey foo), ~w(GET mykey)])
-      ** (Redix.NetworkError) :closed
+      ** (Redix.ConnectionError) :closed
 
   """
   @spec pipeline!(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value]
@@ -340,7 +340,7 @@ defmodule Redix do
       {:ok, resp} ->
         resp
       {:error, error} ->
-        raise Redix.NetworkError, error
+        raise Redix.ConnectionError, error
     end
   end
 

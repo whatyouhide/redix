@@ -8,9 +8,9 @@ defmodule Redix.Error do
   @type t :: %__MODULE__{message: binary}
 end
 
-defmodule Redix.NetworkError do
+defmodule Redix.ConnectionError do
   @moduledoc """
-  Error in the TCP connection to Redis.
+  Error in the connection to Redis.
   """
 
   defexception [:message]
