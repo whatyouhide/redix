@@ -1,13 +1,11 @@
 defmodule Redix.PubSubTest do
   use ExUnit.Case, async: true
 
-  alias Redix.PubSub
-
   test "pubsub without patterns" do
-    {:ok, c} = PubSub.start_link
+    {:ok, c} = Redix.start_link
     {:ok, other} = Redix.start_link
 
-    PubSub.subscribe(c, "foo", self())
+    Redix.subscribe(c, "foo", self())
     :timer.sleep 100
 
     Redix.command!(other, ~w(PUBLISH foo hey_foo))
@@ -16,7 +14,7 @@ defmodule Redix.PubSubTest do
     assert_receive {:redix_pubsub, "hey_foo"}
     refute_receive {:redix_pubsub, "hey_bar"}
 
-    PubSub.unsubscribe(c, "foo", self())
+    Redix.unsubscribe(c, "foo", self())
     :timer.sleep 100
 
     Redix.command!(other, ~w(PUBLISH foo hey_foo))
@@ -25,10 +23,10 @@ defmodule Redix.PubSubTest do
   end
 
   test "pubsub with patterns" do
-    {:ok, c} = PubSub.start_link
+    {:ok, c} = Redix.start_link
     {:ok, other} = Redix.start_link
 
-    PubSub.psubscribe(c, "foo*", self())
+    Redix.psubscribe(c, "foo*", self())
     :timer.sleep 100
 
     Redix.command!(other, ~w(PUBLISH foo_1 hey_foo_1))
@@ -39,7 +37,7 @@ defmodule Redix.PubSubTest do
     assert_receive {:redix_pubsub, "hey_foo_2"}
     refute_receive {:redix_pubsub, "hey_bar"}
 
-    PubSub.punsubscribe(c, "foo*", self())
+    Redix.punsubscribe(c, "foo*", self())
     :timer.sleep 100
 
     Redix.command!(other, ~w(PUBLISH foo_x hey_foo))

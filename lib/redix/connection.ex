@@ -103,8 +103,9 @@ defmodule Redix.Connection do
     {:disconnect, :stop, s}
   end
 
-  def handle_cast({:pubsub_subscribe, channels, receiver}, %{pubsub: _} = s) do
+  def handle_cast({:pubsub_subscribe, channels, receiver}, s) do
     s
+    |> Map.put(:pubsub, true)
     |> enqueue({:subscribe, channels, receiver})
     |> send_noreply(Protocol.pack(["SUBSCRIBE"|channels]))
   end
@@ -117,6 +118,7 @@ defmodule Redix.Connection do
 
   def handle_cast({:pubsub_psubscribe, channels, receiver}, %{pubsub: _} = s) do
     s
+    |> Map.put(:pubsub, true)
     |> enqueue({:subscribe, channels, receiver})
     |> send_noreply(Protocol.pack(["PSUBSCRIBE"|channels]))
   end

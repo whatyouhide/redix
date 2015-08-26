@@ -345,6 +345,22 @@ defmodule Redix do
     end
   end
 
+  def subscribe(conn, channels, recipient) do
+    Connection.cast(conn, {:pubsub_subscribe, List.wrap(channels), recipient})
+  end
+
+  def psubscribe(conn, patterns, recipient) do
+    Connection.cast(conn, {:pubsub_psubscribe, List.wrap(patterns), recipient})
+  end
+
+  def unsubscribe(conn, channels, recipient) do
+    Connection.cast(conn, {:pubsub_unsubscribe, List.wrap(channels), recipient})
+  end
+
+  def punsubscribe(conn, patterns, recipient) do
+    Connection.cast(conn, {:pubsub_punsubscribe, List.wrap(patterns), recipient})
+  end
+
   defp merge_with_default_opts(opts) do
     Keyword.merge @default_opts, opts, fn
       _k, default_val, nil ->
