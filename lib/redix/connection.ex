@@ -12,6 +12,8 @@ defmodule Redix.Connection do
     opts: nil,
     queue: :queue.new,
     reconnection_attempts: 0,
+    pubsub: false,
+    pubsub_clients: %{},
   }
 
   @default_timeout 5000
@@ -21,8 +23,8 @@ defmodule Redix.Connection do
   ## Callbacks
 
   @doc false
-  def init(opts) do
-    {:connect, :init, Dict.merge(@initial_state, opts: opts)}
+  def init(s) do
+    {:connect, :init, Dict.merge(@initial_state, s)}
   end
 
   @doc false
@@ -74,10 +76,18 @@ defmodule Redix.Connection do
     {:reply, {:error, :closed}, s}
   end
 
+  def handle_call({:command, _args}, _from, %{pubsub: true} = s) do
+    {:reply, {:error, :pubsub_mode}, s}
+  end
+
   def handle_call({:command, args}, from, s) do
     s
     |> enqueue({:command, from})
     |> send_noreply(Protocol.pack(args))
+  end
+
+  def handle_call({:pipeline, _args}, _from, %{pubsub: true} = s) do
+    {:reply, {:error, :pubsub_mode}, s}
   end
 
   def handle_call({:pipeline, commands}, from, s) do
@@ -91,6 +101,30 @@ defmodule Redix.Connection do
 
   def handle_cast(:stop, s) do
     {:disconnect, :stop, s}
+  end
+
+  def handle_cast({:pubsub_subscribe, channels, receiver}, %{pubsub: _} = s) do
+    s
+    |> enqueue({:subscribe, channels, receiver})
+    |> send_noreply(Protocol.pack(["SUBSCRIBE"|channels]))
+  end
+
+  def handle_cast({:pubsub_unsubscribe, channels, receiver}, s) do
+    s
+    |> enqueue({:unsubscribe, channels, receiver})
+    |> send_noreply(Protocol.pack(["UNSUBSCRIBE"|channels]))
+  end
+
+  def handle_cast({:pubsub_psubscribe, channels, receiver}, %{pubsub: _} = s) do
+    s
+    |> enqueue({:subscribe, channels, receiver})
+    |> send_noreply(Protocol.pack(["PSUBSCRIBE"|channels]))
+  end
+
+  def handle_cast({:pubsub_punsubscribe, channels, receiver}, s) do
+    s
+    |> enqueue({:unsubscribe, channels, receiver})
+    |> send_noreply(Protocol.pack(["PUNSUBSCRIBE"|channels]))
   end
 
   @doc false
@@ -116,13 +150,23 @@ defmodule Redix.Connection do
     %{s | tail: <<>>}
   end
 
-  defp new_data(s, data) do
+  defp new_data(%{pubsub: false} = s, data) do
     {from, parser, new_queue} = dequeue(s)
 
     case parser.(data) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
         s = %{s | queue: new_queue}
+        new_data(s, rest)
+      {:error, :incomplete} ->
+        %{s | tail: data}
+    end
+  end
+
+  defp new_data(%{pubsub: true} = s, data) do
+    case Protocol.parse(data) do
+      {:ok, resp, rest} ->
+        s = new_pubsub_msg(s, resp)
         new_data(s, rest)
       {:error, :incomplete} ->
         %{s | tail: data}
@@ -137,6 +181,94 @@ defmodule Redix.Connection do
         {from, &Protocol.parse_multi(&1, ncommands), new_queue}
       {:empty, _} ->
         raise "still got data but the queue is empty"
+    end
+  end
+
+  defp new_pubsub_msg(s, ["message", channel, message]) do
+    recipients = s.pubsub_clients[channel]
+
+    Enum.each recipients, fn(recipient) ->
+      send recipient, {:redix_pubsub, message}
+    end
+
+    s
+  end
+
+  defp new_pubsub_msg(s, ["pmessage", pattern, actual_channel, message]) do
+    recipients = s.pubsub_clients[pattern]
+
+    Enum.each recipients, fn(recipient) ->
+      send recipient, {:redix_pubsub, message}
+    end
+
+    s
+  end
+
+  defp new_pubsub_msg(s, ["subscribe", channel, _count]) do
+    case :queue.out(s.queue) do
+      {{:value, {:subscribe, [^channel|other_channels], receiver}}, new_queue} ->
+        s = update_in s.pubsub_clients, fn(clients) ->
+          Map.update(clients, channel, [receiver], &[receiver|&1])
+        end
+
+        if other_channels != [] do
+          new_queue = :queue.in_r({:subscribe, other_channels, receiver}, new_queue)
+        end
+
+        %{s | queue: new_queue}
+      _ ->
+        raise "oops"
+    end
+  end
+
+  defp new_pubsub_msg(s, ["psubscribe", channel, _count]) do
+    case :queue.out(s.queue) do
+      {{:value, {:subscribe, [^channel|other_channels], receiver}}, new_queue} ->
+        s = update_in s.pubsub_clients, fn(clients) ->
+          Map.update(clients, channel, [receiver], &[receiver|&1])
+        end
+
+        if other_channels != [] do
+          new_queue = :queue.in_r({:subscribe, other_channels, receiver}, new_queue)
+        end
+
+        %{s | queue: new_queue}
+      _ ->
+        raise "oops"
+    end
+  end
+
+  defp new_pubsub_msg(s, ["unsubscribe", channel, _count]) do
+    case :queue.out(s.queue) do
+      {{:value, {:unsubscribe, [^channel|other_channels], receiver}}, new_queue} ->
+        s = update_in s.pubsub_clients, fn(clients) ->
+          Map.update!(clients, channel, &List.delete(&1, receiver))
+        end
+
+        if other_channels != [] do
+          new_queue = :queue.in_r({:unsubscribe, other_channels, receiver}, new_queue)
+        end
+
+        %{s | queue: new_queue}
+      _ ->
+        raise "oops"
+    end
+  end
+
+  defp new_pubsub_msg(s, ["punsubscribe", channel, _count]) do
+    case :queue.out(s.queue) do
+      {{:value, {:unsubscribe, [^channel|other_channels], receiver}}, new_queue} ->
+        s = update_in s.pubsub_clients, fn(clients) ->
+          Map.update!(clients, channel, &List.delete(&1, receiver))
+        end
+
+        if other_channels != [] do
+          new_queue = :queue.in_r({:unsubscribe, other_channels, receiver}, new_queue)
+        end
+
+        %{s | queue: new_queue}
+      _ ->
+        raise "oops"
     end
   end
 

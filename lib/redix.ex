@@ -153,7 +153,8 @@ defmodule Redix do
   def start_link(opts) do
     {_redis_opts, connection_opts} = Keyword.split(opts, @redis_opts)
     opts = merge_with_default_opts(opts)
-    Connection.start_link(Redix.Connection, opts, connection_opts)
+    {pubsub?, opts} = Keyword.pop(opts, :pubsub, false)
+    Connection.start_link(Redix.Connection, %{opts: opts, pubsub: pubsub?}, connection_opts)
   end
 
   @doc """
