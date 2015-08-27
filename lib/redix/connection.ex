@@ -190,7 +190,8 @@ defmodule Redix.Connection do
     recipients = s.pubsub_clients[channel]
 
     Enum.each recipients, fn(recipient) ->
-      send recipient, {:redix_pubsub, message}
+      message = {:redix_pubsub, :message, channel, message}
+      send(recipient, message)
     end
 
     s
@@ -200,7 +201,8 @@ defmodule Redix.Connection do
     recipients = s.pubsub_clients[pattern]
 
     Enum.each recipients, fn(recipient) ->
-      send recipient, {:redix_pubsub, message}
+      message = {:redix_pubsub, :pmessage, {pattern, actual_channel}, message}
+      send(recipient, message)
     end
 
     s
