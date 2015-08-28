@@ -144,6 +144,76 @@ It appears from the benchmarks that:
 For now, I'm quite happy with these benchmarks and hope we can make them even
 better in the future.
 
+## Sample Poolboy usage
+
+If you are a beginner and want to use this lib in your project it is maybe not
+apparent how you use it. This is a small walkthrough on how to use the lib
+with a supervisor to get connection pooling wrapped in a public API.
+
+To start with you need to make a module that implements `Supervisor`.
+```
+defmodule Redix.Poolboy do
+  use Supervisor
+
+  @connection_params Application.get_env(:redix, :poolboy)[:server]
+
+  def start_link do
+    Supervisor.start_link(__MODULE__, [], name: __MODULE__)
+  end
+
+  def init([]) do
+    worker_pool_options = [
+      name: {:local, :redix_poolboy},
+      worker_module: Redix, #worker process
+      size: 10,
+      max_overflow: 5
+    ]
+
+    children = [
+      :poolboy.child_spec(:redix_poolboy, worker_pool_options, @connection_params)
+    ]
+
+    opts = [strategy: :one_for_one, name: __MODULE__]
+
+    supervise(children, opts)
+  end
+
+
+  def command(command) do
+    :poolboy.transaction(:redix_poolboy, fn(conn) -> Redix.command(conn, command) end)
+  end
+
+  def pipeline(command) do
+      :poolboy.transaction(:redix_poolboy, fn(conn) -> Redix.pipeline(conn, command) end)
+    end
+end
+```
+
+This module can be put anywhere, but it is suggested to put it in `/lib/redix/redix_poolboy.ex` 
+or a similar place. After putting the module in place you have to do two more things 
+before it can be used. 
+
+The first thing you need to do is to actually tell your application that this supervisor 
+should be started. When making a new project with `mix` you will get a `your_app_name.ex` 
+file placed in the `/lib` folder. In this file you need to add `supervisor(Redix.Poolboy, [])`
+inside the `children = []` block. 
+
+Secondly you need to configure the server url to connect to. This config follows the exact same
+pattern as the configuration described earlier in the readme and must be put under the namespace
+`:redix, :poolboy`.
+
+Sample config:
+```
+config :redix, :poolboy,
+  server: [host: "localhost", port: 6379]
+```
+
+Do note that this way of configuring is not compatible with umbrella apps or multiple Redis backends.
+If you need multiple instances, you need to make multiple instances of the supervisor or to move the config
+to the `supervisor()` call.
+
+
+
 ## Contributing
 
 Clone the repository and run `$ mix test` to make sure everything is
