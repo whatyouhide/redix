@@ -219,46 +219,40 @@ defmodule Redix.Connection do
   end
 
   defp new_pubsub_msg(s, ["subscribe", channel, _count]) do
-    {{:value, {:subscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    new_pubsub_subscription(s, :subscribe, channel)
+  end
+
+  defp new_pubsub_msg(s, ["psubscribe", pattern, _count]) do
+    new_pubsub_subscription(s, :psubscribe, pattern)
+  end
+
+  defp new_pubsub_msg(s, ["unsubscribe", channel, _count]) do
+    new_pubsub_unsubscription(s, :unsubscribe, channel)
+  end
+
+  defp new_pubsub_msg(s, ["punsubscribe", channel, _count]) do
+    new_pubsub_unsubscription(s, :punsubscribe, channel)
+  end
+
+  defp new_pubsub_subscription(s, subscription_type, channel) do
+    {{:value, {^subscription_type, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
     s = update_in s.pubsub_clients, fn(clients) ->
       Map.update(clients, channel, [receiver], &[receiver|&1])
     end
 
-    message = {:redix_pubsub, :subscribe, channel}
+    message = {:redix_pubsub, subscription_type, channel}
     send(receiver, message)
 
     %{s | queue: new_queue}
   end
 
-  defp new_pubsub_msg(s, ["psubscribe", channel, _count]) do
-    {{:value, {:psubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
-    s = update_in s.pubsub_clients, fn(clients) ->
-      Map.update(clients, channel, [receiver], &[receiver|&1])
-    end
-
-    send receiver, {:redix_pubsub, :psubscribe, channel}
-
-    %{s | queue: new_queue}
-  end
-
-  defp new_pubsub_msg(s, ["unsubscribe", channel, _count]) do
-    {{:value, {:unsubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+  defp new_pubsub_unsubscription(s, unsubscription_type, channel) do
+    {{:value, {^unsubscription_type, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
     s = update_in s.pubsub_clients, fn(clients) ->
       Map.update!(clients, channel, &List.delete(&1, receiver))
     end
 
-    send receiver, {:redix_pubsub, :unsubscribe, channel}
-
-    %{s | queue: new_queue}
-  end
-
-  defp new_pubsub_msg(s, ["punsubscribe", channel, _count]) do
-    {{:value, {:punsubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
-    s = update_in s.pubsub_clients, fn(clients) ->
-      Map.update!(clients, channel, &List.delete(&1, receiver))
-    end
-
-    send receiver, {:redix_pubsub, :punsubscribe, channel}
+    send receiver, {:redix_pubsub, unsubscription_type, channel}
 
     %{s | queue: new_queue}
   end
