@@ -104,28 +104,36 @@ defmodule Redix.Connection do
   end
 
   def handle_cast({:pubsub_subscribe, channels, receiver}, s) do
+    subscriptions = Enum.map(channels, fn(ch) -> {:subscribe, ch, receiver} end)
+
     s
     |> Map.put(:pubsub, true)
-    |> enqueue({:subscribe, channels, receiver})
+    |> enqueue(subscriptions)
     |> send_noreply(Protocol.pack(["SUBSCRIBE"|channels]))
   end
 
   def handle_cast({:pubsub_unsubscribe, channels, receiver}, s) do
+    unsubscriptions = Enum.map(channels, fn(ch) -> {:unsubscribe, ch, receiver} end)
+
     s
-    |> enqueue({:unsubscribe, channels, receiver})
+    |> enqueue(unsubscriptions)
     |> send_noreply(Protocol.pack(["UNSUBSCRIBE"|channels]))
   end
 
   def handle_cast({:pubsub_psubscribe, channels, receiver}, %{pubsub: _} = s) do
+    subscriptions = Enum.map(channels, fn(ch) -> {:psubscribe, ch, receiver} end)
+
     s
     |> Map.put(:pubsub, true)
-    |> enqueue({:subscribe, channels, receiver})
+    |> enqueue(subscriptions)
     |> send_noreply(Protocol.pack(["PSUBSCRIBE"|channels]))
   end
 
   def handle_cast({:pubsub_punsubscribe, channels, receiver}, s) do
+    unsubscriptions = Enum.map(channels, fn(ch) -> {:punsubscribe, ch, receiver} end)
+
     s
-    |> enqueue({:punsubscribe, channels, receiver})
+    |> enqueue(unsubscriptions)
     |> send_noreply(Protocol.pack(["PUNSUBSCRIBE"|channels]))
   end
 
@@ -199,80 +207,48 @@ defmodule Redix.Connection do
   end
 
   defp new_pubsub_msg(s, ["subscribe", channel, _count]) do
-    case :queue.out(s.queue) do
-      {{:value, {:subscribe, [^channel|other_channels], receiver}}, new_queue} ->
-        s = update_in s.pubsub_clients, fn(clients) ->
-          Map.update(clients, channel, [receiver], &[receiver|&1])
-        end
-
-        if other_channels != [] do
-          new_queue = :queue.in_r({:subscribe, other_channels, receiver}, new_queue)
-        end
-
-        message = {:redix_pubsub, :subscribe, channel}
-        send(receiver, message)
-
-        %{s | queue: new_queue}
-      _ ->
-        raise "oops"
+    {{:value, {:subscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update(clients, channel, [receiver], &[receiver|&1])
     end
+
+    message = {:redix_pubsub, :subscribe, channel}
+    send(receiver, message)
+
+    %{s | queue: new_queue}
   end
 
   defp new_pubsub_msg(s, ["psubscribe", channel, _count]) do
-    case :queue.out(s.queue) do
-      {{:value, {:subscribe, [^channel|other_channels], receiver}}, new_queue} ->
-        s = update_in s.pubsub_clients, fn(clients) ->
-          Map.update(clients, channel, [receiver], &[receiver|&1])
-        end
-
-        if other_channels != [] do
-          new_queue = :queue.in_r({:subscribe, other_channels, receiver}, new_queue)
-        end
-
-        send receiver, {:redix_pubsub, :psubscribe, channel}
-
-        %{s | queue: new_queue}
-      _ ->
-        raise "oops"
+    {{:value, {:psubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update(clients, channel, [receiver], &[receiver|&1])
     end
+
+    send receiver, {:redix_pubsub, :psubscribe, channel}
+
+    %{s | queue: new_queue}
   end
 
   defp new_pubsub_msg(s, ["unsubscribe", channel, _count]) do
-    case :queue.out(s.queue) do
-      {{:value, {:unsubscribe, [^channel|other_channels], receiver}}, new_queue} ->
-        s = update_in s.pubsub_clients, fn(clients) ->
-          Map.update!(clients, channel, &List.delete(&1, receiver))
-        end
-
-        if other_channels != [] do
-          new_queue = :queue.in_r({:unsubscribe, other_channels, receiver}, new_queue)
-        end
-
-        send receiver, {:redix_pubsub, :unsubscribe, channel}
-
-        %{s | queue: new_queue}
-      _ ->
-        raise "oops"
+    {{:value, {:unsubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update!(clients, channel, &List.delete(&1, receiver))
     end
+
+    send receiver, {:redix_pubsub, :unsubscribe, channel}
+
+    %{s | queue: new_queue}
   end
 
   defp new_pubsub_msg(s, ["punsubscribe", channel, _count]) do
-    case :queue.out(s.queue) do
-      {{:value, {:punsubscribe, [^channel|other_channels], receiver}}, new_queue} ->
-        s = update_in s.pubsub_clients, fn(clients) ->
-          Map.update!(clients, channel, &List.delete(&1, receiver))
-        end
-
-        if other_channels != [] do
-          new_queue = :queue.in_r({:punsubscribe, other_channels, receiver}, new_queue)
-        end
-
-        send receiver, {:redix_pubsub, :punsubscribe, channel}
-
-        %{s | queue: new_queue}
-      _ ->
-        raise "oops"
+    {{:value, {:punsubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update!(clients, channel, &List.delete(&1, receiver))
     end
+
+    send receiver, {:redix_pubsub, :punsubscribe, channel}
+
+    %{s | queue: new_queue}
   end
 
   defp send_noreply(%{socket: socket} = s, data) do
@@ -285,6 +261,10 @@ defmodule Redix.Connection do
   end
 
   # Enqueues `val` in the state.
+  defp enqueue(%{queue: queue} = s, vals) when is_list(vals) do
+    %{s | queue: :queue.join(queue, :queue.from_list(vals))}
+  end
+
   defp enqueue(%{queue: queue} = s, val) do
     %{s | queue: :queue.in(val, queue)}
   end
