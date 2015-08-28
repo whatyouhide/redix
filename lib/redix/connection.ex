@@ -97,11 +97,11 @@ defmodule Redix.Connection do
   end
 
   def handle_call({op, _channels, _receiver}, _from, %{pubsub: false} = s)
-      when op in [:pubsub_unsubscribe, :pubsub_punsubscribe] do
+      when op in [:unsubscribe, :punsubscribe] do
     {:reply, {:error, :not_pubsub_mode}, s}
   end
 
-  def handle_call({:pubsub_subscribe, channels, receiver}, _from, s) do
+  def handle_call({:subscribe, channels, receiver}, _from, s) do
     subscriptions = Enum.map(channels, fn(ch) -> {:subscribe, ch, receiver} end)
 
     s
@@ -110,7 +110,7 @@ defmodule Redix.Connection do
     |> send_reply(Protocol.pack(["SUBSCRIBE"|channels]), :ok)
   end
 
-  def handle_call({:pubsub_unsubscribe, channels, receiver}, _from, s) do
+  def handle_call({:unsubscribe, channels, receiver}, _from, s) do
     unsubscriptions = Enum.map(channels, fn(ch) -> {:unsubscribe, ch, receiver} end)
 
     s
@@ -118,7 +118,7 @@ defmodule Redix.Connection do
     |> send_reply(Protocol.pack(["UNSUBSCRIBE"|channels]), :ok)
   end
 
-  def handle_call({:pubsub_psubscribe, channels, receiver}, _from, s) do
+  def handle_call({:psubscribe, channels, receiver}, _from, s) do
     subscriptions = Enum.map(channels, fn(ch) -> {:psubscribe, ch, receiver} end)
 
     s
@@ -127,7 +127,7 @@ defmodule Redix.Connection do
     |> send_reply(Protocol.pack(["PSUBSCRIBE"|channels]), :ok)
   end
 
-  def handle_call({:pubsub_punsubscribe, channels, receiver}, _from, s) do
+  def handle_call({:punsubscribe, channels, receiver}, _from, s) do
     unsubscriptions = Enum.map(channels, fn(ch) -> {:punsubscribe, ch, receiver} end)
 
     s
