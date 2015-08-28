@@ -96,45 +96,50 @@ defmodule Redix.Connection do
     |> send_noreply(Enum.map(commands, &Protocol.pack/1))
   end
 
-  @doc false
-  def handle_cast(operation, s)
-
-  def handle_cast(:stop, s) do
-    {:disconnect, :stop, s}
+  def handle_call({op, _channels, _receiver}, _from, %{pubsub: false} = s)
+      when op in [:pubsub_unsubscribe, :pubsub_punsubscribe] do
+    {:reply, {:error, :not_pubsub_mode}, s}
   end
 
-  def handle_cast({:pubsub_subscribe, channels, receiver}, s) do
+  def handle_call({:pubsub_subscribe, channels, receiver}, _from, s) do
     subscriptions = Enum.map(channels, fn(ch) -> {:subscribe, ch, receiver} end)
 
     s
     |> Map.put(:pubsub, true)
     |> enqueue(subscriptions)
-    |> send_noreply(Protocol.pack(["SUBSCRIBE"|channels]))
+    |> send_reply(Protocol.pack(["SUBSCRIBE"|channels]), :ok)
   end
 
-  def handle_cast({:pubsub_unsubscribe, channels, receiver}, s) do
+  def handle_call({:pubsub_unsubscribe, channels, receiver}, _from, s) do
     unsubscriptions = Enum.map(channels, fn(ch) -> {:unsubscribe, ch, receiver} end)
 
     s
     |> enqueue(unsubscriptions)
-    |> send_noreply(Protocol.pack(["UNSUBSCRIBE"|channels]))
+    |> send_reply(Protocol.pack(["UNSUBSCRIBE"|channels]), :ok)
   end
 
-  def handle_cast({:pubsub_psubscribe, channels, receiver}, %{pubsub: _} = s) do
+  def handle_call({:pubsub_psubscribe, channels, receiver}, _from, s) do
     subscriptions = Enum.map(channels, fn(ch) -> {:psubscribe, ch, receiver} end)
 
     s
     |> Map.put(:pubsub, true)
     |> enqueue(subscriptions)
-    |> send_noreply(Protocol.pack(["PSUBSCRIBE"|channels]))
+    |> send_reply(Protocol.pack(["PSUBSCRIBE"|channels]), :ok)
   end
 
-  def handle_cast({:pubsub_punsubscribe, channels, receiver}, s) do
+  def handle_call({:pubsub_punsubscribe, channels, receiver}, _from, s) do
     unsubscriptions = Enum.map(channels, fn(ch) -> {:punsubscribe, ch, receiver} end)
 
     s
     |> enqueue(unsubscriptions)
-    |> send_noreply(Protocol.pack(["PUNSUBSCRIBE"|channels]))
+    |> send_reply(Protocol.pack(["PUNSUBSCRIBE"|channels]), :ok)
+  end
+
+  @doc false
+  def handle_cast(operation, s)
+
+  def handle_cast(:stop, s) do
+    {:disconnect, :stop, s}
   end
 
   @doc false
@@ -255,6 +260,15 @@ defmodule Redix.Connection do
     case :gen_tcp.send(socket, data) do
       :ok ->
         {:noreply, s}
+      {:error, _reason} = error ->
+        {:disconnect, error, s}
+    end
+  end
+
+  defp send_reply(%{socket: socket} = s, data, reply) do
+    case :gen_tcp.send(socket, data) do
+      :ok ->
+        {:reply, reply, s}
       {:error, _reason} = error ->
         {:disconnect, error, s}
     end

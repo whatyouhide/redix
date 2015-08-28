@@ -58,7 +58,7 @@ defmodule RedixTest do
     silence_log fn ->
       Process.flag :trap_exit, true
       assert {:ok, pid} = Redix.start_link host: "nonexistent"
-      assert_receive {:EXIT, ^pid, :nxdomain}, 500
+      assert_receive {:EXIT, ^pid, :nxdomain}, 1000
     end
   end
 
@@ -375,5 +375,22 @@ defmodule RedixTest do
 
     refute_receive {:redix_pubsub, :pmessage, {"foo*", "foo_x"}, "foo_x"}
     assert_receive {:redix_pubsub, :pmessage, {"ba?", "baz"}, "baz"}
+  end
+
+  test "pubsub: once you (p)subscribe, you go in pubsub mode (with subscribe/3)", %{conn: c} do
+    assert :ok = Redix.subscribe(c, "foo", self())
+    assert_receive {:redix_pubsub, :subscribe, "foo"}
+    assert Redix.command(c, ["PING"]) == {:error, :pubsub_mode}
+  end
+
+  test "pubsub: once you (p)subscribe, you go in pubsub mode (with psubscribe/3)", %{conn: c} do
+    assert :ok = Redix.psubscribe(c, "fo*", self())
+    assert_receive {:redix_pubsub, :psubscribe, "fo*"}
+    assert Redix.command(c, ["PING"]) == {:error, :pubsub_mode}
+  end
+
+  test "pubsub: you can't unsubscribe if you're not in pubsub mode", %{conn: c} do
+    assert Redix.unsubscribe(c, "foo", self()) == {:error, :not_pubsub_mode}
+    assert Redix.punsubscribe(c, "fo*", self()) == {:error, :not_pubsub_mode}
   end
 end
