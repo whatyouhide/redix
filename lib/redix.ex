@@ -224,7 +224,14 @@ defmodule Redix do
     {:ok, Redix.Protocol.redis_value} |
     {:error, atom | Redix.Error.t}
   def command(conn, args, opts \\ []) do
-    Connection.call(conn, {:command, args}, opts[:timeout] || @default_timeout)
+    case pipeline(conn, [args], opts) do
+      {:ok, [%Redix.Error{} = error]} ->
+        {:error, error}
+      {:ok, [resp]} ->
+        {:ok, resp}
+      o ->
+        o
+    end
   end
 
   @doc """
@@ -302,7 +309,7 @@ defmodule Redix do
     {:ok, [Redix.Protocol.redis_value]} |
     {:error, atom}
   def pipeline(conn, commands, opts \\ []) do
-    Connection.call(conn, {:pipeline, commands}, opts[:timeout] || @default_timeout)
+    Connection.call(conn, {:commands, commands}, opts[:timeout] || @default_timeout)
   end
 
   @doc """

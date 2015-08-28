@@ -96,9 +96,13 @@ defmodule Redix.Protocol do
 
   """
   @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
-  def parse_multi(data, n) do
-    take_n_elems(data, n, [])
-  end
+  def parse_multi(data, nelems)
+
+  # We treat the case when we have just one element to parse differently as it's
+  # a very common case since single commands are treated as pipelines with just
+  # one command in them.
+  def parse_multi(data, 1), do: parse(data)
+  def parse_multi(data, n), do: take_n_elems(data, n, [])
 
   defp parse_simple_string(data) do
     until_crlf(data)

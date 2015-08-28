@@ -63,7 +63,8 @@ defmodule Redix.Connection do
 
     queue
     |> :queue.to_list
-    |> Stream.map(&extract_client_from_queued_item/1)
+    |> Stream.filter(&match?({:commands, _, _}, &1))
+    |> Stream.map(fn({:commands, from, _}) -> from end)
     |> Enum.map(&Connection.reply(&1, error))
 
     # Backoff with 0 to churn through all the commands in the mailbox before
@@ -79,23 +80,13 @@ defmodule Redix.Connection do
     {:reply, {:error, :closed}, s}
   end
 
-  def handle_call({:command, _args}, _from, %{pubsub: true} = s) do
+  def handle_call({:commands, _commands}, _from, %{pubsub: true} = s) do
     {:reply, {:error, :pubsub_mode}, s}
   end
 
-  def handle_call({:command, args}, from, s) do
+  def handle_call({:commands, commands}, from, s) do
     s
-    |> enqueue({:command, from})
-    |> send_noreply(Protocol.pack(args))
-  end
-
-  def handle_call({:pipeline, _args}, _from, %{pubsub: true} = s) do
-    {:reply, {:error, :pubsub_mode}, s}
-  end
-
-  def handle_call({:pipeline, commands}, from, s) do
-    s
-    |> enqueue({:pipeline, from, length(commands)})
+    |> enqueue({:commands, from, length(commands)})
     |> send_noreply(Enum.map(commands, &Protocol.pack/1))
   end
 
@@ -173,9 +164,9 @@ defmodule Redix.Connection do
   end
 
   defp new_data(%{pubsub: false} = s, data) do
-    {from, parser, new_queue} = dequeue(s)
+    {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(s.queue)
 
-    case parser.(data) do
+    case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
         s = %{s | queue: new_queue}
@@ -192,17 +183,6 @@ defmodule Redix.Connection do
         new_data(s, rest)
       {:error, :incomplete} ->
         %{s | tail: data}
-    end
-  end
-
-  defp dequeue(s) do
-    case :queue.out(s.queue) do
-      {{:value, {:command, from}}, new_queue} ->
-        {from, &Protocol.parse/1, new_queue}
-      {{:value, {:pipeline, from, ncommands}}, new_queue} ->
-        {from, &Protocol.parse_multi(&1, ncommands), new_queue}
-      {:empty, _} ->
-        raise "still got data but the queue is empty"
     end
   end
 
@@ -303,9 +283,6 @@ defmodule Redix.Connection do
     buffer = buffer |> max(sndbuf) |> max(recbuf)
     :ok = :inet.setopts(socket, [buffer: buffer])
   end
-
-  defp extract_client_from_queued_item({:command, from}), do: from
-  defp extract_client_from_queued_item({:pipeline, from, _}), do: from
 
   defp format_resp(%Redix.Error{} = err), do: {:error, err}
   defp format_resp(resp), do: {:ok, resp}
