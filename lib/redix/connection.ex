@@ -4,7 +4,10 @@ defmodule Redix.Connection do
   use Connection
 
   alias Redix.Protocol
+  alias Redix.Connection.Auth
   require Logger
+
+  @type state :: %{}
 
   @initial_state %{
     socket: nil,
@@ -36,7 +39,7 @@ defmodule Redix.Connection do
     case :gen_tcp.connect(host, port, socket_opts, timeout) do
       {:ok, socket} ->
         setup_socket_buffers(socket)
-        auth_and_select_db(%{s | socket: socket, reconnection_attempts: 0})
+        Auth.auth_and_select_db(%{s | socket: socket, reconnection_attempts: 0})
       {:error, reason} ->
         Logger.error "Error connecting to Redis (#{host_for_logging(s)}): #{inspect reason}"
         handle_connection_error(s, info, reason)
@@ -150,7 +153,7 @@ defmodule Redix.Connection do
   def handle_info(msg, s)
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
-    reactivate_socket(s)
+    :ok = :inet.setopts(socket, active: :once)
     s = new_data(s, s.tail <> data)
     {:noreply, s}
   end
@@ -298,11 +301,6 @@ defmodule Redix.Connection do
     {host, port, socket_opts, timeout}
   end
 
-  # Reactivates the socket with `active: :once`.
-  defp reactivate_socket(%{socket: socket} = _s) do
-    :ok = :inet.setopts(socket, active: :once)
-  end
-
   # Setups the `:buffer` option of the given socket.
   defp setup_socket_buffers(socket) do
     {:ok, [sndbuf: sndbuf, recbuf: recbuf, buffer: buffer]} =
@@ -317,76 +315,6 @@ defmodule Redix.Connection do
 
   defp format_resp(%Redix.Error{} = err), do: {:error, err}
   defp format_resp(resp), do: {:ok, resp}
-
-  defp auth_and_select_db(s) do
-    case auth(s, s.opts[:password]) do
-      {:ok, s} ->
-        case select_db(s, s.opts[:database]) do
-          {:ok, s} ->
-            reactivate_socket(s)
-            {:ok, s}
-          o ->
-            o
-        end
-      o ->
-        o
-    end
-  end
-
-  defp auth(s, nil) do
-    {:ok, s}
-  end
-
-  defp auth(%{socket: socket} = s, password) when is_binary(password) do
-    case :gen_tcp.send(socket, Protocol.pack(["AUTH", password])) do
-      :ok ->
-        case wait_for_response(s) do
-          {:ok, "OK", s} ->
-            {:ok, s}
-          {:ok, error, s} ->
-            {:stop, error, s}
-          {:error, reason} ->
-            {:stop, reason, s}
-        end
-      {:error, reason} ->
-        {:stop, reason, s}
-    end
-  end
-
-  defp select_db(s, nil) do
-    {:ok, s}
-  end
-
-  defp select_db(%{socket: socket} = s, db) do
-    case :gen_tcp.send(socket, Protocol.pack(["SELECT", db])) do
-      :ok ->
-        case wait_for_response(s) do
-          {:ok, "OK", s} ->
-            {:ok, s}
-          {:ok, error, s} ->
-            {:stop, error, s}
-          {:error, reason} ->
-            {:stop, reason, s}
-        end
-      {:error, reason} ->
-        {:stop, reason, s}
-    end
-  end
-
-  defp wait_for_response(%{socket: socket} = s) do
-    case :gen_tcp.recv(socket, 0) do
-      {:ok, data} ->
-        data = s.tail <> data
-        case Protocol.parse(data) do
-          {:ok, value, rest} ->
-            {:ok, value, %{s | tail: rest}}
-          {:error, :incomplete} ->
-            wait_for_response(%{s | tail: data})
-        end
-      {:error, _} = err ->
-        err
-    end
-  end
 
   defp host_for_logging(%{opts: opts} = _s) do
     "#{opts[:host]}:#{opts[:port]}"
