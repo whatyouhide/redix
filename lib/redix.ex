@@ -153,7 +153,8 @@ defmodule Redix do
   def start_link(opts) do
     {_redis_opts, connection_opts} = Keyword.split(opts, @redis_opts)
     opts = merge_with_default_opts(opts)
-    Connection.start_link(Redix.Connection, opts, connection_opts)
+    {pubsub?, opts} = Keyword.pop(opts, :pubsub, false)
+    Connection.start_link(Redix.Connection, %{opts: opts, pubsub: pubsub?}, connection_opts)
   end
 
   @doc """
@@ -342,6 +343,26 @@ defmodule Redix do
       {:error, error} ->
         raise Redix.ConnectionError, error
     end
+  end
+
+  def subscribe(conn, channels, recipient) do
+    Connection.call(conn, {:subscribe, List.wrap(channels), recipient})
+  end
+
+  def psubscribe(conn, patterns, recipient) do
+    Connection.call(conn, {:psubscribe, List.wrap(patterns), recipient})
+  end
+
+  def unsubscribe(conn, channels, recipient) do
+    Connection.call(conn, {:unsubscribe, List.wrap(channels), recipient})
+  end
+
+  def punsubscribe(conn, patterns, recipient) do
+    Connection.call(conn, {:punsubscribe, List.wrap(patterns), recipient})
+  end
+
+  def pubsub?(conn, opts \\ []) do
+    Connection.call(conn, :pubsub?, opts[:timeout] || @default_timeout)
   end
 
   defp merge_with_default_opts(opts) do

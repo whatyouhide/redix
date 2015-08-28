@@ -12,6 +12,8 @@ defmodule Redix.Connection do
     opts: nil,
     queue: :queue.new,
     reconnection_attempts: 0,
+    pubsub: false,
+    pubsub_clients: %{},
   }
 
   @default_timeout 5000
@@ -21,8 +23,8 @@ defmodule Redix.Connection do
   ## Callbacks
 
   @doc false
-  def init(opts) do
-    {:connect, :init, Dict.merge(@initial_state, opts: opts)}
+  def init(s) do
+    {:connect, :init, Dict.merge(@initial_state, s)}
   end
 
   @doc false
@@ -74,16 +76,67 @@ defmodule Redix.Connection do
     {:reply, {:error, :closed}, s}
   end
 
+  def handle_call({:command, _args}, _from, %{pubsub: true} = s) do
+    {:reply, {:error, :pubsub_mode}, s}
+  end
+
   def handle_call({:command, args}, from, s) do
     s
     |> enqueue({:command, from})
     |> send_noreply(Protocol.pack(args))
   end
 
+  def handle_call({:pipeline, _args}, _from, %{pubsub: true} = s) do
+    {:reply, {:error, :pubsub_mode}, s}
+  end
+
   def handle_call({:pipeline, commands}, from, s) do
     s
     |> enqueue({:pipeline, from, length(commands)})
     |> send_noreply(Enum.map(commands, &Protocol.pack/1))
+  end
+
+  def handle_call({op, _channels, _receiver}, _from, %{pubsub: false} = s)
+      when op in [:unsubscribe, :punsubscribe] do
+    {:reply, {:error, :not_pubsub_mode}, s}
+  end
+
+  def handle_call({:subscribe, channels, receiver}, _from, s) do
+    subscriptions = Enum.map(channels, fn(ch) -> {:subscribe, ch, receiver} end)
+
+    s
+    |> Map.put(:pubsub, true)
+    |> enqueue(subscriptions)
+    |> send_reply(Protocol.pack(["SUBSCRIBE"|channels]), :ok)
+  end
+
+  def handle_call({:unsubscribe, channels, receiver}, _from, s) do
+    unsubscriptions = Enum.map(channels, fn(ch) -> {:unsubscribe, ch, receiver} end)
+
+    s
+    |> enqueue(unsubscriptions)
+    |> send_reply(Protocol.pack(["UNSUBSCRIBE"|channels]), :ok)
+  end
+
+  def handle_call({:psubscribe, channels, receiver}, _from, s) do
+    subscriptions = Enum.map(channels, fn(ch) -> {:psubscribe, ch, receiver} end)
+
+    s
+    |> Map.put(:pubsub, true)
+    |> enqueue(subscriptions)
+    |> send_reply(Protocol.pack(["PSUBSCRIBE"|channels]), :ok)
+  end
+
+  def handle_call({:punsubscribe, channels, receiver}, _from, s) do
+    unsubscriptions = Enum.map(channels, fn(ch) -> {:punsubscribe, ch, receiver} end)
+
+    s
+    |> enqueue(unsubscriptions)
+    |> send_reply(Protocol.pack(["PUNSUBSCRIBE"|channels]), :ok)
+  end
+
+  def handle_call(:pubsub?, _from, s) do
+    {:reply, s.pubsub, s}
   end
 
   @doc false
@@ -116,13 +169,23 @@ defmodule Redix.Connection do
     %{s | tail: <<>>}
   end
 
-  defp new_data(s, data) do
+  defp new_data(%{pubsub: false} = s, data) do
     {from, parser, new_queue} = dequeue(s)
 
     case parser.(data) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
         s = %{s | queue: new_queue}
+        new_data(s, rest)
+      {:error, :incomplete} ->
+        %{s | tail: data}
+    end
+  end
+
+  defp new_data(%{pubsub: true} = s, data) do
+    case Protocol.parse(data) do
+      {:ok, resp, rest} ->
+        s = new_pubsub_msg(s, resp)
         new_data(s, rest)
       {:error, :incomplete} ->
         %{s | tail: data}
@@ -140,6 +203,63 @@ defmodule Redix.Connection do
     end
   end
 
+  defp new_pubsub_msg(s, ["message", channel, message]) do
+    message = {:redix_pubsub, :message, channel, message}
+    deliver_message(s.pubsub_clients[channel], message)
+    s
+  end
+
+  defp new_pubsub_msg(s, ["pmessage", pattern, channel, message]) do
+    message = {:redix_pubsub, :pmessage, {pattern, channel}, message}
+    deliver_message(s.pubsub_clients[pattern], message)
+    s
+  end
+
+  defp new_pubsub_msg(s, ["subscribe", channel, _count]) do
+    {{:value, {:subscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update(clients, channel, [receiver], &[receiver|&1])
+    end
+
+    message = {:redix_pubsub, :subscribe, channel}
+    send(receiver, message)
+
+    %{s | queue: new_queue}
+  end
+
+  defp new_pubsub_msg(s, ["psubscribe", channel, _count]) do
+    {{:value, {:psubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update(clients, channel, [receiver], &[receiver|&1])
+    end
+
+    send receiver, {:redix_pubsub, :psubscribe, channel}
+
+    %{s | queue: new_queue}
+  end
+
+  defp new_pubsub_msg(s, ["unsubscribe", channel, _count]) do
+    {{:value, {:unsubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update!(clients, channel, &List.delete(&1, receiver))
+    end
+
+    send receiver, {:redix_pubsub, :unsubscribe, channel}
+
+    %{s | queue: new_queue}
+  end
+
+  defp new_pubsub_msg(s, ["punsubscribe", channel, _count]) do
+    {{:value, {:punsubscribe, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
+    s = update_in s.pubsub_clients, fn(clients) ->
+      Map.update!(clients, channel, &List.delete(&1, receiver))
+    end
+
+    send receiver, {:redix_pubsub, :punsubscribe, channel}
+
+    %{s | queue: new_queue}
+  end
+
   defp send_noreply(%{socket: socket} = s, data) do
     case :gen_tcp.send(socket, data) do
       :ok ->
@@ -149,7 +269,20 @@ defmodule Redix.Connection do
     end
   end
 
+  defp send_reply(%{socket: socket} = s, data, reply) do
+    case :gen_tcp.send(socket, data) do
+      :ok ->
+        {:reply, reply, s}
+      {:error, _reason} = error ->
+        {:disconnect, error, s}
+    end
+  end
+
   # Enqueues `val` in the state.
+  defp enqueue(%{queue: queue} = s, vals) when is_list(vals) do
+    %{s | queue: :queue.join(queue, :queue.from_list(vals))}
+  end
+
   defp enqueue(%{queue: queue} = s, val) do
     %{s | queue: :queue.in(val, queue)}
   end
@@ -284,5 +417,9 @@ defmodule Redix.Connection do
   defp attempt_to_reconnect?(%{opts: opts, reconnection_attempts: attempts}) do
     max_attempts = opts[:max_reconnection_attempts]
     is_nil(max_attempts) or (max_attempts > 0 and attempts <= max_attempts)
+  end
+
+  defp deliver_message(recipients, message) do
+    Enum.each recipients, &send(&1, message)
   end
 end

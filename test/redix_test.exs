@@ -58,7 +58,7 @@ defmodule RedixTest do
     silence_log fn ->
       Process.flag :trap_exit, true
       assert {:ok, pid} = Redix.start_link host: "nonexistent"
-      assert_receive {:EXIT, ^pid, :nxdomain}, 500
+      assert_receive {:EXIT, ^pid, :nxdomain}, 1000
     end
   end
 
@@ -270,5 +270,133 @@ defmodule RedixTest do
       Redix.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
       assert_receive {:EXIT, ^c, :tcp_closed}
     end
+  end
+
+  ## PubSub
+
+  test "subscribe/3: one channel", %{conn: c} do
+    assert :ok = Redix.subscribe(c, "foo", self())
+    assert_receive {:redix_pubsub, :subscribe, "foo"}
+  end
+
+  test "subscribe/3: multiple channels", %{conn: c} do
+    assert :ok = Redix.subscribe(c, ["foo", "bar"], self())
+    assert_receive {:redix_pubsub, :subscribe, "foo"}
+    assert_receive {:redix_pubsub, :subscribe, "bar"}
+  end
+
+  test "psubscribe/3: one pattern", %{conn: c} do
+    assert :ok = Redix.psubscribe(c, "foo*", self())
+    assert_receive {:redix_pubsub, :psubscribe, "foo*"}
+  end
+
+  test "psubscribe/3: multiple patterns", %{conn: c} do
+    assert :ok = Redix.psubscribe(c, ["foo*", "bar*"], self())
+    assert_receive {:redix_pubsub, :psubscribe, "foo*"}
+    assert_receive {:redix_pubsub, :psubscribe, "bar*"}
+  end
+
+  test "subscribe/3: sending to a pid", %{conn: c} do
+    task = Task.async fn ->
+      assert_receive {:redix_pubsub, :subscribe, "foo"}
+    end
+
+    assert :ok = Redix.subscribe(c, "foo", task.pid)
+    Task.await(task)
+  end
+
+  test "unsubscribe/3: single channel", %{conn: c} do
+    assert :ok = Redix.subscribe(c, "foo", self())
+    assert :ok = Redix.unsubscribe(c, "foo", self())
+    assert_receive {:redix_pubsub, :unsubscribe, "foo"}
+  end
+
+  test "unsubscribe/3: multiple channels", %{conn: c} do
+    assert :ok = Redix.subscribe(c, ~w(foo bar), self())
+    assert :ok = Redix.unsubscribe(c, ~w(foo bar), self())
+    assert_receive {:redix_pubsub, :unsubscribe, "foo"}
+    assert_receive {:redix_pubsub, :unsubscribe, "bar"}
+  end
+
+  test "punsubscribe/3: single channel", %{conn: c} do
+    assert :ok = Redix.psubscribe(c, "foo*", self())
+    assert :ok = Redix.punsubscribe(c, "foo*", self())
+    assert_receive {:redix_pubsub, :punsubscribe, "foo*"}
+  end
+
+  test "punsubscribe/3: multiple channels", %{conn: c} do
+    assert :ok = Redix.psubscribe(c, ~w(foo* bar?), self())
+    assert :ok = Redix.punsubscribe(c, ~w(foo* bar?), self())
+    assert_receive {:redix_pubsub, :punsubscribe, "foo*"}
+    assert_receive {:redix_pubsub, :punsubscribe, "bar?"}
+  end
+
+  test "pubsub: subscribing to channels and receiving messages", %{conn: c} do
+    {:ok, pubsub} = Redix.start_link
+
+    Redix.subscribe(pubsub, ~w(foo bar), self())
+    assert_receive {:redix_pubsub, :subscribe, "foo"}
+    assert_receive {:redix_pubsub, :subscribe, "bar"}
+
+    Redix.pipeline!(c, [~w(PUBLISH foo foo), ~w(PUBLISH bar bar), ~w(PUBLISH baz baz)])
+    assert_receive {:redix_pubsub, :message, "foo", "foo"}
+    assert_receive {:redix_pubsub, :message, "bar", "bar"}
+    refute_receive {:redix_pubsub, :message, "baz", "baz"}
+
+    Redix.unsubscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, :unsubscribe, "foo"}
+
+    Redix.pipeline!(c, [~w(PUBLISH foo foo), ~w(PUBLISH bar bar)])
+    refute_receive {:redix_pubsub, :message, "foo", "foo"}
+    assert_receive {:redix_pubsub, :message, "bar", "bar"}
+  end
+
+  test "pubsub: subscribing to patterns and receiving messages", %{conn: c} do
+    {:ok, pubsub} = Redix.start_link
+
+    Redix.psubscribe(pubsub, ~w(foo* ba?), self())
+    assert_receive {:redix_pubsub, :psubscribe, "foo*"}
+    assert_receive {:redix_pubsub, :psubscribe, "ba?"}
+
+    Redix.pipeline!(c, [~w(PUBLISH foo_1 foo_1),
+                        ~w(PUBLISH foo_2 foo_2),
+                        ~w(PUBLISH bar bar),
+                        ~w(PUBLISH barfoo barfoo)])
+
+    assert_receive {:redix_pubsub, :pmessage, {"foo*", "foo_1"}, "foo_1"}
+    assert_receive {:redix_pubsub, :pmessage, {"foo*", "foo_2"}, "foo_2"}
+    assert_receive {:redix_pubsub, :pmessage, {"ba?", "bar"}, "bar"}
+    refute_receive {:redix_pubsub, :pmessage, {_, "barfoo"}, "barfoo"}
+
+    Redix.punsubscribe(pubsub, "foo*", self())
+    assert_receive {:redix_pubsub, :punsubscribe, "foo*"}
+
+    Redix.pipeline!(c, [~w(PUBLISH foo_x foo_x), ~w(PUBLISH baz baz)])
+
+    refute_receive {:redix_pubsub, :pmessage, {"foo*", "foo_x"}, "foo_x"}
+    assert_receive {:redix_pubsub, :pmessage, {"ba?", "baz"}, "baz"}
+  end
+
+  test "pubsub: once you (p)subscribe, you go in pubsub mode (with subscribe/3)", %{conn: c} do
+    assert :ok = Redix.subscribe(c, "foo", self())
+    assert_receive {:redix_pubsub, :subscribe, "foo"}
+    assert Redix.command(c, ["PING"]) == {:error, :pubsub_mode}
+  end
+
+  test "pubsub: once you (p)subscribe, you go in pubsub mode (with psubscribe/3)", %{conn: c} do
+    assert :ok = Redix.psubscribe(c, "fo*", self())
+    assert_receive {:redix_pubsub, :psubscribe, "fo*"}
+    assert Redix.command(c, ["PING"]) == {:error, :pubsub_mode}
+  end
+
+  test "pubsub: you can't unsubscribe if you're not in pubsub mode", %{conn: c} do
+    assert Redix.unsubscribe(c, "foo", self()) == {:error, :not_pubsub_mode}
+    assert Redix.punsubscribe(c, "fo*", self()) == {:error, :not_pubsub_mode}
+  end
+
+  test "pubsub?/1: returns true if the conn is in pubsub mode, false otherwise", %{conn: c} do
+    refute Redix.pubsub?(c)
+    Redix.subscribe(c, "foo", self())
+    assert Redix.pubsub?(c)
   end
 end
