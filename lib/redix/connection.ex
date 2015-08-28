@@ -135,6 +135,10 @@ defmodule Redix.Connection do
     |> send_reply(Protocol.pack(["PUNSUBSCRIBE"|channels]), :ok)
   end
 
+  def handle_call(:pubsub?, _from, s) do
+    {:reply, s.pubsub, s}
+  end
+
   @doc false
   def handle_cast(operation, s)
 

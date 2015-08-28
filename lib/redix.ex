@@ -361,6 +361,10 @@ defmodule Redix do
     Connection.call(conn, {:pubsub_punsubscribe, List.wrap(patterns), recipient})
   end
 
+  def pubsub?(conn, opts \\ []) do
+    Connection.call(conn, :pubsub?, opts[:timeout] || @default_timeout)
+  end
+
   defp merge_with_default_opts(opts) do
     Keyword.merge @default_opts, opts, fn
       _k, default_val, nil ->

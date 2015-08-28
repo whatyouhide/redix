@@ -393,4 +393,10 @@ defmodule RedixTest do
     assert Redix.unsubscribe(c, "foo", self()) == {:error, :not_pubsub_mode}
     assert Redix.punsubscribe(c, "fo*", self()) == {:error, :not_pubsub_mode}
   end
+
+  test "pubsub?/1: returns true if the conn is in pubsub mode, false otherwise", %{conn: c} do
+    refute Redix.pubsub?(c)
+    Redix.subscribe(c, "foo", self())
+    assert Redix.pubsub?(c)
+  end
 end
