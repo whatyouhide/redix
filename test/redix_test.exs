@@ -377,6 +377,22 @@ defmodule RedixTest do
     assert_receive {:redix_pubsub, :pmessage, "baz", {"ba?", "baz"}}
   end
 
+  test "pubsub: subscribing multiple times to the same channel has no effects", %{conn: c} do
+    {:ok, pubsub} = Redix.start_link
+
+    Redix.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, :subscribe, "foo", _}
+
+    Redix.subscribe(pubsub, ["foo", "bar"], self())
+    refute_receive {:redix_pubsub, :subscribe, "foo", _} # already subscribed to "foo"
+    assert_receive {:redix_pubsub, :subscribe, "bar", _}
+
+    # Let's be sure we only receive *one* message on the "foo" channel.
+    Redix.command!(c, ~w(PUBLISH foo hello))
+    assert_receive {:redix_pubsub, :message, "hello", _}
+    refute_receive {:redix_pubsub, :message, "hello", _}
+  end
+
   test "pubsub: once you (p)subscribe, you go in pubsub mode (with subscribe/3)", %{conn: c} do
     assert :ok = Redix.subscribe(c, "foo", self())
     assert_receive {:redix_pubsub, :subscribe, "foo", _}

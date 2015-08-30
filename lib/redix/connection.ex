@@ -216,20 +216,22 @@ defmodule Redix.Connection do
 
   defp new_pubsub_subscription(s, subscription_type, channel, count) do
     {{:value, {^subscription_type, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
-    s = update_in s.pubsub_clients, fn(clients) ->
-      Map.update(clients, channel, [receiver], &[receiver|&1])
+    s = update_in s, [:pubsub_clients, channel], fn(set) ->
+      set = set || HashSet.new
+      unless HashSet.member?(set, receiver) do
+        send receiver, {:redix_pubsub, subscription_type, channel, count}
+      end
+
+      (set || HashSet.new) |> HashSet.put(receiver)
     end
 
-    send receiver, {:redix_pubsub, subscription_type, channel, count}
 
     %{s | queue: new_queue}
   end
 
   defp new_pubsub_unsubscription(s, unsubscription_type, channel, count) do
     {{:value, {^unsubscription_type, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
-    s = update_in s.pubsub_clients, fn(clients) ->
-      Map.update!(clients, channel, &List.delete(&1, receiver))
-    end
+    s = update_in s, [:pubsub_clients, channel], &HashSet.delete(&1, receiver)
 
     send receiver, {:redix_pubsub, unsubscription_type, channel, count}
 
@@ -300,7 +302,7 @@ defmodule Redix.Connection do
     do: backoff_or_stop(s, s.opts[:backoff], reason)
 
   # This function is called every time we want to try and reconnect. It returns
-  # {:backoff, ...} if we're under the max number of allowed reconnection
+  # {:backoff, ...} if we're below the max number of allowed reconnection
   # attempts (or if there's no such limit), {:stop, ...} otherwise.
   defp backoff_or_stop(s, backoff, stop_reason) do
     s = update_in(s.reconnection_attempts, &(&1 + 1))
