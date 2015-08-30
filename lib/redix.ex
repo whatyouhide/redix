@@ -15,6 +15,10 @@ defmodule Redix do
   response. This pattern avoids blocking the Redix process for each request (until
   a response arrives), increasing the performance of this driver.
 
+  This pattern is different when using PubSub since no commands can be sent to
+  Redis once PubSub is active. Have a look at the "PubSub" section below to know
+  more about PubSub support in Redix.
+
   ## Reconnections
 
   Redix tries to be as resilient as possible: it tries to recover automatically
@@ -43,9 +47,76 @@ defmodule Redix do
   All this behaviour is implemented using the
   [connection](https://github.com/fishcakez/connection) library (a dependency of
   Redix).
+
+  ## PubSub
+
+  Redix provides an interface for the [Redis PubSub
+  functionality](http://redis.io/topics/pubsub).
+
+  Every Redix connection has two modes of operation: "commands" mode and PubSub
+  mode. "Commands" mode is the one every Redix connection starts with and the
+  one described in the sections above: clients call functions in the `Redix`
+  module, Redix sends the commands to Redis and then sends the responses back to
+  the clients. PubSub mode works differently: clients can only
+  subscribe/unsubscribe from channels, but all communication from Redis to the
+  clients happens via (Elixir) messages.
+
+  The rest of this section will assume the reader knows how PubSub works in
+  Redis and knows the meaning of the Redis commands `SUBSCRIBE`, `PSUBSCRIBE`,
+  `UNSUBSCRIBE`, and `PUNSUBSCRIBE`.
+
+  #### Starting PubSub mode
+
+  We already mentioned that every Redix connection starts in "commands" mode. To
+  move to PubSub mode, we can just call one of `subscribe/4` or `psubscribe/4`.
+  Once in PubSub mode, `command/3` and `pipeline/3` will return `{:error,
+  :pubsub_mode}` as we can't send messages to Redis anymore.
+
+  As a side note, `unsubscribe/4` or `punsubscribe/4` return `{:error,
+  :not_pubsub_mode}` when the Redix connection is in "commands" mode. In both
+  cases, you can use `pubsub?/2` to check if a Redix connection is in PubSub
+  mode or not.
+
+  Once a Redix connection goes into PubSub mode, all communication with the
+  clients is done through messages. The recipients of these messages will be the
+  processes specified at subscription time. The format of *all* PubSub messages
+  delivered by Redix is this:
+
+      {:redix_pubsub, message_type, message_subject, other_data}
+
+  Given this format, it's easy to match on all Redix PubSub messages by just
+  matching on `{:redix_pubsub, _, _, _}`.
+
+  The message subject and the additional data strictly depend of the message type.
+
+  #### List of possible messages
+
+  The following is a list of all possible PubSub messages that Redix sends:
+
+    * `{:redix_pubsub, :subscribe, channel, client_count}` - sent when a client
+      successfully subscribes to a `channel` using `subscribe/4`. `client_count` is the number of
+      clients subscribed to `channel`. Note that when `subscribe/4` is called
+      with more than one channel, a message like this one will be sent for each
+      of the channels in the list.
+    * `{:redix_pubsub, :psubscribe, pattern, client_count}` - exactly like the
+      previous message, except it's sent after calls to `psubscribe/4`.
+    * `{:redix_pubsub, :unsubscribe, channel, client_count}` - sent when a
+      client successfully unsubscribes from a `channel` using `unsubscribe/4`.
+      `client_count` is the number of clients subscribed to `channel`. Note that
+      when `subscribe/4` is called with more than one channel, a message like
+      this one will be sent for each of the channels in the list.
+    * `{:redix_pubsub, :punsubscribes, pattern, client_count}` - exactly like
+      the previous message, except it's sent after calls to `punsubscribe/4`.
+    * `{:redix_pubsub, :message, content, channel}` - sent when a message is
+      published on `channel`. `content` is the content of the message.
+    * `{:redix_pubsub, :pmessage, content, {original_pattern, channel}}` - sent
+      when a message is published on `channel`. `original_pattern` is the
+      pattern that caused this message to be delivered.
+
   """
 
   @type command :: [binary]
+  @type pubsub_recipient :: pid | port | atom | {atom, node}
 
   @default_opts [
     host: 'localhost',
@@ -352,22 +423,111 @@ defmodule Redix do
     end
   end
 
-  def subscribe(conn, channels, recipient) do
-    Connection.call(conn, {:subscribe, List.wrap(channels), recipient})
+  @doc """
+  Subscribes `recipient` to the given channel or list of channels.
+
+  Subscribes `recipient` (which can be anything that can be passed to `send/2`)
+  to `channels`, which can be a single channel as well as a list of channels.
+
+  See the "PubSub" section in the docs for the `Redix` module for more info on
+  PubSub.
+
+  ## Examples
+
+      iex> Redix.subscribe(conn, ["foo", "bar", "baz"], self())
+      :ok
+
+  """
+  @spec subscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
+    :ok | {:error, term}
+  def subscribe(conn, channels, recipient, opts \\ []) do
+    timeout = opts[:timeout] || @default_timeout
+    Connection.call(conn, {:subscribe, List.wrap(channels), recipient}, timeout)
   end
 
-  def psubscribe(conn, patterns, recipient) do
-    Connection.call(conn, {:psubscribe, List.wrap(patterns), recipient})
+  @doc """
+  Subscribes `recipient` to the given pattern or list of patterns.
+
+  Works like `subscribe/3` but subscribing `recipient` to a pattern (or list of
+  patterns) instead of regular channels.
+
+  See the "PubSub" section in the docs for the `Redix` module for more info on
+  PubSub.
+
+  ## Examples
+
+      iex> Redix.psubscribe(conn, "ba*", self())
+      :ok
+
+  """
+  @spec psubscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
+    :ok | {:error, term}
+  def psubscribe(conn, patterns, recipient, opts \\ []) do
+    timeout = opts[:timeout] || @default_timeout
+    Connection.call(conn, {:psubscribe, List.wrap(patterns), recipient}, timeout)
   end
 
-  def unsubscribe(conn, channels, recipient) do
-    Connection.call(conn, {:unsubscribe, List.wrap(channels), recipient})
+  @doc """
+  Unsubscribes `recipient` from the given channel or list of channels.
+
+  This function basically "undoes" what `subscribe/3` does: it unsubscribes
+  `recipient` from the given channel or list of channels.
+
+  See the "PubSub" section in the docs for the `Redix` module for more info on
+  PubSub.
+
+  ## Examples
+
+      iex> Redix.unsubscribe(conn, ["foo", "bar", "baz"], self())
+      :ok
+
+  """
+  @spec unsubscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
+    :ok | {:error, term}
+  def unsubscribe(conn, channels, recipient, opts \\ []) do
+    timeout = opts[:timeout] || @default_timeout
+    Connection.call(conn, {:unsubscribe, List.wrap(channels), recipient}, timeout)
   end
 
-  def punsubscribe(conn, patterns, recipient) do
-    Connection.call(conn, {:punsubscribe, List.wrap(patterns), recipient})
+  @doc """
+  Unsubscribes `recipient` from the given pattern or list of patterns.
+
+  This function basically "undoes" what `psubscribe/3` does: it unsubscribes
+  `recipient` from the given channel or list of channels.
+
+  See the "PubSub" section in the docs for the `Redix` module for more info on
+  PubSub.
+
+  ## Examples
+
+      iex> Redix.punsubscribe(conn, ["foo", "bar", "baz"], self())
+      :ok
+
+  """
+  @spec punsubscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
+    :ok | {:error, term}
+  def punsubscribe(conn, patterns, recipient, opts \\ []) do
+    timeout = opts[:timeout] || @default_timeout
+    Connection.call(conn, {:punsubscribe, List.wrap(patterns), recipient}, timeout)
   end
 
+  @doc """
+  Tells whether `conn` is in PubSub mode.
+
+  Returns `true` if `conn` is in PubSub mode (look at the documentation for the
+  Redix module) to know more about PubSub), `false` otherwise.
+
+  ## Examples
+
+      iex> Redix.pubsub?(conn)
+      false
+      iex> Redix.subscribe(conn, "foo", self())
+      :ok
+      iex> Redix.pubsub?(conn)
+      true
+
+  """
+  @spec pubsub?(GenServer.server, Keyword.t) :: boolean
   def pubsub?(conn, opts \\ []) do
     Connection.call(conn, :pubsub?, opts[:timeout] || @default_timeout)
   end
