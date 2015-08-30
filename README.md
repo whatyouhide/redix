@@ -115,6 +115,41 @@ Redix.command(conn, ~w(EXEC))
 #=> {:ok, [1, 2]}
 ```
 
+#### PubSub
+
+Redix supports the [PubSub functionality][redis-pubsub] provided by Redis.
+
+Clients can subscribe arbitrary processes to channels (or patterns) using
+`Redix.subscribe/4` (or `Redix.psubscribe/4`). After that, the recipient
+processes will receive (Elixir) messages for successful subscriptions, messages
+published on subscribed channels, and successful unsubscriptions (through
+`Redix.unsubscribe/4` or `Redix.punsubscribe/4`).
+
+Here's an example usage of the PubSub functionality:
+
+```elixir
+# We start a regular connection
+{:ok, conn} = Redix.start_link
+
+# By calling subscribe/3 we go into "PubSub mode".
+:ok = Redix.subscribe(conn, "ch1", self())
+
+# We receive a message for each channel we subscribe to. We are receiving it
+# because we passed self() to subscribe/3.
+receive do msg -> msg end
+#=> {:redix_pubsub, :subscribe, "ch1", 1}
+
+# Calling `command/2` or `pipeline/2` in PubSub mode returns an error.
+Redix.command(conn, ["PING"])
+{:error, :pubsub_mode}
+
+{:ok, other_conn} = Redix.start_link
+{:ok, _} = Redix.command(other_conn, ~w(PUBLISH ch1 hello_world))
+
+receive do msg -> msg end
+#=> {:redix_pubsub, :message, "hello_world", "ch1"}
+```
+
 #### Resiliency
 
 Redix takes full advantage of the [connection][connection] library by James
@@ -189,14 +224,14 @@ defmodule Redix.Poolboy do
 end
 ```
 
-This module can be put anywhere, but it is suggested to put it in `/lib/redix/redix_poolboy.ex` 
-or a similar place. After putting the module in place you have to do two more things 
-before it can be used. 
+This module can be put anywhere, but it is suggested to put it in `/lib/redix/redix_poolboy.ex`
+or a similar place. After putting the module in place you have to do two more things
+before it can be used.
 
-The first thing you need to do is to actually tell your application that this supervisor 
-should be started. When making a new project with `mix` you will get a `your_app_name.ex` 
+The first thing you need to do is to actually tell your application that this supervisor
+should be started. When making a new project with `mix` you will get a `your_app_name.ex`
 file placed in the `/lib` folder. In this file you need to add `supervisor(Redix.Poolboy, [])`
-inside the `children = []` block. 
+inside the `children = []` block.
 
 Secondly you need to configure the server url to connect to. This config follows the exact same
 pattern as the configuration described earlier in the readme and must be put under the namespace
@@ -226,6 +261,7 @@ MIT &copy; 2015 Andrea Leopardi, see the [license file](LICENSE.txt).
 
 
 [redis]: http://redis.io
+[redis-pubsub]: http://redis.io/topics/pubsub
 [connection]: https://github.com/fishcakez/connection
 [redo]: https://github.com/heroku/redo
 [eredis]: https://github.com/wooga/eredis
