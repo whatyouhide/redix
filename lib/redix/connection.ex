@@ -164,22 +164,37 @@ defmodule Redix.Connection do
   end
 
   defp new_data(%{pubsub: false} = s, data) do
+    # We're not in pubsub mode, so we're sure there has to be a pending request
+    # in the queue.
     {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(s.queue)
 
+    new_response_to_commands(s, data, from, ncommands, new_queue)
+  end
+
+  defp new_data(%{pubsub: true} = s, data) do
+    # This connection has received a (p)subscribe message and entered pubsub
+    # mode, but there could still be commands waiting for a response in the
+    # queue. If there are, do what new_data does when pubsub is false. If there
+    # aren't, do the pubsub thing.
+    case :queue.out(s.queue) do
+      {{:value, {:commands, from, ncommands}}, new_queue} ->
+        new_response_to_commands(s, data, from, ncommands, new_queue)
+      _ ->
+        case Protocol.parse(data) do
+          {:ok, resp, rest} ->
+            s = new_pubsub_msg(s, resp)
+            new_data(s, rest)
+          {:error, :incomplete} ->
+            %{s | tail: data}
+        end
+    end
+  end
+
+  defp new_response_to_commands(s, data, from, ncommands, new_queue) do
     case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
         s = %{s | queue: new_queue}
-        new_data(s, rest)
-      {:error, :incomplete} ->
-        %{s | tail: data}
-    end
-  end
-
-  defp new_data(%{pubsub: true} = s, data) do
-    case Protocol.parse(data) do
-      {:ok, resp, rest} ->
-        s = new_pubsub_msg(s, resp)
         new_data(s, rest)
       {:error, :incomplete} ->
         %{s | tail: data}
