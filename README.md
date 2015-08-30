@@ -179,75 +179,73 @@ It appears from the benchmarks that:
 For now, I'm quite happy with these benchmarks and hope we can make them even
 better in the future.
 
-## Sample Poolboy usage
+## Using Redix in the Real World™
 
-If you are a beginner and want to use this lib in your project it is maybe not
-apparent how you use it. This is a small walkthrough on how to use the lib
-with a supervisor to get connection pooling wrapped in a public API.
+Redix is "low level" in some ways as it tries to be as close to the Redis API as
+possible and at the same time remain as flexible as it can. A Redix connection
+is basically just a GenServer, so it fits nicely in OTP supervision trees and
+the such. Most of the times you will want to supervise Redix connections and
+often to use a pool of them: for example, if you have a web application that
+uses Redis, you wouldn't want to connect to Redis each time a new request
+arrives to the server.
 
-To start with you need to make a module that implements `Supervisor`.
-```
-defmodule Redix.Poolboy do
+This section provides some sample code to serve as an example for how to
+supervise a pool of Redix connections. Pooling will be done using the very
+famous [poolboy][poolboy] Erlang library.
+
+A simple way to do this is create a supervisor for the poolboy pool that we can
+later start when we start our application. The code for this supervisor would
+look something like this.
+
+```elixir
+defmodule MyApp.RedixPool do
   use Supervisor
 
-  @connection_params Application.get_env(:redix, :poolboy)[:server]
+  @redis_connection_params host: "example.com", password: "secret"
 
   def start_link do
-    Supervisor.start_link(__MODULE__, [], name: __MODULE__)
+    Supervisor.start_link(__MODULE__, [])
   end
 
   def init([]) do
-    worker_pool_options = [
+    pool_opts = [
       name: {:local, :redix_poolboy},
-      worker_module: Redix, #worker process
+      worker_module: Redix,
       size: 10,
-      max_overflow: 5
+      max_overflow: 5,
     ]
 
     children = [
-      :poolboy.child_spec(:redix_poolboy, worker_pool_options, @connection_params)
+      :poolboy.child_spec(:redix_poolboy, pool_opts, [@redis_connection_params])
     ]
 
-    opts = [strategy: :one_for_one, name: __MODULE__]
-
-    supervise(children, opts)
+    supervise(children, strategy: :one_for_one, name: __MODULE__)
   end
-
 
   def command(command) do
-    :poolboy.transaction(:redix_poolboy, fn(conn) -> Redix.command(conn, command) end)
+    :poolboy.transaction(:redix_pool, &Redix.command(&1, command))
   end
 
-  def pipeline(command) do
-      :poolboy.transaction(:redix_poolboy, fn(conn) -> Redix.pipeline(conn, command) end)
-    end
+  def pipeline(commands) do
+    :poolboy.transaction(:redix_pool, &Redix.pipeline(&1, commands))
+  end
 end
 ```
 
-This module can be put anywhere, but it is suggested to put it in `/lib/redix/redix_poolboy.ex`
-or a similar place. After putting the module in place you have to do two more things
-before it can be used.
+Using this is straightforward:
 
-The first thing you need to do is to actually tell your application that this supervisor
-should be started. When making a new project with `mix` you will get a `your_app_name.ex`
-file placed in the `/lib` folder. In this file you need to add `supervisor(Redix.Poolboy, [])`
-inside the `children = []` block.
-
-Secondly you need to configure the server url to connect to. This config follows the exact same
-pattern as the configuration described earlier in the readme and must be put under the namespace
-`:redix, :poolboy`.
-
-Sample config:
-```
-config :redix, :poolboy,
-  server: [host: "localhost", port: 6379]
+```elixir
+MyApp.RedixPool.command(~w(PING)) #=> {:ok, "PONG"}
 ```
 
-Do note that this way of configuring is not compatible with umbrella apps or multiple Redis backends.
-If you need multiple instances, you need to make multiple instances of the supervisor or to move the config
-to the `supervisor()` call.
+Now, all you need to do to is add the `MyApp.RedixPool` supervisor to the
+supervision tree of your application (using something like
+`supervisor(MyApp.RedixPool, [])` in the list of children to supervise).
 
-
+Just as a short aside, note that you could also use `:poolboy.child_spec/3`
+directly in the list of supervised children of your application, without
+creating a dedicated supervisor for the pool of Redix connection. Here, we did
+this for clarity but both strategies make sense in different scenarios.
 
 ## Contributing
 
@@ -266,3 +264,4 @@ MIT &copy; 2015 Andrea Leopardi, see the [license file](LICENSE.txt).
 [redo]: https://github.com/heroku/redo
 [eredis]: https://github.com/wooga/eredis
 [benchfella]: https://github.com/alco/benchfella
+[poolboy]: https://github.com/devinus/poolboy
