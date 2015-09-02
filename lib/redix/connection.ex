@@ -5,6 +5,7 @@ defmodule Redix.Connection do
 
   alias Redix.Protocol
   alias Redix.Connection.Auth
+  alias Redix.Connection.PubSub
   require Logger
 
   @type state :: %{}
@@ -17,6 +18,7 @@ defmodule Redix.Connection do
     reconnection_attempts: 0,
     pubsub: false,
     pubsub_clients: %{},
+    pubsub_waiting_for_subscription_ack: HashSet.new,
   }
 
   @default_timeout 5000
@@ -58,17 +60,14 @@ defmodule Redix.Connection do
     {:stop, :normal, %{s | socket: nil}}
   end
 
-  def disconnect({:error, reason} = error, %{queue: queue} = s) do
+  def disconnect({:error, reason} = _error, %{queue: _queue} = s) do
     Logger.error "Disconnected from Redis (#{host_for_logging(s)}): #{inspect reason}"
 
-    queue
-    |> :queue.to_list
-    |> Stream.filter(&match?({:commands, _, _}, &1))
-    |> Stream.map(fn({:commands, from, _}) -> from end)
-    |> Enum.map(&Connection.reply(&1, error))
+    # TODO take care of all the waiting clients and possibly send messages to
+    # pubsub ones.
 
-    # Backoff with 0 to churn through all the commands in the mailbox before
-    # reconnecting.
+    # Backoff with 0 ms as the backoff time to churn through all the commands in
+    # the mailbox before reconnecting.
     s = %{s | socket: nil, queue: :queue.new, tail: ""}
     backoff_or_stop(s, 0, reason)
   end
@@ -95,38 +94,26 @@ defmodule Redix.Connection do
     {:reply, {:error, :not_pubsub_mode}, s}
   end
 
-  def handle_call({:subscribe, channels, receiver}, _from, s) do
-    subscriptions = Enum.map(channels, fn(ch) -> {:subscribe, ch, receiver} end)
+  def handle_call({op, channels, receiver}, _from, s) when op in [:subscribe, :psubscribe] do
+    {s, channels_to_subscribe_to} = PubSub.subscribe(s, op, channels, receiver)
 
-    s
-    |> Map.put(:pubsub, true)
-    |> enqueue(subscriptions)
-    |> send_reply(Protocol.pack(["SUBSCRIBE"|channels]), :ok)
+    if channels_to_subscribe_to == [] do
+      {:reply, :ok, s}
+    else
+      cmd = [PubSub.op_to_command(op)|channels_to_subscribe_to] |> Protocol.pack
+      send_reply(s, cmd, :ok)
+    end
   end
 
-  def handle_call({:unsubscribe, channels, receiver}, _from, s) do
-    unsubscriptions = Enum.map(channels, fn(ch) -> {:unsubscribe, ch, receiver} end)
+  def handle_call({op, channels, receiver}, _from, s) when op in [:unsubscribe, :punsubscribe] do
+    {s, channels_to_unsubscribe_from} = PubSub.unsubscribe(s, op, channels, receiver)
 
-    s
-    |> enqueue(unsubscriptions)
-    |> send_reply(Protocol.pack(["UNSUBSCRIBE"|channels]), :ok)
-  end
-
-  def handle_call({:psubscribe, channels, receiver}, _from, s) do
-    subscriptions = Enum.map(channels, fn(ch) -> {:psubscribe, ch, receiver} end)
-
-    s
-    |> Map.put(:pubsub, true)
-    |> enqueue(subscriptions)
-    |> send_reply(Protocol.pack(["PSUBSCRIBE"|channels]), :ok)
-  end
-
-  def handle_call({:punsubscribe, channels, receiver}, _from, s) do
-    unsubscriptions = Enum.map(channels, fn(ch) -> {:punsubscribe, ch, receiver} end)
-
-    s
-    |> enqueue(unsubscriptions)
-    |> send_reply(Protocol.pack(["PUNSUBSCRIBE"|channels]), :ok)
+    if channels_to_unsubscribe_from == [] do
+      {:reply, :ok, s}
+    else
+      cmd = [PubSub.op_to_command(op)|channels_to_unsubscribe_from] |> Protocol.pack
+      send_reply(s, cmd, :ok)
+    end
   end
 
   def handle_call(:pubsub?, _from, s) do
@@ -157,6 +144,10 @@ defmodule Redix.Connection do
     {:disconnect, {:error, reason}, s}
   end
 
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, _s) do
+    # TODO
+  end
+
   ## Helper functions
 
   defp new_data(s, <<>>) do
@@ -166,9 +157,8 @@ defmodule Redix.Connection do
   defp new_data(%{pubsub: false} = s, data) do
     # We're not in pubsub mode, so we're sure there has to be a pending request
     # in the queue.
-    {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(s.queue)
-
-    new_response_to_commands(s, data, from, ncommands, new_queue)
+    {{:value, {:commands, _, _} = queue_el}, new_queue} = :queue.out(s.queue)
+    new_response_to_commands(s, data, queue_el, new_queue)
   end
 
   defp new_data(%{pubsub: true} = s, data) do
@@ -177,20 +167,19 @@ defmodule Redix.Connection do
     # queue. If there are, do what new_data does when pubsub is false. If there
     # aren't, do the pubsub thing.
     case :queue.out(s.queue) do
-      {{:value, {:commands, from, ncommands}}, new_queue} ->
-        new_response_to_commands(s, data, from, ncommands, new_queue)
+      {{:value, {:commands, _, _} = queue_el}, new_queue} ->
+        new_response_to_commands(s, data, queue_el, new_queue)
       _ ->
         case Protocol.parse(data) do
           {:ok, resp, rest} ->
-            s = new_pubsub_msg(s, resp)
-            new_data(s, rest)
+            s |> PubSub.handle_message(resp) |> new_data(rest)
           {:error, :incomplete} ->
             %{s | tail: data}
         end
     end
   end
 
-  defp new_response_to_commands(s, data, from, ncommands, new_queue) do
+  defp new_response_to_commands(s, data, {:commands, from, ncommands}, new_queue) do
     case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
@@ -201,84 +190,25 @@ defmodule Redix.Connection do
     end
   end
 
-  defp new_pubsub_msg(s, ["message", channel, message]) do
-    message = {:redix_pubsub, :message, message, channel}
-    deliver_message(s.pubsub_clients[channel], message)
-    s
-  end
-
-  defp new_pubsub_msg(s, ["pmessage", pattern, channel, message]) do
-    message = {:redix_pubsub, :pmessage, message, {pattern, channel}}
-    deliver_message(s.pubsub_clients[pattern], message)
-    s
-  end
-
-  defp new_pubsub_msg(s, ["subscribe", channel, count]) do
-    new_pubsub_subscription(s, :subscribe, channel, count)
-  end
-
-  defp new_pubsub_msg(s, ["psubscribe", pattern, count]) do
-    new_pubsub_subscription(s, :psubscribe, pattern, count)
-  end
-
-  defp new_pubsub_msg(s, ["unsubscribe", channel, count]) do
-    new_pubsub_unsubscription(s, :unsubscribe, channel, count)
-  end
-
-  defp new_pubsub_msg(s, ["punsubscribe", channel, count]) do
-    new_pubsub_unsubscription(s, :punsubscribe, channel, count)
-  end
-
-  defp new_pubsub_subscription(s, subscription_type, channel, count) do
-    {{:value, {^subscription_type, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
-    s = update_in s, [:pubsub_clients, channel], fn(set) ->
-      set = set || HashSet.new
-      unless HashSet.member?(set, receiver) do
-        send receiver, {:redix_pubsub, subscription_type, channel, count}
-      end
-
-      (set || HashSet.new) |> HashSet.put(receiver)
-    end
-
-
-    %{s | queue: new_queue}
-  end
-
-  defp new_pubsub_unsubscription(s, unsubscription_type, channel, count) do
-    {{:value, {^unsubscription_type, ^channel, receiver}}, new_queue} = :queue.out(s.queue)
-    s = update_in s, [:pubsub_clients, channel], &HashSet.delete(&1, receiver)
-
-    send receiver, {:redix_pubsub, unsubscription_type, channel, count}
-
-    %{s | queue: new_queue}
-  end
-
   defp send_noreply(%{socket: socket} = s, data) do
     case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:noreply, s}
-      {:error, _reason} = error ->
-        {:disconnect, error, s}
+      :ok                       -> {:noreply, s}
+      {:error, _reason} = error -> {:disconnect, error, s}
     end
   end
 
   defp send_reply(%{socket: socket} = s, data, reply) do
     case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:reply, reply, s}
-      {:error, _reason} = error ->
-        {:disconnect, error, s}
+      :ok                       -> {:reply, reply, s}
+      {:error, _reason} = error -> {:disconnect, error, s}
     end
   end
 
-  # Enqueues `val` in the state.
-  defp enqueue(%{queue: queue} = s, vals) when is_list(vals) do
-    %{s | queue: :queue.join(queue, :queue.from_list(vals))}
-  end
-
-  defp enqueue(%{queue: queue} = s, val) do
-    %{s | queue: :queue.in(val, queue)}
-  end
+  # Enqueues `val` or `vals` in the state.
+  defp enqueue(%{queue: queue} = s, vals) when is_list(vals),
+    do: %{s | queue: :queue.join(queue, :queue.from_list(vals))}
+  defp enqueue(%{queue: queue} = s, val),
+    do: %{s | queue: :queue.in(val, queue)}
 
   # Extracts the TCP connection options (host, port and socket opts) from the
   # given `opts`.
@@ -332,9 +262,5 @@ defmodule Redix.Connection do
   defp attempt_to_reconnect?(%{opts: opts, reconnection_attempts: attempts}) do
     max_attempts = opts[:max_reconnection_attempts]
     is_nil(max_attempts) or (max_attempts > 0 and attempts <= max_attempts)
-  end
-
-  defp deliver_message(recipients, message) do
-    Enum.each recipients, &send(&1, message)
   end
 end
