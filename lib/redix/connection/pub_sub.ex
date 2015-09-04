@@ -1,16 +1,6 @@
 defmodule Redix.Connection.PubSub do
   @moduledoc false
 
-  @type subscription_op :: :subscribe | :psubscribe
-  @type unsubscription_op :: :unsubscribe | :punsubscribe
-  @type channels :: [binary]
-
-  # Subscribes `recipient` to the given list of `channels` (or
-  # patterns). Returns a tuple with the state as the first element and the list
-  # of channels to actually subscribe to (with (P)SUBSCRIBE) as the second
-  # element.
-  @spec subscribe(Redix.Connection.state, subscription_op, channels, Redix.pubsub_recipient)
-    :: {Redix.Connection.state, channels}
   def subscribe(s, subscription_type, channels, recipient) do
     {s, channels_to_subscribe_to} =
       Enum.reduce(channels, {s, []}, &subscribe_to_channel(&1, &2, subscription_type, recipient))
@@ -19,13 +9,9 @@ defmodule Redix.Connection.PubSub do
     {s, Enum.reverse(channels_to_subscribe_to)}
   end
 
-  # Unsubscribes `recipient` from the given list of `channels` (or patterns).
-  @spec unsubscribe(Redix.Connection.state, unsubscription_op, channels, Redix.pubsub_recipient)
-    :: Redix.Connection.state
   def unsubscribe(s, unsubscription_type, channels, recipient) do
     {s, channels_to_unsubscribe_from} =
       Enum.reduce(channels, {s, []}, &unsubscribe_from_channel(&1, &2, unsubscription_type, recipient))
-
     channels_to_unsubscribe_from = Enum.reverse(channels_to_unsubscribe_from)
 
     channels_to_unsubscribe_from =
@@ -43,13 +29,11 @@ defmodule Redix.Connection.PubSub do
     {s, channels_to_unsubscribe_from}
   end
 
-  # Handles a pubsub message sent by Redis.
-  @spec handle_message(Redix.Connection.state, [binary]) :: Redix.Connection.state
   def handle_message(s, message)
 
   def handle_message(s, ["message", channel, payload]) do
     s.pubsub_clients
-    |> Dict.fetch!(channel)
+    |> Dict.fetch!({:channel, channel})
     |> deliver_payload(msg(:message, payload, channel))
 
     s
@@ -57,7 +41,7 @@ defmodule Redix.Connection.PubSub do
 
   def handle_message(s, ["pmessage", pattern, channel, payload]) do
     s.pubsub_clients
-    |> Dict.fetch!(pattern)
+    |> Dict.fetch!({:pattern, pattern})
     |> deliver_payload(msg(:pmessage, payload, {pattern, channel}))
 
     s
@@ -70,9 +54,11 @@ defmodule Redix.Connection.PubSub do
     # TODO find appropriate metadata to shove in here
     send(receiver, msg(op, channel, nil))
 
+    key = {channel_or_pattern(op), channel}
+
     s
     |> update_in([:pubsub_waiting_for_subscription_ack], &HashSet.delete(&1, channel))
-    |> put_in([:pubsub_clients, channel], init_receivers(receiver))
+    |> put_in([:pubsub_clients, key], init_receivers(receiver))
     |> Map.put(:queue, new_queue)
   end
 
@@ -83,12 +69,13 @@ defmodule Redix.Connection.PubSub do
     # TODO find appropriate metadata to shove in here
     send(receiver, msg(op, channel, nil))
 
+    key = {channel_or_pattern(op), channel}
+
     s
-    |> update_in([:pubsub_clients], &Dict.delete(&1, channel))
+    |> update_in([:pubsub_clients], &Dict.delete(&1, key))
     |> Map.put(:queue, new_queue)
   end
 
-  @spec op_to_command(subscription_op | unsubscription_op) :: binary
   def op_to_command(op) when op in ~w(subscribe psubscribe unsubscribe punsubscribe)a do
     op |> Atom.to_string |> String.upcase
   end
@@ -99,10 +86,11 @@ defmodule Redix.Connection.PubSub do
   end
 
   defp subscribe_to_channel(channel, {s, channels_to_subscribe_to}, subscription_type, receiver) do
-    if receivers = s.pubsub_clients[channel] do
+    key = {channel_or_pattern(subscription_type), channel}
+    if receivers = s.pubsub_clients[key] do
       # TODO find appropriate metadata to shove in here
       send(receiver, msg(subscription_type, channel, nil))
-      s = put_in(s, [:pubsub_clients, channel], HashSet.put(receivers, receiver))
+      s = put_in(s, [:pubsub_clients, key], HashSet.put(receivers, receiver))
       {s, channels_to_subscribe_to}
     else
       # We didn't subscribe to this channel yet: we'll enqueue the subscription
@@ -114,12 +102,13 @@ defmodule Redix.Connection.PubSub do
   end
 
   defp unsubscribe_from_channel(channel, {s, channels_to_unsubscribe_from}, unsubscription_type, receiver) do
-    if receivers = s.pubsub_clients[channel] do
+    key = {channel_or_pattern(unsubscription_type), channel}
+    if receivers = s.pubsub_clients[key] do
       if HashSet.member?(receivers, receiver) do
         # TODO find appropriate metadata to shove in here
         send(receiver, msg(unsubscription_type, channel, nil))
         receivers = HashSet.delete(receivers, receiver)
-        s = put_in(s, [:pubsub_clients, channel], receivers)
+        s = put_in(s, [:pubsub_clients, key], receivers)
       end
 
       if HashSet.size(receivers) == 0 do
@@ -142,4 +131,9 @@ defmodule Redix.Connection.PubSub do
   defp init_receivers(receiver) do
     HashSet.new |> HashSet.put(receiver)
   end
+
+  defp channel_or_pattern(:subscribe), do: :channel
+  defp channel_or_pattern(:unsubscribe), do: :channel
+  defp channel_or_pattern(:psubscribe), do: :pattern
+  defp channel_or_pattern(:punsubscribe), do: :pattern
 end
