@@ -11,13 +11,22 @@ defmodule Redix.Connection do
   @type state :: %{}
 
   @initial_state %{
+    # The TCP socket that holds the connection to Redis
     socket: nil,
+    # The data that couldn't be parsed (yet)
     tail: "",
+    # Options passed when the connection is started
     opts: nil,
+    # A queue of operations waiting for a response
     queue: :queue.new,
+    # The number of times a reconnection has been attempted
     reconnection_attempts: 0,
+    # Whether this connection is in pubsub mode
     pubsub: false,
+    # A %{channel_or_pattern => recipients} map
     pubsub_clients: %{},
+    # A set of channels that some pid subscribed to but we're still waiting for
+    # the subscription confirmation
     pubsub_waiting_for_subscription_ack: HashSet.new,
   }
 
