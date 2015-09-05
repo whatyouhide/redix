@@ -83,6 +83,10 @@ defmodule Redix.PubSub.Connection do
     {:disconnect, {:error, reason}, s}
   end
 
+  def handle_info({:DOWN, _ref, :process, _pid, _reason}, _s) do
+    # TODO handle recipients going down
+  end
+
   ## Helper functions
 
   defp new_data(s, <<>>) do
@@ -99,6 +103,8 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp subscribe(s, op, channels, recipient) do
+    # TODO handle monitoring of `recipient`
+
     {channels_to_subscribe_to, recipients} =
       Enum.flat_map_reduce(channels, s.recipients, &subscribe_to_channel(&1, &2, recipient, op))
 
@@ -116,6 +122,8 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp unsubscribe(s, op, channels, recipient) do
+    # TODO handle demonitoring of `recipient`
+
     {channels_to_unsubscribe_from, recipients} =
       Enum.flat_map_reduce(channels, s.recipients, &unsubscribe_from_channel(&1, &2, recipient, op))
 
