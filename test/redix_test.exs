@@ -69,12 +69,6 @@ defmodule RedixTest do
   end
 
   @tag :no_setup
-  test "start_link/1: nil options don't mess start_link up" do
-    assert {:ok, pid} = Redix.start_link(host: nil, port: nil)
-    assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
-  end
-
-  @tag :no_setup
   test "start_link/2: passing options along with a Redis URI" do
     assert {:ok, _pid} = Redix.start_link("redis://localhost:6379", name: :redix_uri)
     assert (:redix_uri |> Process.whereis |> Process.alive?)

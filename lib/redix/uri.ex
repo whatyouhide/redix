@@ -14,12 +14,12 @@ defmodule Redix.URI do
     ensure_scheme_is_redis!(uri)
     %URI{host: host, port: port} = uri
 
-    [
+    remove_nils([
       host: host,
       port: port,
       password: password(uri),
       database: db(uri),
-    ]
+    ])
   end
 
   defp ensure_scheme_is_redis!(%URI{scheme: "redis"}),
@@ -39,4 +39,8 @@ defmodule Redix.URI do
   defp db(%URI{path: nil}), do: nil
   defp db(%URI{path: "/"}), do: nil
   defp db(%URI{path: "/" <> db}), do: String.to_integer(db)
+
+  defp remove_nils(opts) when is_list(opts) do
+    Enum.reject(opts, &is_nil/1)
+  end
 end
