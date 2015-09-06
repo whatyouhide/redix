@@ -1,4 +1,6 @@
 defmodule Redix.PubSub.Connection do
+  @moduledoc false
+
   use Connection
 
   require Logger

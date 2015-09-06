@@ -51,67 +51,8 @@ defmodule Redix do
   ## PubSub
 
   Redix provides an interface for the [Redis PubSub
-  functionality](http://redis.io/topics/pubsub).
-
-  Every Redix connection has two modes of operation: "commands" mode and PubSub
-  mode. "Commands" mode is the one every Redix connection starts with and the
-  one described in the sections above: clients call functions in the `Redix`
-  module, Redix sends the commands to Redis and then sends the responses back to
-  the clients. PubSub mode works differently: clients can only
-  subscribe/unsubscribe from channels, but all communication from Redis to the
-  clients happens via (Elixir) messages.
-
-  The rest of this section will assume the reader knows how PubSub works in
-  Redis and knows the meaning of the Redis commands `SUBSCRIBE`, `PSUBSCRIBE`,
-  `UNSUBSCRIBE`, and `PUNSUBSCRIBE`.
-
-  #### Starting PubSub mode
-
-  We already mentioned that every Redix connection starts in "commands" mode. To
-  move to PubSub mode, we can just call one of `subscribe/4` or `psubscribe/4`.
-  Once in PubSub mode, `command/3` and `pipeline/3` will return `{:error,
-  :pubsub_mode}` as we can't send messages to Redis anymore.
-
-  As a side note, `unsubscribe/4` or `punsubscribe/4` return `{:error,
-  :not_pubsub_mode}` when the Redix connection is in "commands" mode. In both
-  cases, you can use `pubsub?/2` to check if a Redix connection is in PubSub
-  mode or not.
-
-  Once a Redix connection goes into PubSub mode, all communication with the
-  clients is done through messages. The recipients of these messages will be the
-  processes specified at subscription time. The format of *all* PubSub messages
-  delivered by Redix is this:
-
-      {:redix_pubsub, message_type, message_subject, other_data}
-
-  Given this format, it's easy to match on all Redix PubSub messages by just
-  matching on `{:redix_pubsub, _, _, _}`.
-
-  The message subject and the additional data strictly depend of the message type.
-
-  #### List of possible messages
-
-  The following is a list of all possible PubSub messages that Redix sends:
-
-    * `{:redix_pubsub, :subscribe, channel, client_count}` - sent when a client
-      successfully subscribes to a `channel` using `subscribe/4`. `client_count` is the number of
-      clients subscribed to `channel`. Note that when `subscribe/4` is called
-      with more than one channel, a message like this one will be sent for each
-      of the channels in the list.
-    * `{:redix_pubsub, :psubscribe, pattern, client_count}` - exactly like the
-      previous message, except it's sent after calls to `psubscribe/4`.
-    * `{:redix_pubsub, :unsubscribe, channel, client_count}` - sent when a
-      client successfully unsubscribes from a `channel` using `unsubscribe/4`.
-      `client_count` is the number of clients subscribed to `channel`. Note that
-      when `subscribe/4` is called with more than one channel, a message like
-      this one will be sent for each of the channels in the list.
-    * `{:redix_pubsub, :punsubscribes, pattern, client_count}` - exactly like
-      the previous message, except it's sent after calls to `punsubscribe/4`.
-    * `{:redix_pubsub, :message, content, channel}` - sent when a message is
-      published on `channel`. `content` is the content of the message.
-    * `{:redix_pubsub, :pmessage, content, {original_pattern, channel}}` - sent
-      when a message is published on `channel`. `original_pattern` is the
-      pattern that caused this message to be delivered.
+  functionality](http://redis.io/topics/pubsub). You can read more about it in
+  the documentation for the `Redix.PubSub` module.
 
   """
 
