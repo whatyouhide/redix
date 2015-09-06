@@ -9,7 +9,7 @@ defmodule Redix.PubSub do
     * `PSUBSCRIBE` and `PUNSUBSCRIBE`
     * `PUBLISH`
 
-  #### PubSub connections
+  ## PubSub connections
 
   Redix requires users to start a separate connection for using the PubSub
   functionality: connections started via `Redix.start_link/1` (or
@@ -19,7 +19,15 @@ defmodule Redix.PubSub do
   `Redix.PubSub.start_link/2` cannot be used to send commands, only to
   subscribe/unsubscribe to channels.
 
-  #### Messages
+  ## Reconnections
+
+  PubSub connections are subject to the same reconnection behaviour described in
+  the "reconnections" section of the documentation for the `Redix` module. The
+  only difference is that a PubSub connection notifies subscribed clients when
+  it disconnects and reconnects. The exact form of the messages is described in
+  the "Messages" section.
+
+  ## Messages
 
   All communication with a PubSub connection is done via (Elixir) messages: the
   recipients of these messages will be the processes specified at subscription
@@ -58,6 +66,13 @@ defmodule Redix.PubSub do
     * `{:redix_pubsub, :pmessage, content, {pattern, originating_channel}}` -
       sent when a message is published on `originating_channel` and delivered to
       the recipient because that channels matches `pattern.
+    * `{:redix_pubsub, :disconnected, subscribed_channels, nil}` - sent when a
+      Redix PubSub connection disconnects from Redis. `subscribed_channels` is
+      the list of channels and patterns to which the recipient process was
+      subscribed before the disconnection (elements of this list have the form
+      `{:channel, channel}` or `{:pattern, pattern}`).
+    * `{:redix_pubsub, :reconnected, nil, nil}` - sent when a Redix PubSub
+      connection reconnects after a disconnection.
 
   ## Example
 
