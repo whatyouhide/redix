@@ -39,13 +39,8 @@ defmodule Redix.Connection do
   @doc false
   def disconnect(reason, s)
 
-  def disconnect(:stop, %{socket: nil} = s) do
+  def disconnect(:stop, s) do
     {:stop, :normal, s}
-  end
-
-  def disconnect(:stop, %{socket: socket} = s) do
-    :gen_tcp.close(socket)
-    {:stop, :normal, %{s | socket: nil}}
   end
 
   def disconnect({:error, reason} = _error, %{queue: _queue} = s) do
