@@ -14,6 +14,7 @@ defmodule Redix.PubSub.Connection do
     monitors: HashDict.new,
     reconnection_attempts: 0,
     queue: :queue.new,
+    clients_to_notify_of_reconnection: [],
   }
 
   ## Callbacks
@@ -27,7 +28,17 @@ defmodule Redix.PubSub.Connection do
   def connect(info, s)
 
   def connect(info, s) do
-    ConnectionUtils.connect(info, s)
+    case ConnectionUtils.connect(info, s) do
+      {:ok, s} ->
+        if info == :backoff do
+          Enum.each(s.clients_to_notify_of_reconnection, &send(&1, msg(:reconnected, nil)))
+          s = %{s | clients_to_notify_of_reconnection: []}
+        end
+
+        {:ok, s}
+      o ->
+        o
+    end
   end
 
   @doc false
@@ -44,9 +55,7 @@ defmodule Redix.PubSub.Connection do
 
   def disconnect({:error, reason}, s) do
     Logger.error "Disconnected from Redis (#{ConnectionUtils.host_for_logging(s)}): #{inspect reason}"
-
-    # TODO inform clients of the disconnection.
-
+    s = disconnect_and_notify_clients(s, reason)
     ConnectionUtils.backoff_or_stop(%{s | tail: "", socket: nil}, 0, reason)
   end
 
@@ -279,5 +288,27 @@ defmodule Redix.PubSub.Connection do
     end
 
     s
+  end
+
+  defp disconnect_and_notify_clients(s, error_reason) do
+    # First, demonitor all the monitored clients and reset the state.
+    {clients, s} = get_and_update_in s.monitors, fn(monitors) ->
+      monitors |> Dict.values |> Enum.each(&Process.demonitor/1)
+      {Dict.keys(monitors), HashDict.new}
+    end
+
+    # Then, let's send a message to each of those clients.
+    for client <- clients do
+      subscribed_to = client_subscriptions(s, client)
+      send(client, msg(:disconnected, error_reason, subscribed_to))
+    end
+
+    %{s | clients_to_notify_of_reconnection: clients}
+  end
+
+  defp client_subscriptions(s, client) do
+    s.recipients
+    |> Enum.filter(fn({_, recipients}) -> HashSet.member?(recipients, client) end)
+    |> Enum.map(fn({channel, _recipients}) -> channel end)
   end
 end

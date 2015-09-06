@@ -1,6 +1,7 @@
 defmodule Redix.PubSubTest do
   use ExUnit.Case, async: true
 
+  import Redix.TestHelpers
   alias Redix.PubSub
 
   setup do
@@ -179,6 +180,19 @@ defmodule Redix.PubSubTest do
     Process.exit(pid, :kill)
 
     :timer.sleep(100)
+  end
+
+  test "clients are notified of disconnections", %{conn: ps} do
+    PubSub.subscribe!(ps, "foo", self())
+    assert_receive {:redix_pubsub, :subscribe, "foo", _}
+
+    {:ok, c} = Redix.start_link
+
+    silence_log fn ->
+      Redix.command!(c, ~w(CLIENT KILL TYPE pubsub))
+      assert_receive {:redix_pubsub, :disconnected, _reason, [{:channel, "foo"}]}
+      assert_receive {:redix_pubsub, :reconnected, _, _}, 1000
+    end
   end
 
   # This function just sends back to this process every message it receives.
