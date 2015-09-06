@@ -68,8 +68,12 @@ defmodule Redix.PubSubTest do
     assert :ok = PubSub.subscribe(ps, "foo", self())
     assert_receive {:redix_pubsub, :subscribe, "foo", _}
 
-    # TODO test that self() only receives one message when something is
-    # published on the "foo" channel.
+    {:ok, c} = Redix.start_link
+
+    Redix.command!(c, ~w(PUBLISH foo hello))
+
+    assert_receive {:redix_pubsub, :message, "hello", "foo"}
+    refute_receive {:redix_pubsub, :message, "hello", "foo"}
   end
 
   test "pubsub: subscribing to channels and receiving messages", %{conn: ps} do
@@ -164,11 +168,23 @@ defmodule Redix.PubSubTest do
     assert_receive {^mirror, _}
   end
 
+  test "recipients are monitored and the connection unsubcribes when they go down", %{conn: ps} do
+    parent = self
+    pid = spawn(fn -> message_mirror(parent) end)
+
+    assert :ok = PubSub.subscribe(ps, "foo", pid)
+    assert_receive {^pid, {:redix_pubsub, :subscribe, "foo", _}}
+
+    # Let's just ensure no errors happen when we kill the recipient.
+    Process.exit(pid, :kill)
+
+    :timer.sleep(100)
+  end
+
   # This function just sends back to this process every message it receives.
   defp message_mirror(parent) do
     receive do
-      msg ->
-        send(parent, {self(), msg})
+      msg -> send(parent, {self(), msg})
     end
     message_mirror(parent)
   end

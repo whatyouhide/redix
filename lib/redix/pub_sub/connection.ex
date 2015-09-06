@@ -83,8 +83,8 @@ defmodule Redix.PubSub.Connection do
     {:disconnect, {:error, reason}, s}
   end
 
-  def handle_info({:DOWN, _ref, :process, _pid, _reason}, _s) do
-    # TODO handle recipients going down
+  def handle_info({:DOWN, _ref, :process, pid, _reason}, s) do
+    recipient_terminated(s, pid)
   end
 
   ## Helper functions
@@ -103,7 +103,7 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp subscribe(s, op, channels, recipient) do
-    # TODO handle monitoring of `recipient`
+    s = monitor_recipient(s, recipient)
 
     {channels_to_subscribe_to, recipients} =
       Enum.flat_map_reduce(channels, s.recipients, &subscribe_to_channel(&1, &2, recipient, op))
@@ -122,7 +122,7 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp unsubscribe(s, op, channels, recipient) do
-    # TODO handle demonitoring of `recipient`
+    s = demonitor_recipient(s, recipient)
 
     {channels_to_unsubscribe_from, recipients} =
       Enum.flat_map_reduce(channels, s.recipients, &unsubscribe_from_channel(&1, &2, recipient, op))
@@ -137,6 +137,43 @@ defmodule Redix.PubSub.Connection do
       |> send_reply(Protocol.pack([command|channels_to_unsubscribe_from]), :ok)
     else
       {:reply, :ok, s}
+    end
+  end
+
+  defp recipient_terminated(s, recipient) do
+    {channels_to_unsubscribe_from, recipients} = Enum.flat_map_reduce s.recipients, s.recipients, fn {channel, for_channel}, recipients ->
+      if HashSet.member?(for_channel, recipient) do
+        for_channel = HashSet.delete(for_channel, recipient)
+        if HashSet.size(for_channel) == 0 do
+          {[channel], Dict.delete(recipients, channel)}
+        else
+          {[], Dict.put(recipients, channel, for_channel)}
+        end
+      else
+        {[], recipients}
+      end
+    end
+
+    s = %{s | recipients: recipients}
+
+    {channels, patterns} = Enum.partition(channels_to_unsubscribe_from, &match?({:channel, _}, &1))
+    channels = Enum.map(channels, fn({:channel, channel}) -> channel end)
+    patterns = Enum.map(patterns, fn({:pattern, pattern}) -> pattern end)
+
+    commands = []
+    if channels != [] do
+      commands = [["UNSUBSCRIBE"|channels]|commands]
+      s = enqueue(s, Enum.map(channels, &{:unsubscribe, &1, nil}))
+    end
+    if patterns != [] do
+      commands = [["PUNSUBSCRIBE"|patterns]|commands]
+      s = enqueue(s, Enum.map(patterns, &{:punsubscribe, &1, nil}))
+    end
+
+    if commands != [] do
+      send_noreply(s, Enum.map(commands, &Protocol.pack/1))
+    else
+      {:noreply, s}
     end
   end
 
@@ -185,13 +222,21 @@ defmodule Redix.PubSub.Connection do
 
   defp handle_message(s, [op, channel, _count]) when op in ~w(unsubscribe punsubscribe) do
     op = String.to_atom(op)
-    {{:value, {^op, ^channel, recipient}}, new_queue} = :queue.out(s.queue)
 
-    send(recipient, msg(op, channel))
+    {{:value, {^op, ^channel, recipient}}, new_queue} = :queue.out(s.queue)
 
     s = %{s | queue: new_queue}
 
-    update_in s, [:recipients, {op_to_type(op), channel}], &HashSet.delete(&1, recipient)
+    # If `recipient` is nil it means that this unsubscription came from a
+    # monitored recipient going down: we don't need to send anything to anyone
+    # and we don't need to remove it from the state (it had already been
+    # removed).
+    if is_nil(recipient) do
+      s
+    else
+      send(recipient, msg(op, channel))
+      update_in s, [:recipients, {op_to_type(op), channel}], &HashSet.delete(&1, recipient)
+    end
   end
 
   defp handle_message(s, ["message", channel, payload]) do
@@ -223,6 +268,32 @@ defmodule Redix.PubSub.Connection do
     end
   end
 
+  defp send_noreply(%{socket: socket} = s, data) do
+    case :gen_tcp.send(socket, data) do
+      :ok ->
+        {:noreply, s}
+      {:error, _reason} = err ->
+        {:disconnect, err, s}
+    end
+  end
+
   defp op_to_type(op) when op in [:subscribe, :unsubscribe], do: :channel
   defp op_to_type(op) when op in [:psubscribe, :punsubscribe], do: :pattern
+
+  defp monitor_recipient(s, recipient) do
+    update_in s.monitors[recipient], fn
+      nil ->
+        Process.monitor(recipient)
+      ref when is_reference(ref) ->
+        ref
+    end
+  end
+
+  defp demonitor_recipient(s, recipient) do
+    unless Enum.any?(s.recipients, fn({_, recipients}) -> HashSet.member?(recipients, recipient) end) do
+      s.monitors |> Dict.fetch!(recipient) |> Process.demonitor
+    end
+
+    s
+  end
 end
