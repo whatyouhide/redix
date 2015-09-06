@@ -115,7 +115,7 @@ defmodule Redix.PubSub.Connection do
     if channels_to_subscribe_to != [] do
       s
       |> enqueue(Enum.map(channels_to_subscribe_to, &{op, &1, recipient}))
-      |> send_reply(Protocol.pack([command|channels_to_subscribe_to]), :ok)
+      |> ConnectionUtils.send_reply(Protocol.pack([command|channels_to_subscribe_to]), :ok)
     else
       {:reply, :ok, s}
     end
@@ -134,7 +134,7 @@ defmodule Redix.PubSub.Connection do
     if channels_to_unsubscribe_from != [] do
       s
       |> enqueue(Enum.map(channels_to_unsubscribe_from, &{op, &1, recipient}))
-      |> send_reply(Protocol.pack([command|channels_to_unsubscribe_from]), :ok)
+      |> ConnectionUtils.send_reply(Protocol.pack([command|channels_to_unsubscribe_from]), :ok)
     else
       {:reply, :ok, s}
     end
@@ -171,7 +171,7 @@ defmodule Redix.PubSub.Connection do
     end
 
     if commands != [] do
-      send_noreply(s, Enum.map(commands, &Protocol.pack/1))
+      ConnectionUtils.send_noreply(s, Enum.map(commands, &Protocol.pack/1))
     else
       {:noreply, s}
     end
@@ -257,24 +257,6 @@ defmodule Redix.PubSub.Connection do
 
   defp enqueue(%{queue: queue} = s, elems) when is_list(elems) do
     %{s | queue: :queue.join(queue, :queue.from_list(elems))}
-  end
-
-  defp send_reply(%{socket: socket} = s, data, reply) do
-    case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:reply, reply, s}
-      {:error, _reason} = err ->
-        {:disconnect, err, s}
-    end
-  end
-
-  defp send_noreply(%{socket: socket} = s, data) do
-    case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:noreply, s}
-      {:error, _reason} = err ->
-        {:disconnect, err, s}
-    end
   end
 
   defp op_to_type(op) when op in [:subscribe, :unsubscribe], do: :channel

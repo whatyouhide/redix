@@ -24,6 +24,24 @@ defmodule Redix.ConnectionUtils do
     "#{opts[:host]}:#{opts[:port]}"
   end
 
+  def send_reply(%{socket: socket} = s, data, reply) do
+    case :gen_tcp.send(socket, data) do
+      :ok ->
+        {:reply, reply, s}
+      {:error, _reason} = err ->
+        {:disconnect, err, s}
+    end
+  end
+
+  def send_noreply(%{socket: socket} = s, data) do
+    case :gen_tcp.send(socket, data) do
+      :ok ->
+        {:noreply, s}
+      {:error, _reason} = err ->
+        {:disconnect, err, s}
+    end
+  end
+
   # This function is called every time we want to try and reconnect. It returns
   # {:backoff, ...} if we're below the max number of allowed reconnection
   # attempts (or if there's no such limit), {:stop, ...} otherwise.

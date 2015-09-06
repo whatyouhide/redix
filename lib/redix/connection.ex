@@ -72,7 +72,7 @@ defmodule Redix.Connection do
   def handle_call({:commands, commands}, from, s) do
     s
     |> Map.update!(:queue, &:queue.in({:commands, from, length(commands)}, &1))
-    |> send_noreply(Enum.map(commands, &Protocol.pack/1))
+    |> ConnectionUtils.send_noreply(Enum.map(commands, &Protocol.pack/1))
   end
 
   @doc false
@@ -115,15 +115,6 @@ defmodule Redix.Connection do
         new_data(s, rest)
       {:error, :incomplete} ->
         %{s | tail: data}
-    end
-  end
-
-  defp send_noreply(%{socket: socket} = s, data) do
-    case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:noreply, s}
-      {:error, _reason} = error ->
-        {:disconnect, error, s}
     end
   end
 
