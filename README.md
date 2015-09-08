@@ -119,29 +119,25 @@ Redix.command(conn, ~w(EXEC))
 
 Redix supports the [PubSub functionality][redis-pubsub] provided by Redis.
 
-Clients can subscribe arbitrary processes to channels (or patterns) using
-`Redix.subscribe/4` (or `Redix.psubscribe/4`). After that, the recipient
-processes will receive (Elixir) messages for successful subscriptions, messages
-published on subscribed channels, and successful unsubscriptions (through
-`Redix.unsubscribe/4` or `Redix.punsubscribe/4`).
+PubSub connections are different than regular Redix connections and have to be
+started using `Redix.PubSub.start_link/1-2`. Clients can then subscribe processes to channels (or patterns) using `Redix.PubSub.subscribe/4` (or `Redix.PubSub.psubscribe/4`). After that, recipient processes will receive (Elixir) messages for:
+
+  * successful subscriptions
+  * messages published on subscribed channels or patterns
+  * successful unsubscriptions (`Redix.PubSub.unsubscribe/4` and `Redix.PubSub.punsubscribe/4`)
+  * disconnections and reconnections of the PubSub client
 
 Here's an example usage of the PubSub functionality:
 
 ```elixir
-# We start a regular connection
-{:ok, conn} = Redix.start_link
+{:ok, conn} = Redix.PubSub.start_link
 
-# By calling subscribe/3 we go into "PubSub mode".
-:ok = Redix.subscribe(conn, "ch1", self())
+:ok = Redix.PubSub.subscribe(conn, "ch1", self())
 
 # We receive a message for each channel we subscribe to. We are receiving it
 # because we passed self() to subscribe/3.
 receive do msg -> msg end
 #=> {:redix_pubsub, :subscribe, "ch1", 1}
-
-# Calling `command/2` or `pipeline/2` in PubSub mode returns an error.
-Redix.command(conn, ["PING"])
-{:error, :pubsub_mode}
 
 {:ok, other_conn} = Redix.start_link
 {:ok, _} = Redix.command(other_conn, ~w(PUBLISH ch1 hello_world))
