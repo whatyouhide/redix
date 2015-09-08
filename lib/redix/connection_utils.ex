@@ -13,6 +13,7 @@ defmodule Redix.ConnectionUtils do
 
   @default_timeout 5000
 
+  @spec connect(term, Redix.Connection.state) :: term
   def connect(info, %{opts: opts} = s) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
@@ -26,10 +27,14 @@ defmodule Redix.ConnectionUtils do
     end
   end
 
+  @spec host_for_logging(Redix.Connection.state) :: String.t
   def host_for_logging(%{opts: opts} = _s) do
     "#{opts[:host]}:#{opts[:port]}"
   end
 
+  @spec send_reply(Redix.Connection.state, iodata, term) ::
+    {:reply, term, Redix.Connection.state} |
+    {:disconnect, term, Redix.Connection.state}
   def send_reply(%{socket: socket} = s, data, reply) do
     case :gen_tcp.send(socket, data) do
       :ok ->
@@ -39,6 +44,9 @@ defmodule Redix.ConnectionUtils do
     end
   end
 
+  @spec send_noreply(Redix.Connection.state, iodata) ::
+    {:noreply, Redix.Connection.state} |
+    {:disconnect, term, Redix.Connection.state}
   def send_noreply(%{socket: socket} = s, data) do
     case :gen_tcp.send(socket, data) do
       :ok ->
@@ -51,6 +59,9 @@ defmodule Redix.ConnectionUtils do
   # This function is called every time we want to try and reconnect. It returns
   # {:backoff, ...} if we're below the max number of allowed reconnection
   # attempts (or if there's no such limit), {:stop, ...} otherwise.
+  @spec backoff_or_stop(Redix.Connection.state, non_neg_integer, term) ::
+    {:backoff, non_neg_integer, Redix.Connection.state} |
+    {:stop, term, Redix.Connection.state}
   def backoff_or_stop(s, backoff, stop_reason) do
     s = update_in(s.reconnection_attempts, &(&1 + 1))
 
