@@ -212,18 +212,18 @@ defmodule MyApp.RedixPool do
     ]
 
     children = [
-      :poolboy.child_spec(:redix_poolboy, pool_opts, [@redis_connection_params])
+      :poolboy.child_spec(:redix_poolboy, pool_opts, @redis_connection_params)
     ]
 
     supervise(children, strategy: :one_for_one, name: __MODULE__)
   end
 
   def command(command) do
-    :poolboy.transaction(:redix_pool, &Redix.command(&1, command))
+    :poolboy.transaction(:redix_poolboy, &Redix.command(&1, command))
   end
 
   def pipeline(commands) do
-    :poolboy.transaction(:redix_pool, &Redix.pipeline(&1, commands))
+    :poolboy.transaction(:redix_poolboy, &Redix.pipeline(&1, commands))
   end
 end
 ```
