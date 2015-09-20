@@ -120,11 +120,15 @@ Redix.command(conn, ~w(EXEC))
 Redix supports the [PubSub functionality][redis-pubsub] provided by Redis.
 
 PubSub connections are different than regular Redix connections and have to be
-started using `Redix.PubSub.start_link/1-2`. Clients can then subscribe processes to channels (or patterns) using `Redix.PubSub.subscribe/4` (or `Redix.PubSub.psubscribe/4`). After that, recipient processes will receive (Elixir) messages for:
+started using `Redix.PubSub.start_link/1-2`. Clients can then subscribe
+processes to channels (or patterns) using `Redix.PubSub.subscribe/4` (or
+`Redix.PubSub.psubscribe/4`). After that, recipient processes will receive
+(Elixir) messages for:
 
   * successful subscriptions
   * messages published on subscribed channels or patterns
-  * successful unsubscriptions (`Redix.PubSub.unsubscribe/4` and `Redix.PubSub.punsubscribe/4`)
+  * successful unsubscriptions (`Redix.PubSub.unsubscribe/4` and
+    `Redix.PubSub.punsubscribe/4`)
   * disconnections and reconnections of the PubSub client
 
 Here's an example usage of the PubSub functionality:
