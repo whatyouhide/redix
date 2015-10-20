@@ -45,7 +45,7 @@ defmodule Redix.Mixfile do
 
   defp deps do
     [
-      {:connection, "~> 1.0.0-rc.1"},
+      {:connection, "~> 1.0.0"},
       {:dialyze, "~> 0.2", only: :dev},
       {:benchfella, github: "alco/benchfella", only: :bench},
       {:redo, github: "heroku/redo", only: :bench},
