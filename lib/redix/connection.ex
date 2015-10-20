@@ -44,7 +44,7 @@ defmodule Redix.Connection do
   end
 
   def disconnect({:error, reason} = _error, %{queue: _queue} = s) do
-    Logger.error "Disconnected from Redis (#{ConnectionUtils.host_for_logging(s)}): #{inspect reason}"
+    Logger.error "Disconnected from Redis (#{ConnectionUtils.format_host(s)}): #{:inet.format_error(reason)}"
 
     :gen_tcp.close(s.socket)
 
