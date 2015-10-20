@@ -11,6 +11,7 @@ defmodule Redix.TestHelpers do
   def silence_log(fun) do
     Logger.remove_backend :console
     fun.()
+  after
     Logger.add_backend :console, flush: true
   end
 end
