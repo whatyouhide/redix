@@ -117,6 +117,10 @@ defmodule RedixTest do
     assert length(results) == ncommands
   end
 
+  test "pipeline/2: a single command should still return a list of results", %{conn: c} do
+    assert Redix.pipeline(c, [["PING"]]) == {:ok, ["PONG"]}
+  end
+
   test "some commands: APPEND", %{conn: c} do
     assert Redix.command(c, ~w(APPEND to_append hello)) == {:ok, 5}
     assert Redix.command(c, ~w(APPEND to_append world)) == {:ok, 10}
@@ -151,6 +155,12 @@ defmodule RedixTest do
     # Discarding
     assert Redix.command(c, ["DISCARD"]) == {:ok, "OK"}
     assert Redix.command(c, ["GET", "discarding"]) == {:ok, "foo"}
+  end
+
+  test "some commands: MULTI/EXEC always returns a list", %{conn: c} do
+    assert Redix.command(c, ["MULTI"]) == {:ok, "OK"}
+    assert Redix.command(c, ["PING"]) == {:ok, "QUEUED"}
+    assert Redix.command(c, ["EXEC"]) == {:ok, ["PONG"]}
   end
 
   test "some commands: TYPE", %{conn: c} do

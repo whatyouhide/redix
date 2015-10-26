@@ -101,8 +101,16 @@ defmodule Redix.Protocol do
   # We treat the case when we have just one element to parse differently as it's
   # a very common case since single commands are treated as pipelines with just
   # one command in them.
-  def parse_multi(data, 1), do: parse(data)
-  def parse_multi(data, n), do: take_n_elems(data, n, [])
+  def parse_multi(data, 1) do
+    case parse(data) do
+      {:ok, resp, rest} -> {:ok, [resp], rest}
+      o                 -> o
+    end
+  end
+
+  def parse_multi(data, n) do
+    take_n_elems(data, n, [])
+  end
 
   defp parse_simple_string(data) do
     until_crlf(data)
