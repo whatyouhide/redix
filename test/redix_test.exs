@@ -105,6 +105,11 @@ defmodule RedixTest do
     assert Redix.pipeline(c, commands) == {:ok, ["OK", 11, "11"]}
   end
 
+  test "pipeline/2: only one command should still return a list", %{conn: c} do
+    commands = [ ["SET", "pipe", "10"] ]
+    assert Redix.pipeline(c, commands) == {:ok, ["OK"]}
+  end
+
   test "pipeline/2: a lot of commands so that TCP gets stressed", %{conn: c} do
     assert {:ok, "OK"} = Redix.command(c, ~w(SET stress_pipeline foo))
 

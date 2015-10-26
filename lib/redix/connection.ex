@@ -116,7 +116,8 @@ defmodule Redix.Connection do
   end
 
   defp format_resp(%Redix.Error{} = err), do: {:error, err}
-  defp format_resp(resp), do: {:ok, resp}
+  defp format_resp(resp) when is_list(resp), do: {:ok, resp}
+  defp format_resp(resp), do: {:ok, [resp]}
 
   defp reset_state(s) do
     %{s | queue: :queue.new, tail: "", socket: nil}
