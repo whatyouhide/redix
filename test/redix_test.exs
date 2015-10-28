@@ -86,7 +86,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/1: name registration" do
-    assert {:ok, pid} = Redix.start_link(name: :redix_server)
+    assert {:ok, pid} = Redix.start_link([], name: :redix_server)
     assert is_pid(pid)
     assert Process.whereis(:redix_server) == pid
     assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}

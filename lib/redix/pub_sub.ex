@@ -12,11 +12,10 @@ defmodule Redix.PubSub do
   ## PubSub connections
 
   Redix requires users to start a separate connection for using the PubSub
-  functionality: connections started via `Redix.start_link/1` (or
-  `Redix.start_link/2`) cannot be used for PubSub, only for sending regular
-  commands and pipelines of commands. In the same fashion, "PubSub connections"
-  (connections started via `Redix.PubSub.start_link/1` or
-  `Redix.PubSub.start_link/2` cannot be used to send commands, only to
+  functionality: connections started via `Redix.start_link/2` cannot be used for
+  PubSub, only for sending regular commands and pipelines of commands. In the
+  same fashion, "PubSub connections" (connections started via
+  `Redix.PubSub.start_link/2`) cannot be used to send commands, only to
   subscribe/unsubscribe to channels.
 
   ## Reconnections
@@ -111,30 +110,18 @@ defmodule Redix.PubSub do
   Starts a PubSub connection to Redis.
 
   The behaviour of this function and the arguments it takes are exactly the same
-  as in `Redix.start_link/1`; look at its documentation for more information.
+  as in `Redix.start_link/2`; look at its documentation for more information.
   """
-  @spec start_link(Keyword.t | binary) :: GenServer.on_start
-  def start_link(opts_or_uri \\ [])
+  @spec start_link(binary | Keyword.t, Keyword.t) :: GenServer.on_start
+  def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
-  def start_link(uri) when is_binary(uri) do
-    uri |> Redix.URI.opts_from_uri |> start_link
+  def start_link(uri, connection_opts) when is_binary(uri) and is_list(connection_opts) do
+    uri |> Redix.URI.opts_from_uri |> start_link(connection_opts)
   end
 
-  def start_link(opts) when is_list(opts) do
-    opts = Keyword.merge(@default_opts, opts)
-    Connection.start_link(Redix.PubSub.Connection, opts, opts)
-  end
-
-  @doc """
-  Works like `start_link/1` but accepts both a Redis URI and a list of options.
-
-  This function behaves exactly like `Redix.start_link/2` behaves with respect
-  to `Redix.start_link/1`. Read the `Redix.start_link/2` documentation for more
-  information.
-  """
-  @spec start_link(binary, Keyword.t) :: GenServer.on_start
-  def start_link(uri, opts) when is_binary(uri) and is_list(opts) do
-    uri |> Redix.URI.opts_from_uri |> Keyword.merge(opts) |> start_link
+  def start_link(redis_opts, connection_opts) when is_list(redis_opts) and is_list(connection_opts) do
+    redis_opts = Keyword.merge(@default_opts, redis_opts)
+    Connection.start_link(Redix.PubSub.Connection, redis_opts, connection_opts)
   end
 
   @doc """
