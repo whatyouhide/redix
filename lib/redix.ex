@@ -315,7 +315,11 @@ defmodule Redix do
   @spec pipeline(GenServer.server, [command], Keyword.t) ::
     {:ok, [Redix.Protocol.redis_value]} |
     {:error, atom}
-  def pipeline(conn, commands, opts \\ []) do
+  def pipeline(conn, commands, opts \\ [])
+
+  def pipeline(_, [], _), do: {:ok, []}
+
+  def pipeline(conn, commands, opts) do
     Connection.call(conn, {:commands, commands}, opts[:timeout] || @default_timeout)
   end
 

@@ -121,6 +121,10 @@ defmodule RedixTest do
     assert Redix.pipeline(c, [["PING"]]) == {:ok, ["PONG"]}
   end
 
+  test "pipeline/2: no commands should still return an empty list of results", %{conn: c} do
+    assert Redix.pipeline(c, []) == {:ok, []}
+  end
+
   test "some commands: APPEND", %{conn: c} do
     assert Redix.command(c, ~w(APPEND to_append hello)) == {:ok, 5}
     assert Redix.command(c, ~w(APPEND to_append world)) == {:ok, 10}
