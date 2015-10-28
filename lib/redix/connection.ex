@@ -30,95 +30,95 @@ defmodule Redix.Connection do
   end
 
   @doc false
-  def connect(info, s)
+  def connect(info, state)
 
-  def connect(info, s) do
-    ConnectionUtils.connect(info, s)
+  def connect(info, state) do
+    ConnectionUtils.connect(info, state)
   end
 
   @doc false
-  def disconnect(reason, s)
+  def disconnect(reason, state)
 
-  def disconnect(:stop, s) do
-    {:stop, :normal, s}
+  def disconnect(:stop, state) do
+    {:stop, :normal, state}
   end
 
-  def disconnect({:error, reason} = _error, %{queue: _queue} = s) do
-    Logger.error "Disconnected from Redis (#{ConnectionUtils.format_host(s)}): #{:inet.format_error(reason)}"
+  def disconnect({:error, reason} = _error, %{queue: _queue} = state) do
+    Logger.error "Disconnected from Redis (#{ConnectionUtils.format_host(state)}): #{:inet.format_error(reason)}"
 
-    :gen_tcp.close(s.socket)
+    :gen_tcp.close(state.socket)
 
-    for {:commands, from, _} <- :queue.to_list(s.queue) do
+    for {:commands, from, _} <- :queue.to_list(state.queue) do
       Connection.reply(from, {:error, :disconnected})
     end
 
     # Backoff with 0 ms as the backoff time to churn through all the commands in
     # the mailbox before reconnecting.
-    s
+    state
     |> reset_state
     |> ConnectionUtils.backoff_or_stop(0, reason)
   end
 
   @doc false
-  def handle_call(operation, from, s)
+  def handle_call(operation, from, state)
 
-  def handle_call(_operation, _from, %{socket: nil} = s) do
-    {:reply, {:error, :closed}, s}
+  def handle_call(_operation, _from, %{socket: nil} = state) do
+    {:reply, {:error, :closed}, state}
   end
 
-  def handle_call({:commands, commands}, from, s) do
-    s
+  def handle_call({:commands, commands}, from, state) do
+    state
     |> Map.update!(:queue, &:queue.in({:commands, from, length(commands)}, &1))
     |> ConnectionUtils.send_noreply(Enum.map(commands, &Protocol.pack/1))
   end
 
   @doc false
-  def handle_cast(operation, s)
+  def handle_cast(operation, state)
 
-  def handle_cast(:stop, s) do
-    {:disconnect, :stop, s}
+  def handle_cast(:stop, state) do
+    {:disconnect, :stop, state}
   end
 
   @doc false
-  def handle_info(msg, s)
+  def handle_info(msg, state)
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = s) do
+  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     :ok = :inet.setopts(socket, active: :once)
-    s = new_data(s, s.tail <> data)
-    {:noreply, s}
+    state = new_data(state, state.tail <> data)
+    {:noreply, state}
   end
 
-  def handle_info({:tcp_closed, socket}, %{socket: socket} = s) do
-    {:disconnect, {:error, :tcp_closed}, s}
+  def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
+    {:disconnect, {:error, :tcp_closed}, state}
   end
 
-  def handle_info({:tcp_error, socket, reason}, %{socket: socket} = s) do
-    {:disconnect, {:error, reason}, s}
+  def handle_info({:tcp_error, socket, reason}, %{socket: socket} = state) do
+    {:disconnect, {:error, reason}, state}
   end
 
   ## Helper functions
 
-  defp new_data(s, <<>>) do
-    %{s | tail: <<>>}
+  defp new_data(state, <<>>) do
+    %{state | tail: <<>>}
   end
 
-  defp new_data(s, data) do
-    {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(s.queue)
+  defp new_data(state, data) do
+    {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(state.queue)
 
     case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
-        s = %{s | queue: new_queue}
-        new_data(s, rest)
+        state = %{state | queue: new_queue}
+        new_data(state, rest)
       {:error, :incomplete} ->
-        %{s | tail: data}
+        %{state | tail: data}
     end
   end
 
   defp format_resp(%Redix.Error{} = err), do: {:error, err}
   defp format_resp(resp), do: {:ok, resp}
 
-  defp reset_state(s) do
-    %{s | queue: :queue.new, tail: "", socket: nil}
+  defp reset_state(state) do
+    %{state | queue: :queue.new, tail: "", socket: nil}
   end
 end
