@@ -212,10 +212,24 @@ defmodule RedixTest do
     assert Redix.command(c, ~w(INCR errs)) == {:error, %Error{message: msg}}
   end
 
+  test "command/2: passing an empty list returns an error", %{conn: c} do
+    assert Redix.command(c, []) == {:error, :no_command}
+  end
+
   test "pipeline/2: Redis errors in the response", %{conn: c} do
     msg = "ERR value is not an integer or out of range"
     assert {:ok, resp} = Redix.pipeline(c, [~w(SET pipeline_errs foo), ~w(INCR pipeline_errs)])
     assert resp == ["OK", %Error{message: msg}]
+  end
+
+  test "pipeline/2: passing an empty list of commands raises an error", %{conn: c} do
+    msg = "no commands passed to the pipeline"
+    assert_raise Error, msg, fn -> Redix.pipeline(c, []) end
+  end
+
+  test "pipeline/2: passing one or more empty commands returns an error", %{conn: c} do
+    assert Redix.pipeline(c, [[]]) == {:error, :no_command}
+    assert Redix.pipeline(c, [["PING"], [], ["PING"]]) == {:error, :no_command}
   end
 
   test "command!/2: simple commands", %{conn: c} do

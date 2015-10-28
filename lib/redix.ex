@@ -211,6 +211,9 @@ defmodule Redix do
   an error in sending the response or in case the response is a Redis error. In
   the latter case, `reason` will be the error returned by Redis.
 
+  If the given command (`args`) is an empty command (`[]`), `{:error,
+  :no_command}` will be returned.
+
   ## Examples
 
       iex> Redix.command(conn, ["SET", "mykey", "foo"])
@@ -298,6 +301,11 @@ defmodule Redix do
   responsibility to the user. That said, errors other than Redis errors (like
   network errors) always cause the return value to be `{:error, reason}`.
 
+  If `commands` is an empty list (`[]`), then a `Redix.Error` will be raised
+  right away. If any of the commands in `commands` is an empty command (`[]`),
+  `{:error, :no_command}` will be returned (which mirrors the behaviour of
+  `command/3` in case of empty commands).
+
   ## Examples
 
       iex> Redix.pipeline(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
@@ -315,8 +323,18 @@ defmodule Redix do
   @spec pipeline(GenServer.server, [command], Keyword.t) ::
     {:ok, [Redix.Protocol.redis_value]} |
     {:error, atom}
-  def pipeline(conn, commands, opts \\ []) do
-    Connection.call(conn, {:commands, commands}, opts[:timeout] || @default_timeout)
+  def pipeline(conn, commands, opts \\ [])
+
+  def pipeline(_conn, [], _opts) do
+    raise(Redix.Error, "no commands passed to the pipeline")
+  end
+
+  def pipeline(conn, commands, opts) do
+    if Enum.any?(commands, &(&1 == [])) do
+      {:error, :no_command}
+    else
+      Connection.call(conn, {:commands, commands}, opts[:timeout] || @default_timeout)
+    end
   end
 
   @doc """
