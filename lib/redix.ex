@@ -58,9 +58,12 @@ defmodule Redix do
 
   @type command :: [binary]
 
-  @default_opts [
+  @redis_defaults [
     host: 'localhost',
     port: 6379,
+  ]
+
+  @connection_defaults [
     socket_opts: [],
     backoff: 2000,
   ]
@@ -167,8 +170,14 @@ defmodule Redix do
   end
 
   def start_link(redis_opts, connection_opts) when is_list(redis_opts) and is_list(connection_opts) do
-    redis_opts = Keyword.merge(@default_opts, redis_opts)
-    Connection.start_link(Redix.Connection, redis_opts, connection_opts)
+    {other_opts, connection_opts} =
+      Keyword.split(connection_opts, [:socket_opts, :backoff, :max_reconnection_attempts])
+
+    redis_opts = Keyword.merge(@redis_defaults, redis_opts)
+    other_opts = Keyword.merge(@connection_defaults, other_opts)
+    redix_opts = Keyword.merge(redis_opts, other_opts)
+
+    Connection.start_link(Redix.Connection, redix_opts, connection_opts)
   end
 
   @doc """
