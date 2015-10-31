@@ -134,13 +134,14 @@ defmodule Redix do
     * `:socket_opts` - (list of options) this option specifies a list of options
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
-      overridden by Redix so that it functions properly.
+      overridden by Redix so that it functions properly. Defaults to `[]`.
     * `:backoff` - (integer) the time (in milliseconds) to wait before trying to
-      reconnect when a network error occurs.
-    * `:max_reconnection_attempts` - (integer) the maximum number of
+      reconnect when a network error occurs. Defaults to `2000`.
+    * `:max_reconnection_attempts` - (integer or `nil`) the maximum number of
       reconnection attempts that the Redix process is allowed to make. When the
       Redix process "consumes" all the reconnection attempts allowed to it, it
-      will exit with the original error's reason.
+      will exit with the original error's reason. If the value is `nil`, there's
+      no limit to the reconnection attempts that can be made. Defaults to `nil`.
 
   In addition to these options, all options accepted by
   `Connection.start_link/3` (and thus `GenServer.start_link/3`) are forwarded to
