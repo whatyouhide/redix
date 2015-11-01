@@ -213,7 +213,7 @@ defmodule RedixTest do
   end
 
   test "command/2: passing an empty list returns an error", %{conn: c} do
-    assert Redix.command(c, []) == {:error, :no_command}
+    assert Redix.command(c, []) == {:error, :empty_command}
   end
 
   test "pipeline/2: Redis errors in the response", %{conn: c} do
@@ -228,8 +228,8 @@ defmodule RedixTest do
   end
 
   test "pipeline/2: passing one or more empty commands returns an error", %{conn: c} do
-    assert Redix.pipeline(c, [[]]) == {:error, :no_command}
-    assert Redix.pipeline(c, [["PING"], [], ["PING"]]) == {:error, :no_command}
+    assert Redix.pipeline(c, [[]]) == {:error, :empty_command}
+    assert Redix.pipeline(c, [["PING"], [], ["PING"]]) == {:error, :empty_command}
   end
 
   test "command!/2: simple commands", %{conn: c} do

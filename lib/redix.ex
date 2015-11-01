@@ -212,7 +212,7 @@ defmodule Redix do
   the latter case, `reason` will be the error returned by Redis.
 
   If the given command (`args`) is an empty command (`[]`), `{:error,
-  :no_command}` will be returned.
+  :empty_command}` will be returned.
 
   ## Examples
 
@@ -303,7 +303,7 @@ defmodule Redix do
 
   If `commands` is an empty list (`[]`), then a `Redix.Error` will be raised
   right away. If any of the commands in `commands` is an empty command (`[]`),
-  `{:error, :no_command}` will be returned (which mirrors the behaviour of
+  `{:error, :empty_command}` will be returned (which mirrors the behaviour of
   `command/3` in case of empty commands).
 
   ## Examples
@@ -331,7 +331,7 @@ defmodule Redix do
 
   def pipeline(conn, commands, opts) do
     if Enum.any?(commands, &(&1 == [])) do
-      {:error, :no_command}
+      {:error, :empty_command}
     else
       Connection.call(conn, {:commands, commands}, opts[:timeout] || @default_timeout)
     end
