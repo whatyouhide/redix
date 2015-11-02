@@ -4,9 +4,9 @@ defmodule Redix do
 
   ## Overview
 
-  `start_link/1` and `start_link/2` start a process that connects to Redis. Each
-  Elixir process started with these functions maps to a client connection to the
-  specified Redis server.
+  `start_link/2` starts a process that connects to Redis. Each Elixir process
+  started with this function maps to a client TCP connection to the specified
+  Redis server.
 
   The architecture is very simple: when you issue commands to Redis (via
   `command/3` or `pipeline/3`), the Redix process sends the command to Redis right
@@ -30,8 +30,8 @@ defmodule Redix do
     * a reconnection attempt is made right away.
     * if this attempt fails, reconnections are attempted at a given "backoff"
       interval. The duration of this interval can be specified with the
-      `:backoff` option passed to `start_link/1` or `start_link/2`. The default
-      is `2000` milliseconds.
+      `:backoff` option passed to `start_link/2`. The default is `2000`
+      milliseconds.
 
   This behaviour can be tweaked with the `:max_reconnection_attempts` option,
   which controls the max number of reconnection attempts that will be made. For
@@ -42,7 +42,7 @@ defmodule Redix do
   These reconnections attempts only happen when the connection to Redis has been
   established at least once before. If a connection error happens when
   connecting to Redis for the first time, the Redix process will just crash with
-  the proper error (see `start_link/1`, `start_link/2`).
+  the proper error (see `start_link/2`).
 
   All this behaviour is implemented using the
   [connection](https://github.com/fishcakez/connection) library (a dependency of
@@ -58,9 +58,12 @@ defmodule Redix do
 
   @type command :: [binary]
 
-  @default_opts [
+  @redis_defaults [
     host: 'localhost',
     port: 6379,
+  ]
+
+  @connection_defaults [
     socket_opts: [],
     backoff: 2000,
   ]
@@ -71,17 +74,22 @@ defmodule Redix do
   Starts a connection to Redis.
 
   This function returns `{:ok, pid}` if the connection is successful. The actual
-  TCP connection to the Redis server happens asynchronously: when `start_link/1`
+  TCP connection to the Redis server happens asynchronously: when `start_link/2`
   is called, a pid is returned right away and the connection process starts. All
-  the calls to Redis that happen during the connection have to wait for the
-  connection to be established before being issued.
+  the calls to `Redix` that happen during the connection have to wait for the
+  connection to be established before being issued (and sent to the Redis
+  server).
 
-  This function accepts a single argument: `uri_or_opts`. As the name suggests,
-  this argument can either be a Redis URI or a list of options.
+  This function accepts two arguments: the options to connect to the Redis
+  server (like host, port, and so on) and the options to manage the connection
+  and the resiliency. The Redis options can be specified as a keyword list or as
+  a URI.
 
-  ## URI
+  ## Redis options
 
-  In case `uri_or_opts` is a Redis URI, it must be in the form:
+  ### URI
+
+  In case `uri_or_redis_opts` is a Redis URI, it must be in the form:
 
       redis://[:password@]host[:port][/db]
 
@@ -97,14 +105,14 @@ defmodule Redix do
       redis://:secret@localhost
       redis://myuser:secret@localhost
 
-  The only mandatory thing when using is the host. All other elements (password,
-  port, database) are optional and their default value can be found in the
-  "Options" section below.
+  The only mandatory thing when using URIs is the host. All other elements
+  (password, port, database) are optional and their default value can be found
+  in the "Options" section below.
 
-  ## Options
+  ### Options
 
-  The following options can be used to specify the connection parameters
-  (instead of a URI as described above):
+  The following options can be used to specify the parameters used to connect to
+  Redis (instead of a URI as described above):
 
     * `:host` - (string) the host where the Redis server is running. Defaults to
       `"localhost"`.
@@ -118,25 +126,28 @@ defmodule Redix do
       `0` by default). When this option is provided, all Redix does is issue a
       `SELECT` command to Redis in order to select the given database.
 
-  The following options can be specified in the list of options or as a second
-  argument when using a URI (using `start_link/2` instead of `start_link/1`):
+  ## Connection options
+
+  `connection_opts` is a list of options used to manage the connection. These
+  are the Redix-specific options that can be used:
 
     * `:socket_opts` - (list of options) this option specifies a list of options
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
-      overridden by Redix so that it functions properly.
+      overridden by Redix so that it functions properly. Defaults to `[]`.
     * `:backoff` - (integer) the time (in milliseconds) to wait before trying to
-      reconnect when a network error occurs.
-    * `:max_reconnection_attempts` - (integer) the maximum number of
+      reconnect when a network error occurs. Defaults to `2000`.
+    * `:max_reconnection_attempts` - (integer or `nil`) the maximum number of
       reconnection attempts that the Redix process is allowed to make. When the
       Redix process "consumes" all the reconnection attempts allowed to it, it
-      will exit with the original error's reason.
+      will exit with the original error's reason. If the value is `nil`, there's
+      no limit to the reconnection attempts that can be made. Defaults to `nil`.
 
-  In addition to these options, all options accepted by `GenServer.start_link/3`
-  are forwarded to it. For example, a Redix connection can be registered with a
-  name:
+  In addition to these options, all options accepted by
+  `Connection.start_link/3` (and thus `GenServer.start_link/3`) are forwarded to
+  it. For example, a Redix connection can be registered with a name:
 
-      Redix.start_link(name: :redix)
+      Redix.start_link([], name: :redix)
       Process.whereis(:redix)
       #=> #PID<...>
 
@@ -148,38 +159,26 @@ defmodule Redix do
       iex> Redix.start_link(host: "example.com", port: 9999, password: "secret")
       {:ok, #PID<...>}
 
-      iex> Redix.start_link(database: 3, name: :redix_3)
+      iex> Redix.start_link([database: 3], [name: :redix_3])
       {:ok, #PID<...>}
 
   """
-  @spec start_link(Keyword.t | binary) :: GenServer.on_start
-  def start_link(uri_or_opts \\ [])
+  @spec start_link(binary | Keyword.t, Keyword.t) :: GenServer.on_start
+  def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
-  def start_link(uri) when is_binary(uri) do
-    uri |> Redix.URI.opts_from_uri |> start_link
+  def start_link(uri, connection_opts) when is_binary(uri) and is_list(connection_opts) do
+    uri |> Redix.URI.opts_from_uri |> start_link(connection_opts)
   end
 
-  def start_link(opts) do
-    opts = Keyword.merge(@default_opts, opts)
-    Connection.start_link(Redix.Connection, opts, opts)
-  end
+  def start_link(redis_opts, connection_opts) when is_list(redis_opts) and is_list(connection_opts) do
+    {other_opts, connection_opts} =
+      Keyword.split(connection_opts, [:socket_opts, :backoff, :max_reconnection_attempts])
 
-  @doc """
-  Works like `start_link/1` but accepts a Redis URI *and* a list of options.
+    redis_opts = Keyword.merge(@redis_defaults, redis_opts)
+    other_opts = Keyword.merge(@connection_defaults, other_opts)
+    redix_opts = Keyword.merge(redis_opts, other_opts)
 
-  The options you can pass are the ones not about the connection (e.g.,
-  `:socket_opts` or `:name`). Read the docs for `start_link/1` for more
-  information.
-
-  ## Examples
-
-      iex> Redix.start_link("redis://foo.com/2", name: :redix_foo)
-      {:ok, #PID<...>}
-
-  """
-  @spec start_link(binary, Keyword.t) :: GenServer.on_start
-  def start_link(uri, opts) when is_binary(uri) and is_list(opts) do
-    uri |> Redix.URI.opts_from_uri |> Keyword.merge(opts) |> start_link
+    Connection.start_link(Redix.Connection, redix_opts, connection_opts)
   end
 
   @doc """
