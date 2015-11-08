@@ -2,6 +2,7 @@ defmodule RedixTest do
   use ExUnit.Case, async: true
   import Redix.TestHelpers
   alias Redix.Error
+  alias Redix.ConnectionError
 
   setup_all do
     {:ok, conn} = Redix.start_link
@@ -224,7 +225,7 @@ defmodule RedixTest do
 
   test "pipeline/2: passing an empty list of commands raises an error", %{conn: c} do
     msg = "no commands passed to the pipeline"
-    assert_raise Error, msg, fn -> Redix.pipeline(c, []) end
+    assert_raise ConnectionError, msg, fn -> Redix.pipeline(c, []) end
   end
 
   test "pipeline/2: passing one or more empty commands returns an error", %{conn: c} do
@@ -258,6 +259,13 @@ defmodule RedixTest do
 
     msg = "ERR value is not an integer or out of range"
     assert Redix.pipeline!(c, commands) == ["OK", %Redix.Error{message: msg}]
+  end
+
+  test "pipeline!/2: empty commands", %{conn: c} do
+    msg = "an empty command ([]) is not a valid Redis command"
+    assert_raise ConnectionError, msg, fn ->
+      Redix.pipeline!(c, [["PING"], []])
+    end
   end
 
   test "command/2: timeout", %{conn: c} do

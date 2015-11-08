@@ -15,7 +15,14 @@ defmodule Redix.ConnectionError do
 
   defexception [:message]
 
-  def exception(reason) when is_atom(reason) do
-    %__MODULE__{message: inspect(reason)}
+  def exception(reason) when is_binary(reason) do
+    %__MODULE__{message: reason}
   end
+
+  def exception(reason) when is_atom(reason) do
+    %__MODULE__{message: format_reason(reason)}
+  end
+
+  defp format_reason(:empty_command), do: "an empty command ([]) is not a valid Redis command"
+  defp format_reason(other), do: :inet.format_error(other)
 end

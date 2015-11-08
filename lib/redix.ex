@@ -210,7 +210,7 @@ defmodule Redix do
   an error in sending the response or in case the response is a Redis error. In
   the latter case, `reason` will be the error returned by Redis.
 
-  If the given command (`args`) is an empty command (`[]`), `{:error,
+  If the given command (`cmd`) is an empty command (`[]`), `{:error,
   :empty_command}` will be returned.
 
   ## Examples
@@ -232,8 +232,8 @@ defmodule Redix do
   @spec command(GenServer.server, command, Keyword.t) ::
     {:ok, Redix.Protocol.redis_value} |
     {:error, atom | Redix.Error.t}
-  def command(conn, args, opts \\ []) do
-    case pipeline(conn, [args], opts) do
+  def command(conn, cmd, opts \\ []) do
+    case pipeline(conn, [cmd], opts) do
       {:ok, [%Redix.Error{} = error]} ->
         {:error, error}
       {:ok, [resp]} ->
@@ -252,7 +252,7 @@ defmodule Redix do
       `{:ok, result}` tuple.
     * if there's a Redis error, a `Redix.Error` error is raised (with the
       original message).
-    * if there's a network error (e.g., `{:error, :closed}`) a `Redix.Network`
+    * if there's a network error (e.g., `{:error, :closed}`) a `Redix.ConnectionError`
       error is raised.
 
   This function accepts the same options as `command/3`.
@@ -272,8 +272,8 @@ defmodule Redix do
 
   """
   @spec command!(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value
-  def command!(conn, args, opts \\ []) do
-    case command(conn, args, opts) do
+  def command!(conn, cmd, opts \\ []) do
+    case command(conn, cmd, opts) do
       {:ok, resp} ->
         resp
       {:error, %Redix.Error{} = error} ->
@@ -300,10 +300,10 @@ defmodule Redix do
   responsibility to the user. That said, errors other than Redis errors (like
   network errors) always cause the return value to be `{:error, reason}`.
 
-  If `commands` is an empty list (`[]`), then a `Redix.Error` will be raised
-  right away. If any of the commands in `commands` is an empty command (`[]`),
-  `{:error, :empty_command}` will be returned (which mirrors the behaviour of
-  `command/3` in case of empty commands).
+  If `commands` is an empty list (`[]`), then a `Redix.ConnectionError` will be
+  raised right away. If any of the commands in `commands` is an empty command
+  (`[]`), `{:error, :empty_command}` will be returned (which mirrors the
+  behaviour of `command/3` in case of empty commands).
 
   ## Examples
 
@@ -325,7 +325,7 @@ defmodule Redix do
   def pipeline(conn, commands, opts \\ [])
 
   def pipeline(_conn, [], _opts) do
-    raise(Redix.Error, "no commands passed to the pipeline")
+    raise(Redix.ConnectionError, "no commands passed to the pipeline")
   end
 
   def pipeline(conn, commands, opts) do
