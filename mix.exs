@@ -25,9 +25,10 @@ defmodule Redix.Mixfile do
 
       # Docs
       name: "Redix",
-      docs: [readme: "README.md", main: "README",
+      docs: [main: "Redix",
              source_ref: "v#{@version}",
-             source_url: @repo_url],
+             source_url: @repo_url,
+             extras: ["README.md"]],
     ]
   end
 
