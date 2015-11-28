@@ -5,6 +5,7 @@ defmodule Redix.Connection do
 
   alias Redix.Protocol
   alias Redix.ConnectionUtils
+  alias Redix.Connection.Receiver
   require Logger
 
   @type state :: %{}
@@ -12,14 +13,15 @@ defmodule Redix.Connection do
   @initial_state %{
     # The TCP socket that holds the connection to Redis
     socket: nil,
-    # The data that couldn't be parsed (yet)
-    tail: "",
     # Options passed when the connection is started
     opts: nil,
-    # A queue of operations waiting for a response
-    queue: :queue.new,
     # The number of times a reconnection has been attempted
     reconnection_attempts: 0,
+    # The receiver process
+    receiver: nil,
+
+    # TODO remove but used by Auth right now
+    tail: "",
   }
 
   ## Callbacks
@@ -33,7 +35,13 @@ defmodule Redix.Connection do
   def connect(info, state)
 
   def connect(info, state) do
-    ConnectionUtils.connect(info, state)
+    case ConnectionUtils.connect(info, state) do
+      {:ok, state} ->
+        state = start_receiver_and_hand_socket(state)
+        {:ok, state}
+      other ->
+        other
+    end
   end
 
   @doc false
@@ -43,14 +51,10 @@ defmodule Redix.Connection do
     {:stop, :normal, state}
   end
 
-  def disconnect({:error, reason} = _error, %{queue: _queue} = state) do
+  def disconnect({:error, reason} = _error, state) do
     Logger.error "Disconnected from Redis (#{ConnectionUtils.format_host(state)}): #{:inet.format_error(reason)}"
 
     :gen_tcp.close(state.socket)
-
-    for {:commands, from, _} <- :queue.to_list(state.queue) do
-      Connection.reply(from, {:error, :disconnected})
-    end
 
     # Backoff with 0 ms as the backoff time to churn through all the commands in
     # the mailbox before reconnecting.
@@ -67,9 +71,8 @@ defmodule Redix.Connection do
   end
 
   def handle_call({:commands, commands}, from, state) do
-    state
-    |> Map.update!(:queue, &:queue.in({:commands, from, length(commands)}, &1))
-    |> ConnectionUtils.send_noreply(Enum.map(commands, &Protocol.pack/1))
+    :ok = Receiver.enqueue(state.receiver, {:commands, from, length(commands)})
+    ConnectionUtils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
   end
 
   @doc false
@@ -82,43 +85,27 @@ defmodule Redix.Connection do
   @doc false
   def handle_info(msg, state)
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    :ok = :inet.setopts(socket, active: :once)
-    state = new_data(state, state.tail <> data)
-    {:noreply, state}
-  end
-
-  def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
-    {:disconnect, {:error, :tcp_closed}, state}
-  end
-
-  def handle_info({:tcp_error, socket, reason}, %{socket: socket} = state) do
-    {:disconnect, {:error, reason}, state}
+  def handle_info({:receiver, pid, msg}, %{receiver: pid} = state) do
+    handle_msg_from_receiver(msg, state)
   end
 
   ## Helper functions
 
-  defp new_data(state, <<>>) do
-    %{state | tail: <<>>}
-  end
-
-  defp new_data(state, data) do
-    {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(state.queue)
-
-    case Protocol.parse_multi(data, ncommands) do
-      {:ok, resp, rest} ->
-        Connection.reply(from, format_resp(resp))
-        state = %{state | queue: new_queue}
-        new_data(state, rest)
-      {:error, :incomplete} ->
-        %{state | tail: data}
-    end
-  end
-
-  defp format_resp(%Redix.Error{} = err), do: {:error, err}
-  defp format_resp(resp), do: {:ok, resp}
-
   defp reset_state(state) do
-    %{state | queue: :queue.new, tail: "", socket: nil}
+    %{state | socket: nil}
+  end
+
+  defp start_receiver_and_hand_socket(%{socket: socket} = state) do
+    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket)
+    :ok = :gen_tcp.controlling_process(socket, receiver)
+    %{state | receiver: receiver}
+  end
+
+  defp handle_msg_from_receiver({:tcp_closed, socket}, %{socket: socket} = state) do
+    {:disconnect, {:error, :tcp_closed}, state}
+  end
+
+  defp handle_msg_from_receiver({:tcp_error, socket, reason}, %{socket: socket} = state) do
+    {:disconnect, {:error, reason}, state}
   end
 end
