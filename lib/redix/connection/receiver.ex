@@ -4,9 +4,13 @@ defmodule Redix.Connection.Receiver do
   alias Redix.Protocol
 
   @initial_state %{
+    # The process that sends stuff to the socket and that spawns this process
     sender: nil,
+    # The queue of commands issued to Redis
     queue: :queue.new,
+    # The TCP socket, which should be passive when given to this process
     socket: nil,
+    # The tail of unparsed data
     tail: "",
   }
 
