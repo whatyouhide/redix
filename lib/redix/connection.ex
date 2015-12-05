@@ -95,10 +95,14 @@ defmodule Redix.Connection do
     %{state | socket: nil}
   end
 
-  defp start_receiver_and_hand_socket(%{socket: socket} = state) do
-    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket)
+  defp start_receiver_and_hand_socket(%{socket: socket, tail: tail, receiver: receiver} = state) do
+    if receiver && Process.alive?(receiver) do
+      raise "there already is a receiver: #{inspect receiver}"
+    end
+
+    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, tail: tail)
     :ok = :gen_tcp.controlling_process(socket, receiver)
-    %{state | receiver: receiver}
+    %{state | receiver: receiver, tail: ""}
   end
 
   defp handle_msg_from_receiver({:tcp_closed, socket}, %{socket: socket} = state) do
