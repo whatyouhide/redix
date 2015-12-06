@@ -49,7 +49,8 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnect({:error, reason}, state) do
-    Logger.error "Disconnected from Redis (#{ConnectionUtils.format_host(state)}): #{:inet.format_error(reason)}"
+    Logger.error ["Disconnected from Redis (#{ConnectionUtils.format_host(state)}): ",
+                  :inet.format_error(reason)]
     :gen_tcp.close(state.socket)
     state = disconnect_and_notify_clients(state, reason)
     ConnectionUtils.backoff_or_stop(%{state | tail: "", socket: nil}, 0, reason)

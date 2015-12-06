@@ -61,7 +61,8 @@ defmodule Redix.ConnectionUtils do
         setup_socket_buffers(socket)
         Auth.auth_and_select_db(%{state | socket: socket, reconnection_attempts: 0})
       {:error, reason} ->
-        Logger.error "Error connecting to Redis (#{format_host(state)}): #{:inet.format_error(reason)}"
+        Logger.error ["Error connecting to Redis (#{format_host(state)}): ",
+                      :inet.format_error(reason)]
         handle_connection_error(state, info, reason)
     end
   end
