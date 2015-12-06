@@ -58,15 +58,7 @@ defmodule Redix do
 
   @type command :: [binary]
 
-  @redis_defaults [
-    host: 'localhost',
-    port: 6379,
-  ]
-
-  @connection_defaults [
-    socket_opts: [],
-    backoff: 2000,
-  ]
+  alias Redix.ConnectionUtils
 
   @default_timeout 5000
 
@@ -153,7 +145,7 @@ defmodule Redix do
 
   ## Examples
 
-      iex> Redix.start_link
+      iex> Redix.start_link()
       {:ok, #PID<...>}
 
       iex> Redix.start_link(host: "example.com", port: 9999, password: "secret")
@@ -166,19 +158,12 @@ defmodule Redix do
   @spec start_link(binary | Keyword.t, Keyword.t) :: GenServer.on_start
   def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
-  def start_link(uri, connection_opts) when is_binary(uri) and is_list(connection_opts) do
-    uri |> Redix.URI.opts_from_uri |> start_link(connection_opts)
+  def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
+    uri |> Redix.URI.opts_from_uri() |> start_link(other_opts)
   end
 
-  def start_link(redis_opts, connection_opts) when is_list(redis_opts) and is_list(connection_opts) do
-    {other_opts, connection_opts} =
-      Keyword.split(connection_opts, [:socket_opts, :backoff, :max_reconnection_attempts])
-
-    redis_opts = Keyword.merge(@redis_defaults, redis_opts)
-    other_opts = Keyword.merge(@connection_defaults, other_opts)
-    redix_opts = Keyword.merge(redis_opts, other_opts)
-
-    Connection.start_link(Redix.Connection, redix_opts, connection_opts)
+  def start_link(redis_opts, other_opts) do
+    ConnectionUtils.start_link(Redix.Connection, redis_opts, other_opts)
   end
 
   @doc """

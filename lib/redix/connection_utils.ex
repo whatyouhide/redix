@@ -11,7 +11,46 @@ defmodule Redix.ConnectionUtils do
   # is harmless but inconsistent. Credit for this strategy goes to James Fish.
   @socket_opts [:binary, active: false, exit_on_close: false]
 
+  @redis_default_opts [
+    host: 'localhost',
+    port: 6379,
+  ]
+
+  @redix_default_opts [
+    socket_opts: [],
+    backoff: 2000,
+  ]
+
+  @redis_opts [:host, :port, :password, :database]
+  @redix_opts [:socket_opts, :max_reconnection_attempts, :backoff]
+
   @default_timeout 5000
+
+  @doc """
+  Calls `Connection.start_link/3` on the given `conn_module` after cleaning up
+  the given opts.
+
+  `redis_opts` are the options that specify how to connect to the Redis server:
+  host, port, password, and database. `other_opts` are a mixture of options to
+  tweak the behaviour of the Redix connection (e.g., the backoff time) and
+  options to be forwarded to `Connection.start_link/3`.
+  """
+  @spec start_link(module, Keyword.t, Keyword.t) :: GenServer.on_start
+  def start_link(conn_module, redis_opts, other_opts)
+      when is_list(redis_opts) and is_list(other_opts) do
+    # `connection_opts` are the opts to be passed to `Connection.start_link/3`.
+    # `redix_opts` are the other options to tweak the behaviour of Redix (e.g.,
+    # the backoff time).
+    {redix_opts, connection_opts} = Keyword.split(other_opts, @redix_opts)
+
+    check_redis_opts(redis_opts)
+
+    redis_opts = Keyword.merge(@redis_default_opts, redis_opts)
+    redix_opts = Keyword.merge(@redix_default_opts, redix_opts)
+    opts = Keyword.merge(redix_opts, redis_opts)
+
+    Connection.start_link(conn_module, opts, connection_opts)
+  end
 
   @spec connect(term, Redix.Connection.state) :: term
   def connect(info, %{opts: opts} = state) do
@@ -104,5 +143,16 @@ defmodule Redix.ConnectionUtils do
 
     buffer = buffer |> max(sndbuf) |> max(recbuf)
     :ok = :inet.setopts(socket, [buffer: buffer])
+  end
+
+  defp check_redis_opts(opts) when is_list(opts) do
+    Enum.each opts, fn {opt, _value} ->
+      unless opt in @redis_opts do
+        raise ArgumentError, "unknown Redis connection option: #{inspect opt}." <>
+                             " The first argument to start_link/1 should only" <>
+                             " contain Redis-specific options (host, port," <>
+                             " password, database)"
+      end
+    end
   end
 end
