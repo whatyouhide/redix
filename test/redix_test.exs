@@ -1,20 +1,23 @@
 defmodule RedixTest do
   use ExUnit.Case, async: true
-  import Redix.TestHelpers
+
   alias Redix.Error
   alias Redix.ConnectionError
 
+  import Redix.TestHelpers
+
   setup_all do
     {:ok, conn} = Redix.start_link
-    Redix.command(conn, ["FLUSHDB"])
-    {:ok, %{}}
+    Redix.command!(conn, ["FLUSHDB"])
+    Redix.stop(conn)
+    :ok
   end
 
   setup context do
     if context[:no_setup] do
       {:ok, %{}}
     else
-      {:ok, conn} = Redix.start_link
+      {:ok, conn} = Redix.start_link()
       {:ok, %{conn: conn}}
     end
   end
@@ -27,7 +30,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/1: specifying a database" do
-    assert {:ok, pid} = Redix.start_link database: 1
+    assert {:ok, pid} = Redix.start_link(database: 1)
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
   end
 
@@ -35,7 +38,7 @@ defmodule RedixTest do
   test "start_link/1: specifying a password when no password is set" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      assert {:ok, pid} = Redix.start_link password: "foo"
+      assert {:ok, pid} = Redix.start_link(password: "foo")
       assert is_pid(pid)
 
       error = %Error{message: "ERR Client sent AUTH, but no password is set"}
@@ -58,14 +61,14 @@ defmodule RedixTest do
   test "start_link/1: when unable to connect to Redis" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      assert {:ok, pid} = Redix.start_link host: "nonexistent"
+      assert {:ok, pid} = Redix.start_link(host: "nonexistent")
       assert_receive {:EXIT, ^pid, :nxdomain}, 1000
     end
   end
 
   @tag :no_setup
   test "start_link/1: using a redis:// url" do
-    assert {:ok, pid} = Redix.start_link "redis://localhost:6379/3"
+    assert {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
   end
 
@@ -77,7 +80,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "stop/1" do
-    assert {:ok, pid} = Redix.start_link "redis://localhost:6379/3"
+    assert {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     assert Redix.stop(pid) == :ok
 
