@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.3.1
+
+* Restructure the Redix architecture to use two Elixir processes per connection
+  instead of one (a process that packs commands and sends them on the socket and
+  a process that listens from the socket and replies to waiting clients); this
+  should speed up Redix when it comes to multiple clients concurrently issueing
+  requests to Redis.
+
 ## v0.3.0
 
 * Change the behaviour for an empty list of command passed to `Redix.pipeline/2`
