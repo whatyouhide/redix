@@ -4,7 +4,7 @@ defmodule Redix.Connection do
   use Connection
 
   alias Redix.Protocol
-  alias Redix.ConnectionUtils
+  alias Redix.Utils
   alias Redix.Connection.Receiver
   require Logger
 
@@ -35,7 +35,7 @@ defmodule Redix.Connection do
   def connect(info, state)
 
   def connect(info, state) do
-    case ConnectionUtils.connect(info, state) do
+    case Utils.connect(info, state) do
       {:ok, state} ->
         state = start_receiver_and_hand_socket(state)
         {:ok, state}
@@ -52,7 +52,7 @@ defmodule Redix.Connection do
   end
 
   def disconnect({:error, reason} = _error, state) do
-    Logger.error ["Disconnected from Redis (#{ConnectionUtils.format_host(state)}): ",
+    Logger.error ["Disconnected from Redis (#{Utils.format_host(state)}): ",
                   :inet.format_error(reason)]
 
     :gen_tcp.close(state.socket)
@@ -61,7 +61,7 @@ defmodule Redix.Connection do
     # the mailbox before reconnecting.
     state
     |> reset_state
-    |> ConnectionUtils.backoff_or_stop(0, reason)
+    |> Utils.backoff_or_stop(0, reason)
   end
 
   @doc false
@@ -73,7 +73,7 @@ defmodule Redix.Connection do
 
   def handle_call({:commands, commands}, from, state) do
     :ok = Receiver.enqueue(state.receiver, {:commands, from, length(commands)})
-    ConnectionUtils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
+    Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
   end
 
   @doc false

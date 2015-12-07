@@ -5,7 +5,7 @@ defmodule Redix.PubSub.Connection do
 
   require Logger
   alias Redix.Protocol
-  alias Redix.ConnectionUtils
+  alias Redix.Utils
 
   @initial_state %{
     tail: "",
@@ -28,7 +28,7 @@ defmodule Redix.PubSub.Connection do
   def connect(info, state)
 
   def connect(info, state) do
-    case ConnectionUtils.connect(info, state) do
+    case Utils.connect(info, state) do
       {:ok, state} ->
         if info == :backoff do
           Enum.each(state.clients_to_notify_of_reconnection, &send(&1, msg(:reconnected, nil)))
@@ -49,11 +49,11 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnect({:error, reason}, state) do
-    Logger.error ["Disconnected from Redis (#{ConnectionUtils.format_host(state)}): ",
+    Logger.error ["Disconnected from Redis (#{Utils.format_host(state)}): ",
                   :inet.format_error(reason)]
     :gen_tcp.close(state.socket)
     state = disconnect_and_notify_clients(state, reason)
-    ConnectionUtils.backoff_or_stop(%{state | tail: "", socket: nil}, 0, reason)
+    Utils.backoff_or_stop(%{state | tail: "", socket: nil}, 0, reason)
   end
 
   @doc false
@@ -123,7 +123,7 @@ defmodule Redix.PubSub.Connection do
     if channels_to_subscribe_to != [] do
       state
       |> enqueue(Enum.map(channels_to_subscribe_to, &{op, &1, recipient}))
-      |> ConnectionUtils.send_reply(Protocol.pack([command|channels_to_subscribe_to]), :ok)
+      |> Utils.send_reply(Protocol.pack([command|channels_to_subscribe_to]), :ok)
     else
       {:reply, :ok, state}
     end
@@ -142,7 +142,7 @@ defmodule Redix.PubSub.Connection do
     if channels_to_unsubscribe_from != [] do
       state
       |> enqueue(Enum.map(channels_to_unsubscribe_from, &{op, &1, recipient}))
-      |> ConnectionUtils.send_reply(Protocol.pack([command|channels_to_unsubscribe_from]), :ok)
+      |> Utils.send_reply(Protocol.pack([command|channels_to_unsubscribe_from]), :ok)
     else
       {:reply, :ok, state}
     end
@@ -179,7 +179,7 @@ defmodule Redix.PubSub.Connection do
     end
 
     if commands != [] do
-      ConnectionUtils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
+      Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
     else
       {:noreply, state}
     end

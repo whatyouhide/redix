@@ -97,7 +97,7 @@ defmodule Redix.PubSub do
 
   @type pubsub_recipient :: pid | port | atom | {atom, node}
 
-  alias Redix.ConnectionUtils
+  alias Redix.Utils
 
   @default_timeout 5_000
 
@@ -115,7 +115,7 @@ defmodule Redix.PubSub do
   end
 
   def start_link(redis_opts, other_opts) do
-    ConnectionUtils.start_link(Redix.PubSub.Connection, redis_opts, other_opts)
+    Utils.start_link(Redix.PubSub.Connection, redis_opts, other_opts)
   end
 
   @doc """

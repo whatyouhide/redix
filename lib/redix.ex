@@ -58,7 +58,7 @@ defmodule Redix do
 
   @type command :: [binary]
 
-  alias Redix.ConnectionUtils
+  alias Redix.Utils
 
   @default_timeout 5000
 
@@ -163,7 +163,7 @@ defmodule Redix do
   end
 
   def start_link(redis_opts, other_opts) do
-    ConnectionUtils.start_link(Redix.Connection, redis_opts, other_opts)
+    Utils.start_link(Redix.Connection, redis_opts, other_opts)
   end
 
   @doc """

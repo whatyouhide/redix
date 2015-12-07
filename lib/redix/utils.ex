@@ -1,4 +1,4 @@
-defmodule Redix.ConnectionUtils do
+defmodule Redix.Utils do
   @moduledoc false
 
   require Logger
