@@ -1,4 +1,6 @@
 defmodule Redix.Connection.Receiver do
+  @moduledoc false
+
   use GenServer
 
   alias Redix.Protocol
@@ -14,27 +16,40 @@ defmodule Redix.Connection.Receiver do
     tail: "",
   }
 
+  @doc """
+  Starts this genserver.
+
+  Options in `opts` are injected directly in the state of this genserver.
+  """
+  @spec start_link(Keyword.t) :: GenServer.on_start
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @doc """
+  Puts `what` in the internal queue of genserver `pid` asynchronously (cast).
+  """
+  @spec enqueue(pid, term) :: :ok
   def enqueue(pid, what) do
     GenServer.cast(pid, {:enqueue, what})
   end
 
   ## Callbacks
 
+  @doc false
   def init(opts) do
     state = Dict.merge(@initial_state, opts)
     :inet.setopts(state.socket, active: :once)
     {:ok, state}
   end
 
+  @doc false
   def handle_cast({:enqueue, what}, state) do
     state = update_in(state.queue, &:queue.in(what, &1))
     {:noreply, state}
   end
 
+  @doc false
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     :ok = :inet.setopts(socket, active: :once)
     state = new_data(state, state.tail <> data)
