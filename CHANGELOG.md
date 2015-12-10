@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.2
+
+* Fix a bug in the protocol that failed to parse integers in some cases.
+
 ## v0.3.1
 
 * Restructure the Redix architecture to use two Elixir processes per connection
