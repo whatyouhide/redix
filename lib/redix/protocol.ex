@@ -125,7 +125,13 @@ defmodule Redix.Protocol do
     end
   end
 
-  defp parse_integer(""), do: {:error, :incomplete}
+  # We need this clause explicitely only here because parse_integer/1 is the
+  # only function that doesn't rely on until_crlf/1 (which returns {:error,
+  # :incomplete} for empty binaries.
+  defp parse_integer("") do
+    {:error, :incomplete}
+  end
+
   defp parse_integer(rest) do
     case Integer.parse(rest) do
       {i, @crlf <> rest} ->
