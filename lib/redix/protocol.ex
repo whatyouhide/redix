@@ -125,6 +125,7 @@ defmodule Redix.Protocol do
     end
   end
 
+  defp parse_integer(""), do: {:error, :incomplete}
   defp parse_integer(rest) do
     case Integer.parse(rest) do
       {i, @crlf <> rest} ->
