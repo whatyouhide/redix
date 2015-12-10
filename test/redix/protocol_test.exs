@@ -163,6 +163,7 @@ defmodule Redix.ProtocolTest do
   test "parse/1 when the binary it's an invalid integer" do
     assert parse(":312") == {:error, :incomplete}
     assert parse(":312\r") == {:error, :incomplete}
+    assert parse(":") == {:error, :incomplete}
 
     assert_raise ParseError, ~S(not a valid integer: "\r\n"), fn ->
       parse(":\r\n")
