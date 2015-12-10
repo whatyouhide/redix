@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.3.3
+
+* Fix basically the same bug that was almost fixed in `v0.3.2`, but this time
+  for real!
+
 ## v0.3.2
 
 * Fix a bug in the protocol that failed to parse integers in some cases.
