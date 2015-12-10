@@ -100,6 +100,7 @@ defmodule Redix.ProtocolTest do
 
   test "parse/1 with a bulk string whose length is malformed" do
     assert parse("$2") == {:error, :incomplete}
+    assert parse("$2\r") == {:error, :incomplete}
   end
 
   test "parse/1 with an empty array" do
@@ -160,6 +161,9 @@ defmodule Redix.ProtocolTest do
   end
 
   test "parse/1 when the binary it's an invalid integer" do
+    assert parse(":312") == {:error, :incomplete}
+    assert parse(":312\r") == {:error, :incomplete}
+
     assert_raise ParseError, ~S(not a valid integer: "\r\n"), fn ->
       parse(":\r\n")
     end

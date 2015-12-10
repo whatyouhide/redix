@@ -129,9 +129,9 @@ defmodule Redix.Protocol do
     case Integer.parse(rest) do
       {i, @crlf <> rest} ->
         {:ok, i, rest}
-      {_i, <<>>} ->
+      {_i, rest} when rest == "" or rest == "\r" ->
         {:error, :incomplete}
-      {_, _rest} ->
+      {_i, _rest} ->
         raise ParseError, message: "not a valid integer: #{inspect rest}"
       :error ->
         raise ParseError, message: "not a valid integer: #{inspect rest}"
