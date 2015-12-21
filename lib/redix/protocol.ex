@@ -49,8 +49,8 @@ defmodule Redix.Protocol do
   @doc ~S"""
   Parses a RESP-encoded value from the given `data`.
 
-  Returns `{:ok, value, rest}` if a value is parsed successfully, `{:error,
-  reason}` otherwise.
+  Returns `{:ok, value, rest}` if a value is parsed successfully, or a
+  continuation in the form `{:continuation, fun}` if the data is incomplete.
 
   ## Examples
 
@@ -60,39 +60,38 @@ defmodule Redix.Protocol do
       iex> Redix.Protocol.parse "-ERR wrong type\r\n"
       {:ok, %Redix.Error{message: "ERR wrong type"}, ""}
 
-      iex> Redix.Protocol.parse "+OK"
-      {:error, :incomplete}
+      iex> {:continuation, fun} = Redix.Protocol.parse "+OK"
+      iex> fun.("\r\n")
+      {:ok, "OK", ""}
 
   """
   @spec parse(binary) :: {:ok, redis_value, binary} | {:error, term}
   def parse(data)
 
-  def parse("$-1" <> @crlf <> rest), do: {:ok, nil, rest}
-  def parse("*-1" <> @crlf <> rest), do: {:ok, nil, rest}
-  def parse("$-1" <> _), do: {:error, :incomplete}
-  def parse("*-1" <> _), do: {:error, :incomplete}
   def parse("+" <> rest), do: parse_simple_string(rest)
   def parse("-" <> rest), do: parse_error(rest)
   def parse(":" <> rest), do: parse_integer(rest)
   def parse("$" <> rest), do: parse_bulk_string(rest)
   def parse("*" <> rest), do: parse_array(rest)
-  def parse(""), do: {:error, :incomplete}
-  def parse(_), do: raise(ParseError, message: "no type specifier")
+  def parse(""), do: mkcont(&parse/1)
+  def parse(<<b>> <> _), do: raise(ParseError, message: "invalid type specifier (byte #{inspect <<b>>})")
 
   @doc ~S"""
   Parses `n` RESP-encoded values from the given `data`.
 
   Each element is parsed as described in `parse/1`. If there's an error in
-  parsing any of the elements or there are less than `n` elements, `{:error,
-  reason}` is returned. Otherwise, `{:ok, values, rest}` is returned.
+  parsing any of the elements or there are less than `n` elements, a
+  continuation in the form of `{:continuation, fun}` is returned. Otherwise,
+  `{:ok, values, rest}` is returned.
 
   ## Examples
 
       iex> parse_multi("+OK\r\n+COOL\r\n", 2)
       {:ok, ["OK", "COOL"], ""}
 
-      iex> parse_multi("+OK\r\n", 2)
-      {:error, :incomplete}
+      iex> {:continuation, fun} = parse_multi("+OK\r\n", 2)
+      iex> fun.("+OK\r\n")
+      {:ok, ["OK", "OK"], ""}
 
   """
   @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
@@ -102,10 +101,7 @@ defmodule Redix.Protocol do
   # a very common case since single commands are treated as pipelines with just
   # one command in them.
   def parse_multi(data, 1) do
-    case parse(data) do
-      {:ok, resp, rest} -> {:ok, [resp], rest}
-      o                 -> o
-    end
+    resolve_cont(parse(data), &{:ok, [&1], &2})
   end
 
   def parse_multi(data, n) do
@@ -117,69 +113,72 @@ defmodule Redix.Protocol do
   end
 
   defp parse_error(data) do
-    case until_crlf(data) do
-      {:ok, message, rest} ->
-        {:ok, %Redix.Error{message: message}, rest}
-      o ->
-        o
-    end
+    data
+    |> until_crlf()
+    |> resolve_cont(&{:ok, %Redix.Error{message: &1}, &2})
   end
 
   # We need this clause explicitely only here because parse_integer/1 is the
   # only function that doesn't rely on until_crlf/1 (which returns {:error,
   # :incomplete} for empty binaries.
   defp parse_integer("") do
-    {:error, :incomplete}
+    mkcont(&parse_integer/1)
+  end
+
+  defp parse_integer("-") do
+    mkcont(&parse_integer("-" <> &1))
   end
 
   defp parse_integer(rest) do
     case Integer.parse(rest) do
       {i, @crlf <> rest} ->
         {:ok, i, rest}
-      {_i, rest} when rest == "" or rest == "\r" ->
-        {:error, :incomplete}
+      {i, rest} when rest == "" or rest == "\r" ->
+        mkcont fn(new_data) ->
+          until_crlf(rest <> new_data) |> resolve_cont(fn("", rest) -> {:ok, i, rest} end)
+        end
       {_i, _rest} ->
         raise ParseError, message: "not a valid integer: #{inspect rest}"
       :error ->
         raise ParseError, message: "not a valid integer: #{inspect rest}"
-    end
+    end |> resolve_cont(&{:ok, &1, &2})
   end
 
   defp parse_bulk_string(rest) do
-    case parse_integer(rest) do
-      {:ok, len, rest} ->
-        case rest do
-          <<str :: bytes-size(len), @crlf, rest :: binary>> ->
-            {:ok, str, rest}
-          _ ->
-            {:error, :incomplete}
-        end
-      {:error, _} = err ->
-        err
+    resolve_cont parse_integer(rest), fn
+      -1, rest  -> {:ok, nil, rest}
+      len, rest -> parse_string_of_known_size(rest, len)
+    end
+  end
+
+  defp parse_string_of_known_size(data, len) do
+    case data do
+      <<str :: bytes-size(len), @crlf, rest :: binary>> ->
+        {:ok, str, rest}
+      _ ->
+        mkcont fn(new_data) -> parse_string_of_known_size(data <> new_data, len) end
     end
   end
 
   defp parse_array(rest) do
-    case parse_integer(rest) do
-      {:ok, nelems, rest} ->
-        take_n_elems(rest, nelems, [])
-      {:error, _} = err ->
-        err
+    resolve_cont parse_integer(rest), fn
+      -1, rest     -> {:ok, nil, rest}
+      nelems, rest -> take_n_elems(rest, nelems, [])
     end
   end
 
-  defp until_crlf(data, acc \\ "")
+  def until_crlf(data, acc \\ "")
 
-  defp until_crlf(@crlf <> rest, acc) do
+  def until_crlf(@crlf <> rest, acc) do
     {:ok, acc, rest}
   end
 
-  defp until_crlf(<<h, rest :: binary>>, acc) do
-    until_crlf(rest, <<acc :: binary, h>>)
+  def until_crlf(data, acc) when data == "" or data == "\r" do
+    mkcont(&until_crlf(data <> &1, acc))
   end
 
-  defp until_crlf(<<>>, _acc) do
-    {:error, :incomplete}
+  def until_crlf(<<h, rest :: binary>>, acc) do
+    until_crlf(rest, <<acc :: binary, h>>)
   end
 
   defp take_n_elems(data, 0, acc) do
@@ -187,15 +186,22 @@ defmodule Redix.Protocol do
   end
 
   defp take_n_elems(<<_, _ :: binary>> = data, n, acc) when n > 0 do
-    case parse(data) do
-      {:ok, val, rest} ->
-        take_n_elems(rest, n - 1, [val|acc])
-      {:error, _} = err ->
-        err
+    resolve_cont parse(data), fn(elem, rest) ->
+      take_n_elems(rest, n - 1, [elem|acc])
     end
   end
 
-  defp take_n_elems(<<>>, _n, _acc) do
-    {:error, :incomplete}
+  defp take_n_elems(<<>>, n, acc) do
+    mkcont(&take_n_elems(&1, n, acc))
+  end
+
+  defp resolve_cont({:ok, val, rest}, ok) when is_function(ok, 2),
+    do: ok.(val, rest)
+  defp resolve_cont({:continuation, cont}, ok),
+    do: mkcont(fn(new_data) -> resolve_cont(cont.(new_data), ok) end)
+
+  @compile {:inline, mkcont: 1}
+  defp mkcont(fun) do
+    {:continuation, fun}
   end
 end
