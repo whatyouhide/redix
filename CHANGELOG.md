@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.3.4
+
+* Fix a bug in the connection that was replacing the provided Redis password
+  with `:redacted` upon successful connection, making it impossible to reconnect
+  in case of failure (because of the original password now being unavailable).
+
 ## v0.3.3
 
 * Fix basically the same bug that was almost fixed in `v0.3.2`, but this time
