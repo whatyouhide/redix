@@ -38,7 +38,6 @@ defmodule Redix.Connection.Auth do
       :ok ->
         case wait_for_response(state) do
           {:ok, "OK", state} ->
-            state = put_in(state.opts[:password], :redacted)
             {:ok, state}
           {:ok, error, state} ->
             {:stop, error, state}
