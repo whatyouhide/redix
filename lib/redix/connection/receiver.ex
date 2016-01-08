@@ -103,10 +103,6 @@ defmodule Redix.Connection.Receiver do
   defp format_resp(resp), do: {:ok, resp}
 
   defp continuation_or(state, fallback_fun) do
-    if cont = state.continuation do
-      cont
-    else
-      fallback_fun
-    end
+    state.continuation || fallback_fun
   end
 end

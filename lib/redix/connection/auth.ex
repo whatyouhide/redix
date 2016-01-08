@@ -72,8 +72,8 @@ defmodule Redix.Connection.Auth do
   defp wait_for_response(%{socket: socket} = state) do
     case :gen_tcp.recv(socket, 0) do
       {:ok, data} ->
-        data = state.tail <> data
-        parser = if (cont = state.continuation), do: cont, else: &Protocol.parse/1
+        data   = state.tail <> data
+        parser = state.continuation || &Protocol.parse/1
 
         case parser.(data) do
           {:ok, resp, rest} ->
