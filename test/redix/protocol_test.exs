@@ -7,6 +7,8 @@ defmodule Redix.ProtocolTest do
 
   doctest Redix.Protocol
 
+  ## Packing
+
   test "pack/1: empty array" do
     assert b(pack([])) == "*0\r\n"
   end
@@ -26,17 +28,12 @@ defmodule Redix.ProtocolTest do
     assert b(pack([<<1, 2>>])) == <<"*1\r\n$2\r\n", 1, 2, "\r\n">>
   end
 
-  defp b(bin) do
-    IO.iodata_to_binary(bin)
-  end
+  ## Parsing
 
   test "parse/1: simple strings" do
     assert parse("+OK\r\n") == {:ok, "OK", ""}
     assert parse("+the foo is the bar\r\n") == {:ok, "the foo is the bar", ""}
     assert parse("+\r\n") == {:ok, "", ""}
-
-    # Unicode
-    assert parse("+ø\r\n") == {:ok, "ø", ""}
     assert parse("+• º •\r\n") == {:ok, "• º •", ""}
 
     # Whitespace
@@ -47,35 +44,33 @@ defmodule Redix.ProtocolTest do
 
     # Trailing stuff
     assert parse("+foo\r\nbar") == {:ok, "foo", "bar"}
+
+    # Incomplete
+    assert parse_with_continuations(["+", "OK", "\r", "\nrest"]) == {:ok, "OK", "rest"}
+    assert parse_with_continuations(["+OK\r", "\nrest"]) == {:ok, "OK", "rest"}
   end
 
-  test "parse/1 with error values that have no ERRORTYPE" do
-    assert parse("-Error!\r\n") == {:ok, %Err{message: "Error!"}, ""}
+  test "parse/1: errors" do
+    assert parse("-ERR Error!\r\n") == {:ok, %Err{message: "ERR Error!"}, ""}
     assert parse("-\r\n") == {:ok, %Err{message: ""}, ""}
-    assert parse("-Error message\r\n") == {:ok, %Err{message: "Error message"}, ""}
+    assert parse("- Error message \r\n") == {:ok, %Err{message: " Error message "}, ""}
     assert parse("-üniçø∂e\r\n") == {:ok, %Err{message: "üniçø∂e"}, ""}
-    assert parse("-  whitespace  \r\n") == {:ok, %Err{message: "  whitespace  "}, ""}
+
+    assert parse_with_continuations(["-", "Err", "or", "\r\nrest"]) == {:ok, %Err{message: "Error"}, "rest"}
+    assert parse_with_continuations(["-Error\r", "\nrest"]) == {:ok, %Err{message: "Error"}, "rest"}
   end
 
-  test "parse/1 with error values that have an ERRORTYPE" do
-    assert parse("-ODDSPACES \r \n\r\n") == {:ok, %Err{message: "ODDSPACES \r \n"}, ""}
-    assert parse("-UNICODE ø\r\n") == {:ok, %Err{message: "UNICODE ø"}, ""}
-    assert parse("-ERR   Message\r\n") == {:ok, %Err{message: "ERR   Message"}, ""}
-    assert parse("-WRONGTYPE foo bar\r\n") == {:ok, %Err{message: "WRONGTYPE foo bar"}, ""}
-  end
-
-  test "parse/1 with incomplete error values" do
-    assert parse("-Error") == {:error, :incomplete}
-  end
-
-  test "parse/1 with integer values" do
+  test "parse/1: integers" do
     assert parse(":42\r\n") == {:ok, 42, ""}
     assert parse(":1234567890\r\n") == {:ok, 1234567890, ""}
     assert parse(":-100\r\n") == {:ok, -100, ""}
-    assert parse(":0\r\n") == {:ok, 0, ""}
+    assert parse(":0\r\nrest") == {:ok, 0, "rest"}
+
+    assert parse_with_continuations([":", "-", "1", "\r\n"]) == {:ok, -1, ""}
+    assert parse_with_continuations([":1\r", "\nrest"]) == {:ok, 1, "rest"}
   end
 
-  test "parse/1 with bulk string values" do
+  test "parse/1: bulk strings" do
     assert parse("$0\r\n\r\n") == {:ok, "", ""}
     assert parse("$6\r\nfoobar\r\n") == {:ok, "foobar", ""}
 
@@ -84,123 +79,99 @@ defmodule Redix.ProtocolTest do
     byte_count = byte_size(unicode_str)
     assert parse("$#{byte_count}\r\n#{unicode_str}\r\n") == {:ok, unicode_str, ""}
 
+    # Non-printable bytes
+    assert parse("$2\r\n" <> <<1, 2>> <> "\r\n") == {:ok, <<1, 2>>, ""}
+
     # CRLF in the bulk string.
     assert parse("$2\r\n\r\n\r\n") == {:ok, "\r\n", ""}
-  end
 
-  test "parse/1 with a null bulk string" do
+    # Incomplete
+    assert parse_with_continuations(["$0", "\r\n\r", "\nrest"]) == {:ok, "", "rest"}
+    assert parse_with_continuations(["$", "3", "\r\n", "foo\r\n"]) == {:ok, "foo", ""}
+
+    # Null
     assert parse("$-1\r\n") == {:ok, nil, ""}
     assert parse("$-1\r\nrest") == {:ok, nil, "rest"}
-    assert parse("$-1") == {:error, :incomplete}
+    assert parse_with_continuations(["$-1", "\r", "\nrest"]) == {:ok, nil, "rest"}
+    assert parse_with_continuations(["$", "-1", "\r\nrest"]) == {:ok, nil, "rest"}
+    assert parse_with_continuations(["$-", "1", "\r", "\nrest"]) == {:ok, nil, "rest"}
   end
 
-  test "parse/1 with a bulk string that contains non-printable bytes" do
-    assert parse("$2\r\n" <> <<1, 2>> <> "\r\n") == {:ok, <<1, 2>>, ""}
-  end
-
-  test "parse/1 with a bulk string whose length is malformed" do
-    assert parse("$2") == {:error, :incomplete}
-    assert parse("$2\r") == {:error, :incomplete}
-  end
-
-  test "parse/1 with an empty array" do
+  test "parse/1: arrays" do
     assert parse("*0\r\n") == {:ok, [], ""}
-  end
-
-  test "parse/1 with a null array" do
-    assert parse("*-1\r\n") == {:ok, nil, ""}
-    assert parse("*-1\r\nrest") == {:ok, nil, "rest"}
-    assert parse("*-1\r") == {:error, :incomplete}
-  end
-
-  test "parse/1 with regular array values" do
-    # Regular array.
     assert parse("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n") == {:ok, ["foo", "bar"], ""}
 
-    # Arrays with mixed types.
+    # Mixed types
     arr = "*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$6\r\nfoobar\r\n"
     assert parse(arr) == {:ok, [1, 2, 3, 4, "foobar"], ""}
 
-    # says it has only 1 value, has 2
+    # Says it has only 1 value, has 2
     assert parse("*1\r\n:1\r\n:2\r\n") == {:ok, [1], ":2\r\n"}
-  end
 
-  test "parse/1 with nested array values" do
-    arr = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-ERR Bar\r\n"
-    assert parse(arr) == {:ok, [[1, 2, 3], ["Foo", %Err{message: "ERR Bar"}]], ""}
-  end
+    # Null
+    assert parse("*-1\r\n") == {:ok, nil, ""}
+    assert parse("*-1\r\nrest") == {:ok, nil, "rest"}
+    assert parse_with_continuations(["*-1", "\r", "\nrest"]) == {:ok, nil, "rest"}
+    assert parse_with_continuations(["*", "-1", "\r\nrest"]) == {:ok, nil, "rest"}
+    assert parse_with_continuations(["*-", "1", "\r", "\nrest"]) == {:ok, nil, "rest"}
 
-  test "parse/1 with arrays that contain null values" do
-    # Null values (of different types) in the array.
+    # Null values (of different types) in the array
     arr = "*4\r\n$3\r\nfoo\r\n$-1\r\n$3\r\nbar\r\n*-1\r\n"
     assert parse(arr) == {:ok, ["foo", nil, "bar", nil], ""}
+
+    # Nested
+    arr = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-ERR Bar\r\n"
+    assert parse(arr) == {:ok, [[1, 2, 3], ["Foo", %Err{message: "ERR Bar"}]], ""}
+
+    assert parse_with_continuations(["*", "1\r", "\n", "+OK", "\r\nrest"]) == {:ok, ["OK"], "rest"}
+    assert parse_with_continuations(["*2", "\r\n*1", "\r\n", "+", "OK\r\n", ":1", "\r\n"]) == {:ok, [["OK"], 1], ""}
+    assert parse_with_continuations(["*2\r\n+OK\r\n", "+OK\r\nrest"]) == {:ok, ~w(OK OK), "rest"}
   end
 
-  test "parse/1 with arrays whose length is incomplete" do
-    assert parse("*1") == {:error, :incomplete}
-  end
-
-  test "parse/1 with arrays that contain incomplete elements" do
-    assert parse("*1\r\n+OK") == {:error, :incomplete}
-  end
-
-  test "parse/1 with arrays with not enough elements" do
-    assert parse("*2\r\n+OK\r\n") == {:error, :incomplete}
-  end
-
-  test "parse/1 when the binary value has no type specifier" do
-    msg = "no type specifier"
+  test "parse/1: raising when the binary value has no type specifier" do
+    msg = ~s[invalid type specifier (byte "f")]
     assert_raise ParseError, msg, fn -> parse("foo\r\n") end
     assert_raise ParseError, msg, fn -> parse("foo bar baz") end
   end
 
-  test "parse/1 when the binary value is missing the CRLF terminator" do
-    assert parse("+OK") == {:error, :incomplete}
-    assert parse("+OK\r \n") == {:error, :incomplete}
-    assert parse(":3") == {:error, :incomplete}
+  test "parse/1: when the binary it's an invalid integer" do
+    assert_raise ParseError, ~S(not a valid integer: "\r\n"), fn -> parse(":\r\n") end
+    assert_raise ParseError, ~S(not a valid integer: "-\r\n"), fn -> parse(":-\r\n") end
+    assert_raise ParseError, ~S(not a valid integer: "43a\r\n"), fn -> parse(":43a\r\n") end
+    assert_raise ParseError, ~S(not a valid integer: "foo\r\n"), fn -> parse(":foo\r\n") end
   end
 
-  test "parse/1 when the binary it's an invalid integer" do
-    assert parse(":312") == {:error, :incomplete}
-    assert parse(":312\r") == {:error, :incomplete}
-    assert parse(":") == {:error, :incomplete}
-
-    assert_raise ParseError, ~S(not a valid integer: "\r\n"), fn ->
-      parse(":\r\n")
-    end
-
-    assert_raise ParseError, ~S(not a valid integer: "43a\r\n"), fn ->
-      parse(":43a\r\n")
-    end
-
-    assert_raise ParseError, ~S(not a valid integer: "foo\r\n"), fn ->
-      parse(":foo\r\n")
-    end
-  end
-
-  test "parse/1 with malformed arrays" do
-    # says it has 4 values, only has 3
-    assert parse("*4\r\n:1\r\n:2\r\n:3\r\n") == {:error, :incomplete}
-  end
-
-  test "parse/1 with malformed bulk strings" do
-    # says it has 4 bytes, only has 3
-    assert parse("$4\r\nops\r\n") == {:error, :incomplete}
-  end
-
-  test "parse_multi/2 with enough elements" do
+  test "parse_multi/2: enough elements" do
     data = "+OK\r\n+OK\r\n+OK\r\n"
     assert parse_multi(data, 3) == {:ok, ~w(OK OK OK), ""}
     assert parse_multi(data, 2) == {:ok, ~w(OK OK), "+OK\r\n"}
   end
 
-  test "parse_multi/2 with not enough data" do
-    data = "+OK\r\n+OK\r\n"
-    assert parse_multi(data, 3) == {:error, :incomplete}
+  test "parse_multi/2: not enough data" do
+    data = ["+OK\r\n+OK\r\n", "+", "OK", "\r\nrest"]
+    assert parse_with_continuations(data, &parse_multi(&1, 3)) == {:ok, ~w(OK OK OK), "rest"}
   end
 
-  test "parse_multi/2 when the data ends abruptedly" do
-    data = "+OK\r\n+OK"
-    assert parse_multi(data, 2) == {:error, :incomplete}
+  defp b(bin) do
+    IO.iodata_to_binary(bin)
+  end
+
+  defp parse_with_continuations(data, parser_fun \\ &parse/1)
+
+  defp parse_with_continuations([data], parser_fun) do
+    parser_fun.(data)
+  end
+
+  defp parse_with_continuations([first|rest], parser_fun) do
+    {rest, [last]} = Enum.split(rest, -1)
+
+    assert {:continuation, c} = parser_fun.(first)
+
+    last_cont = Enum.reduce rest, c, fn(data, acc) ->
+      assert {:continuation, new_acc} = acc.(data)
+      new_acc
+    end
+
+    last_cont.(last)
   end
 end

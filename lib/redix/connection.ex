@@ -22,6 +22,9 @@ defmodule Redix.Connection do
 
     # TODO remove but used by Auth right now
     tail: "",
+
+    # TODO document this
+    continuation: nil,
   }
 
   ## Callbacks
