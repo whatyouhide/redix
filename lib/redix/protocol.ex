@@ -105,7 +105,7 @@ defmodule Redix.Protocol do
   end
 
   def parse_multi(data, n) do
-    take_n_elems(data, n, [])
+    take_elems(data, n, [])
   end
 
   defp parse_simple_string(data) do
@@ -163,36 +163,36 @@ defmodule Redix.Protocol do
   defp parse_array(rest) do
     resolve_cont parse_integer(rest), fn
       -1, rest     -> {:ok, nil, rest}
-      nelems, rest -> take_n_elems(rest, nelems, [])
+      nelems, rest -> take_elems(rest, nelems, [])
     end
   end
 
-  def until_crlf(data, acc \\ "")
+  defp until_crlf(data, acc \\ "")
 
-  def until_crlf(@crlf <> rest, acc) do
+  defp until_crlf(@crlf <> rest, acc) do
     {:ok, acc, rest}
   end
 
-  def until_crlf(data, acc) when data == "" or data == "\r" do
+  defp until_crlf(data, acc) when data == "" or data == "\r" do
     mkcont(&until_crlf(data <> &1, acc))
   end
 
-  def until_crlf(<<h, rest :: binary>>, acc) do
+  defp until_crlf(<<h, rest :: binary>>, acc) do
     until_crlf(rest, <<acc :: binary, h>>)
   end
 
-  defp take_n_elems(data, 0, acc) do
+  defp take_elems(data, 0, acc) do
     {:ok, Enum.reverse(acc), data}
   end
 
-  defp take_n_elems(<<_, _ :: binary>> = data, n, acc) when n > 0 do
+  defp take_elems(<<_, _ :: binary>> = data, n, acc) when n > 0 do
     resolve_cont parse(data), fn(elem, rest) ->
-      take_n_elems(rest, n - 1, [elem|acc])
+      take_elems(rest, n - 1, [elem|acc])
     end
   end
 
-  defp take_n_elems(<<>>, n, acc) do
-    mkcont(&take_n_elems(&1, n, acc))
+  defp take_elems(<<>>, n, acc) do
+    mkcont(&take_elems(&1, n, acc))
   end
 
   defp resolve_cont({:ok, val, rest}, ok) when is_function(ok, 2),
