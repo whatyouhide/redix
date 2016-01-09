@@ -75,7 +75,7 @@ defmodule Redix.Connection.Receiver do
   defp new_data(state, data) do
     {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(state.queue)
 
-    case continuation_or(state, &Protocol.parse_multi(&1, ncommands)).(data) do
+    case (state.continuation || &Protocol.parse_multi(&1, ncommands)).(data) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
         state = %{state | queue: new_queue, continuation: nil}
@@ -101,8 +101,4 @@ defmodule Redix.Connection.Receiver do
 
   defp format_resp(%Redix.Error{} = err), do: {:error, err}
   defp format_resp(resp), do: {:ok, resp}
-
-  defp continuation_or(state, fallback_fun) do
-    state.continuation || fallback_fun
-  end
 end
