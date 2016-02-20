@@ -112,6 +112,18 @@ defmodule Redix.Utils do
     end
   end
 
+  @doc """
+  This function unwraps the actual reason if an 'unknown POSIX error' is returned
+  from :inet.format_error/1
+  """
+  @spec format_error(term) :: IO.chardata
+  def format_error(reason) do
+    case :inet.format_error(reason) do
+      'unknown POSIX error' -> inspect(reason)
+      message -> message
+    end
+  end
+
   defp attempt_to_reconnect?(%{opts: opts, reconnection_attempts: attempts}) do
     max_attempts = opts[:max_reconnection_attempts]
     is_nil(max_attempts) or (max_attempts > 0 and attempts <= max_attempts)
