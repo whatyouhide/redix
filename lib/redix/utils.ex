@@ -62,7 +62,7 @@ defmodule Redix.Utils do
         Auth.auth_and_select_db(%{state | socket: socket, reconnection_attempts: 0})
       {:error, reason} ->
         Logger.error ["Error connecting to Redis (#{format_host(state)}): ",
-                      :inet.format_error(reason)]
+                      format_error(reason)]
         handle_connection_error(state, info, reason)
     end
   end
@@ -109,6 +109,18 @@ defmodule Redix.Utils do
       {:backoff, backoff, state}
     else
       {:stop, stop_reason, s}
+    end
+  end
+
+  @doc """
+  This function unwraps the actual reason if an 'unknown POSIX error' is returned
+  from :inet.format_error/1
+  """
+  @spec format_error(term) :: IO.chardata
+  def format_error(reason) do
+    case :inet.format_error(reason) do
+      'unknown POSIX error' -> inspect(reason)
+      message -> message
     end
   end
 

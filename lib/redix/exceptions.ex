@@ -13,6 +13,8 @@ defmodule Redix.ConnectionError do
   Error in the connection to Redis.
   """
 
+  alias Redix.Utils
+
   defexception [:message]
 
   def exception(reason) when is_binary(reason) do
@@ -24,5 +26,5 @@ defmodule Redix.ConnectionError do
   end
 
   defp format_reason(:empty_command), do: "an empty command ([]) is not a valid Redis command"
-  defp format_reason(other), do: :inet.format_error(other)
+  defp format_reason(other), do: Utils.format_error(other)
 end
