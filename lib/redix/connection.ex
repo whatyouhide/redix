@@ -104,7 +104,7 @@ defmodule Redix.Connection do
       raise "there already is a receiver: #{inspect receiver}"
     end
 
-    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, tail: tail)
+    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, initial_data: tail)
     :ok = :gen_tcp.controlling_process(socket, receiver)
     %{state | receiver: receiver, tail: ""}
   end

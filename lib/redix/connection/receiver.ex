@@ -12,8 +12,8 @@ defmodule Redix.Connection.Receiver do
     queue: :queue.new,
     # The TCP socket, which should be passive when given to this process
     socket: nil,
-    # The tail of unparsed data
-    tail: "",
+
+    initial_data: "",
 
     continuation: nil,
   }
@@ -54,7 +54,14 @@ defmodule Redix.Connection.Receiver do
   @doc false
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     :ok = :inet.setopts(socket, active: :once)
-    state = new_data(state, state.tail <> data)
+
+    state =
+      if initial = state.initial_data do
+        new_data(%{state | initial_data: nil}, initial <> data)
+      else
+        new_data(state, data)
+      end
+
     {:noreply, state}
   end
 
@@ -69,19 +76,20 @@ defmodule Redix.Connection.Receiver do
   ## Helpers
 
   defp new_data(state, <<>>) do
-    %{state | tail: <<>>}
+    state
   end
 
   defp new_data(state, data) do
     {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(state.queue)
+    parser = state.continuation || &Protocol.parse_multi(&1, ncommands)
 
-    case (state.continuation || &Protocol.parse_multi(&1, ncommands)).(data) do
+    case parser.(data) do
       {:ok, resp, rest} ->
         Connection.reply(from, format_resp(resp))
         state = %{state | queue: new_queue, continuation: nil}
         new_data(state, rest)
       {:continuation, cont} ->
-        %{state | continuation: cont, tail: ""}
+        %{state | continuation: cont}
     end
   end
 
