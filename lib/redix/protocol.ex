@@ -43,7 +43,7 @@ defmodule Redix.Protocol do
       [?$, Integer.to_string(byte_size(str)), @crlf, str, @crlf]
     end
 
-    [?*, to_string(length(elems)), @crlf, packed]
+    [?*, Integer.to_string(length(elems)), @crlf, packed]
   end
 
   @doc ~S"""
@@ -107,6 +107,8 @@ defmodule Redix.Protocol do
   def parse_multi(data, n) do
     take_elems(data, n, [])
   end
+
+  # Type parsers
 
   defp parse_simple_string(data) do
     until_crlf(data)
