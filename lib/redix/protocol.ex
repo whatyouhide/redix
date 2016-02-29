@@ -171,17 +171,10 @@ defmodule Redix.Protocol do
 
   defp until_crlf(data, acc \\ "")
 
-  defp until_crlf(@crlf <> rest, acc) do
-    {:ok, acc, rest}
-  end
-
-  defp until_crlf(data, acc) when data == "" or data == "\r" do
-    mkcont(&until_crlf(data <> &1, acc))
-  end
-
-  defp until_crlf(<<h, rest :: binary>>, acc) do
-    until_crlf(rest, <<acc :: binary, h>>)
-  end
+  defp until_crlf(@crlf <> rest, acc),         do: {:ok, acc, rest}
+  defp until_crlf("", acc),                    do: mkcont(&until_crlf(&1, acc))
+  defp until_crlf("\r", acc),                  do: mkcont(&until_crlf(<<?\r, &1 :: binary>>, acc))
+  defp until_crlf(<<h, rest :: binary>>, acc), do: until_crlf(rest, <<acc :: binary, h>>)
 
   defp take_elems(data, 0, acc) do
     {:ok, Enum.reverse(acc), data}
