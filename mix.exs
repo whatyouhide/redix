@@ -48,6 +48,7 @@ defmodule Redix.Mixfile do
      {:eredis, github: "wooga/eredis", only: :bench},
      {:yar, github: "dantswain/yar", only: :bench},
      {:coverex, "~> 1.4", only: :test},
+     {:markdown, github: "devinus/markdown", only: :docs},
      {:ex_doc, ">= 0.0.0", only: :docs}]
   end
 end
