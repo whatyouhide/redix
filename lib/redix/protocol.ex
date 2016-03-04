@@ -132,7 +132,7 @@ defmodule Redix.Protocol do
   end
 
   defp parse_integer(rest) do
-    case Integer.parse(rest) do
+    case non_leaky_integer_parse(rest) do
       {i, @crlf <> rest} ->
         {:ok, i, rest}
       {i, rest} when rest == "" or rest == "\r" ->
@@ -171,17 +171,10 @@ defmodule Redix.Protocol do
 
   defp until_crlf(data, acc \\ "")
 
-  defp until_crlf(@crlf <> rest, acc) do
-    {:ok, acc, rest}
-  end
-
-  defp until_crlf(data, acc) when data == "" or data == "\r" do
-    mkcont(&until_crlf(data <> &1, acc))
-  end
-
-  defp until_crlf(<<h, rest :: binary>>, acc) do
-    until_crlf(rest, <<acc :: binary, h>>)
-  end
+  defp until_crlf(@crlf <> rest, acc),         do: {:ok, acc, rest}
+  defp until_crlf("", acc),                    do: mkcont(&until_crlf(&1, acc))
+  defp until_crlf("\r", acc),                  do: mkcont(&until_crlf(<<?\r, &1 :: binary>>, acc))
+  defp until_crlf(<<h, rest :: binary>>, acc), do: until_crlf(rest, <<acc :: binary, h>>)
 
   defp take_elems(data, 0, acc) do
     {:ok, Enum.reverse(acc), data}
@@ -206,4 +199,43 @@ defmodule Redix.Protocol do
   defp mkcont(fun) do
     {:continuation, fun}
   end
+
+  # We need this function because in Elixir <= 1.2.2 Integer.parse/1 leaks. The
+  # Integer.parse/1 implementation uses Integer.parse/2 (with a base) under the
+  # hood, and the implementation for Integer.parse/2 looks very similar to this
+  # (except for the base handling of course); at some point however, it does:
+  #
+  #     defp ...(<<char, rest :: binary>>, ...) do
+  #       ...
+  #       {acc, <<char, rest :: binary>>}
+  #     end
+  #
+  # instead of saving <<char, rest :: binary>> in a variable. This causes the
+  # binary to get copied and in turn a dangerous memory leak to manifest itself.
+  # We'll keep usin this custom function, maybe forever as it's pretty simple, or
+  # at least until we can ditch support for Elixir <= 1.2.3.
+  defp non_leaky_integer_parse(bin)
+
+  # Negative case.
+  defp non_leaky_integer_parse(<<?-, rest :: binary>>) do
+    case do_parse_integer(rest) do
+      {i, r} -> {-i, r}
+      :error -> :error
+    end
+  end
+
+  defp non_leaky_integer_parse(bin) do
+    do_parse_integer(bin)
+  end
+
+  # First character: we error out if it's not a digit.
+  defp do_parse_integer(<<digit, _ :: binary>> = bin) when digit in ?0..?9,
+    do: do_parse_integer(bin, 0)
+  defp do_parse_integer(_),
+    do: :error
+
+  defp do_parse_integer(<<digit, rest :: binary>>, acc) when digit in ?0..?9,
+    do: do_parse_integer(rest, acc * 10 + (digit - ?0))
+  defp do_parse_integer(binary, acc),
+    do: {acc, binary}
 end
