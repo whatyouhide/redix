@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.5
+
+* `Redix.Protocol` now uses continuations under the hood for a faster parsing
+  experience.
+* A bug in `Redix.Protocol` that caused massive memory leaks was fixed. This bug
+  originated upstream in Elixir itself, and I submitted a fix for it
+  [here](https://github.com/elixir-lang/elixir/pull/4350).
+* Some improvements where made to error reporting in the Redix logging.
+
 ## v0.3.4
 
 * Fix a bug in the connection that was replacing the provided Redis password
