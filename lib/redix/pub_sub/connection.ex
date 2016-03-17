@@ -30,10 +30,13 @@ defmodule Redix.PubSub.Connection do
   def connect(info, state) do
     case Utils.connect(info, state) do
       {:ok, state} ->
-        if info == :backoff do
-          Enum.each(state.clients_to_notify_of_reconnection, &send(&1, msg(:reconnected, nil)))
-          state = %{state | clients_to_notify_of_reconnection: []}
-        end
+        state =
+          if info == :backoff do
+            Enum.each(state.clients_to_notify_of_reconnection, &send(&1, msg(:reconnected, nil)))
+            %{state | clients_to_notify_of_reconnection: []}
+          else
+            state
+          end
 
         {:ok, state}
       o ->
@@ -169,14 +172,24 @@ defmodule Redix.PubSub.Connection do
     patterns = Enum.map(patterns, fn({:pattern, pattern}) -> pattern end)
 
     commands = []
-    if channels != [] do
-      commands = [["UNSUBSCRIBE"|channels]|commands]
-      state = enqueue(state, Enum.map(channels, &{:unsubscribe, &1, nil}))
-    end
-    if patterns != [] do
-      commands = [["PUNSUBSCRIBE"|patterns]|commands]
-      state = enqueue(state, Enum.map(patterns, &{:punsubscribe, &1, nil}))
-    end
+
+    {commands, state} =
+      if channels != [] do
+        cmds = [["UNSUBSCRIBE"|channels]|commands]
+        s = enqueue(state, Enum.map(channels, &{:unsubscribe, &1, nil}))
+        {cmds, s}
+      else
+        {commands, state}
+      end
+
+    {commands, state} =
+      if patterns != [] do
+        cmds = [["PUNSUBSCRIBE"|patterns]|commands]
+        s = enqueue(state, Enum.map(patterns, &{:punsubscribe, &1, nil}))
+        {cmds, s}
+      else
+        {commands, state}
+      end
 
     if commands != [] do
       Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
