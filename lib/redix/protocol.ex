@@ -135,9 +135,11 @@ defmodule Redix.Protocol do
     case non_leaky_integer_parse(rest) do
       {i, @crlf <> rest} ->
         {:ok, i, rest}
-      {i, rest} when rest == "" or rest == "\r" ->
+      {_i, ""} ->
+        mkcont fn(new_data) -> parse_integer(rest <> new_data) end
+      {i, "\r"} ->
         mkcont fn(new_data) ->
-          until_crlf(rest <> new_data) |> resolve_cont(fn("", rest) -> {:ok, i, rest} end)
+          until_crlf("\r" <> new_data) |> resolve_cont(fn("", rest) -> {:ok, i, rest} end)
         end
       {_i, _rest} ->
         raise ParseError, message: "not a valid integer: #{inspect rest}"

@@ -68,6 +68,8 @@ defmodule Redix.ProtocolTest do
 
     assert parse_with_continuations([":", "-", "1", "\r\n"]) == {:ok, -1, ""}
     assert parse_with_continuations([":1\r", "\nrest"]) == {:ok, 1, "rest"}
+    assert parse_with_continuations([":1", "3", "\r\nrest"]) == {:ok, 13, "rest"}
+    assert parse_with_continuations([":-", "1", "3", "\r\nrest"]) == {:ok, -13, "rest"}
   end
 
   test "parse/1: bulk strings" do
