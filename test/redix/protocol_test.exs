@@ -137,10 +137,10 @@ defmodule Redix.ProtocolTest do
   end
 
   test "parse/1: when the binary it's an invalid integer" do
-    assert_raise ParseError, ~S(not a valid integer: "\r\n"), fn -> parse(":\r\n") end
-    assert_raise ParseError, ~S(not a valid integer: "-\r\n"), fn -> parse(":-\r\n") end
-    assert_raise ParseError, ~S(not a valid integer: "43a\r\n"), fn -> parse(":43a\r\n") end
-    assert_raise ParseError, ~S(not a valid integer: "foo\r\n"), fn -> parse(":foo\r\n") end
+    assert_raise ParseError, ~S(expected integer, found: "\r"), fn -> parse(":\r\n") end
+    assert_raise ParseError, ~S(expected integer, found: "\r"), fn -> parse(":-\r\n") end
+    assert_raise ParseError, ~S(expected CRLF, found: "a"), fn -> parse(":43a\r\n") end
+    assert_raise ParseError, ~S(expected integer, found: "f"), fn -> parse(":foo\r\n") end
   end
 
   test "parse_multi/2: enough elements" do
