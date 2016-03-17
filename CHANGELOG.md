@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.3.6
+
+* Fixed a bug in the integer parsing in `Redix.Protocol`.
+
 ## v0.3.5
 
 * `Redix.Protocol` now uses continuations under the hood for a faster parsing
