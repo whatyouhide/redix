@@ -146,6 +146,11 @@ defmodule Redix.PubSub do
 
       {:redix_pubsub, :subscribe, channel, nil}
 
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
+
   ## Examples
 
       iex> Redix.subscribe(conn, ["foo", "bar", "baz"], self())
@@ -188,6 +193,11 @@ defmodule Redix.PubSub do
 
      {:redix_pubsub, :psubscribe, pattern, nil}
 
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
+
   ## Examples
 
       iex> Redix.psubscribe(conn, "ba*", self())
@@ -227,6 +237,11 @@ defmodule Redix.PubSub do
   sent to `recipient` with the following form:
 
       {:redix_pubsub, :unsubscribe, channel, nil}
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
 
   ## Examples
 
@@ -269,6 +284,11 @@ defmodule Redix.PubSub do
   sent to `recipient` with the following form:
 
       {:redix_pubsub, :punsubscribe, pattern, nil}
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
 
   ## Examples
 
