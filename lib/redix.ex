@@ -198,6 +198,11 @@ defmodule Redix do
   If the given command (`cmd`) is an empty command (`[]`), `{:error,
   :empty_command}` will be returned.
 
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
+
   ## Examples
 
       iex> Redix.command(conn, ["SET", "mykey", "foo"])
@@ -241,6 +246,11 @@ defmodule Redix do
       error is raised.
 
   This function accepts the same options as `command/3`.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
 
   ## Examples
 
@@ -290,6 +300,11 @@ defmodule Redix do
   (`[]`), `{:error, :empty_command}` will be returned (which mirrors the
   behaviour of `command/3` in case of empty commands).
 
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
+
   ## Examples
 
       iex> Redix.pipeline(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
@@ -336,6 +351,11 @@ defmodule Redix do
   documentation for `pipeline/3`.
 
   This function accepts the same options as `pipeline/3`.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
 
   ## Examples
 
