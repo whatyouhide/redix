@@ -62,7 +62,7 @@ replies with a list of responses. They can be used in Redix via
 `Redix.pipeline/2-3`:
 
 ```elixir
-Redix.pipeline(conn, [~w(INCR foo), ~w(INCR foo), ~w(INCR foo 2)])
+Redix.pipeline(conn, [~w(INCR foo), ~w(INCR foo), ~w(INCRBY foo 2)])
 #=> {:ok, [1, 2, 4]}
 ```
 
