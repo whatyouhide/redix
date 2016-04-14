@@ -4,7 +4,7 @@ defmodule Redix.UtilsTest do
   import Redix.Utils
 
   test "format_error/1 known error" do
-    assert format_error(:eaddrinuse) == 'address already in use'
+    assert format_error(:eaddrinuse) == "address already in use"
   end
 
   test "format_error/1 unknown error" do
