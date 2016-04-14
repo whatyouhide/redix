@@ -116,11 +116,11 @@ defmodule Redix.Utils do
   This function unwraps the actual reason if an 'unknown POSIX error' is returned
   from :inet.format_error/1
   """
-  @spec format_error(term) :: IO.chardata
+  @spec format_error(term) :: binary
   def format_error(reason) do
     case :inet.format_error(reason) do
       'unknown POSIX error' -> inspect(reason)
-      message -> message
+      message -> List.to_string(message)
     end
   end
 
