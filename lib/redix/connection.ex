@@ -31,7 +31,7 @@ defmodule Redix.Connection do
 
   @doc false
   def init(opts) do
-    {:connect, :init, Dict.merge(@initial_state, opts: opts)}
+    {:connect, :init, Map.put(@initial_state, :opts, opts)}
   end
 
   @doc false

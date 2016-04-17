@@ -21,7 +21,7 @@ defmodule Redix.PubSub.Connection do
 
   @doc false
   def init(opts) do
-    {:connect, :init, Dict.merge(@initial_state, opts: opts)}
+    {:connect, :init, Map.put(@initial_state, :opts, opts)}
   end
 
   @doc false
@@ -156,9 +156,9 @@ defmodule Redix.PubSub.Connection do
       if HashSet.member?(for_channel, recipient) do
         for_channel = HashSet.delete(for_channel, recipient)
         if HashSet.size(for_channel) == 0 do
-          {[channel], Dict.delete(recipients, channel)}
+          {[channel], HashDict.delete(recipients, channel)}
         else
-          {[], Dict.put(recipients, channel, for_channel)}
+          {[], HashDict.put(recipients, channel, for_channel)}
         end
       else
         {[], recipients}
@@ -202,7 +202,7 @@ defmodule Redix.PubSub.Connection do
     key = {op_to_type(op), channel}
 
     if recipients[key] do
-      recipients = Dict.update!(recipients, key, &HashSet.put(&1, recipient))
+      recipients = HashDict.update!(recipients, key, &HashSet.put(&1, recipient))
       send(recipient, msg(op, channel))
       {[], recipients}
     else
@@ -220,7 +220,7 @@ defmodule Redix.PubSub.Connection do
         {[channel], recipients}
       else
         send(recipient, msg(op, channel))
-        {[], Dict.put(recipients, key, new_for_channel)}
+        {[], HashDict.put(recipients, key, new_for_channel)}
       end
     else
       {[], recipients}
@@ -261,13 +261,13 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp handle_message(state, ["message", channel, payload]) do
-    recipients = Dict.fetch!(state.recipients, {:channel, channel})
+    recipients = HashDict.fetch!(state.recipients, {:channel, channel})
     Enum.each(recipients, fn(rec) -> send(rec, msg(:message, payload, channel)) end)
     state
   end
 
   defp handle_message(state, ["pmessage", pattern, channel, payload]) do
-    recipients = Dict.fetch!(state.recipients, {:pattern, pattern})
+    recipients = HashDict.fetch!(state.recipients, {:pattern, pattern})
     Enum.each(recipients, fn(rec) -> send(rec, msg(:pmessage, payload, {pattern, channel})) end)
     state
   end
@@ -294,7 +294,7 @@ defmodule Redix.PubSub.Connection do
 
   defp demonitor_recipient(state, recipient) do
     unless Enum.any?(state.recipients, fn({_, recipients}) -> HashSet.member?(recipients, recipient) end) do
-      state.monitors |> Dict.fetch!(recipient) |> Process.demonitor
+      state.monitors |> HashDict.fetch!(recipient) |> Process.demonitor
     end
 
     state
@@ -303,8 +303,8 @@ defmodule Redix.PubSub.Connection do
   defp disconnect_and_notify_clients(state, error_reason) do
     # First, demonitor all the monitored clients and reset the state.
     {clients, state} = get_and_update_in state.monitors, fn(monitors) ->
-      monitors |> Dict.values |> Enum.each(&Process.demonitor/1)
-      {Dict.keys(monitors), HashDict.new}
+      monitors |> HashDict.values |> Enum.each(&Process.demonitor/1)
+      {HashDict.keys(monitors), HashDict.new}
     end
 
     # Then, let's send a message to each of those clients.

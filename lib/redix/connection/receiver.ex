@@ -40,7 +40,7 @@ defmodule Redix.Connection.Receiver do
 
   @doc false
   def init(opts) do
-    state = Dict.merge(@initial_state, opts)
+    state = Enum.into(opts, @initial_state)
     :inet.setopts(state.socket, active: :once)
     {:ok, state}
   end
