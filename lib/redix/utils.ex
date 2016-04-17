@@ -2,6 +2,7 @@ defmodule Redix.Utils do
   @moduledoc false
 
   require Logger
+
   alias Redix.Connection.Auth
 
   # We use exit_on_close: false so that we can consistently close the socket
@@ -140,10 +141,11 @@ defmodule Redix.Utils do
   defp check_redis_opts(opts) when is_list(opts) do
     Enum.each opts, fn {opt, _value} ->
       unless opt in @redis_opts do
-        raise ArgumentError, "unknown Redis connection option: #{inspect opt}." <>
-                             " The first argument to start_link/1 should only" <>
-                             " contain Redis-specific options (host, port," <>
-                             " password, database)"
+        raise ArgumentError,
+          "unknown Redis connection option: #{inspect opt}." <>
+          " The first argument to start_link/1 should only" <>
+          " contain Redis-specific options (host, port," <>
+          " password, database)"
       end
     end
   end

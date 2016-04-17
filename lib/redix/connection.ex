@@ -6,6 +6,7 @@ defmodule Redix.Connection do
   alias Redix.Protocol
   alias Redix.Utils
   alias Redix.Connection.Receiver
+
   require Logger
 
   @type state :: %{}
@@ -17,11 +18,9 @@ defmodule Redix.Connection do
     opts: nil,
     # The receiver process
     receiver: nil,
-
-    # TODO remove but used by Auth right now
+    # TODO: remove but used by Auth right now
     tail: "",
-
-    # TODO document this
+    # TODO: document this
     continuation: nil,
   }
 

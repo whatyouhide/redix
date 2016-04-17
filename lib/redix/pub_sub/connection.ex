@@ -3,9 +3,10 @@ defmodule Redix.PubSub.Connection do
 
   use Connection
 
-  require Logger
   alias Redix.Protocol
   alias Redix.Utils
+
+  require Logger
 
   @initial_state %{
     tail: "",
