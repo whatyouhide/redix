@@ -289,15 +289,4 @@ defmodule RedixTest do
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
     end
   end
-
-  @tag :no_setup
-  test "exceeding the max number of reconnection attempts" do
-    {:ok, c} = Redix.start_link([], max_reconnection_attempts: 0)
-
-    silence_log fn ->
-      Process.flag :trap_exit, true
-      Redix.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
-      assert_receive {:EXIT, ^c, :tcp_closed}
-    end
-  end
 end

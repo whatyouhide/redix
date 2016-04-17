@@ -33,12 +33,6 @@ defmodule Redix do
       `:backoff` option passed to `start_link/2`. The default is `2000`
       milliseconds.
 
-  This behaviour can be tweaked with the `:max_reconnection_attempts` option,
-  which controls the max number of reconnection attempts that will be made. For
-  example, to never attempt reconnecting this option can be set to `0`. By
-  default it's `nil`, meaning there's no limit on the number of reconnection
-  attempts that will be made.
-
   These reconnections attempts only happen when the connection to Redis has been
   established at least once before. If a connection error happens when
   connecting to Redis for the first time, the Redix process will just crash with
@@ -129,11 +123,6 @@ defmodule Redix do
       overridden by Redix so that it functions properly. Defaults to `[]`.
     * `:backoff` - (integer) the time (in milliseconds) to wait before trying to
       reconnect when a network error occurs. Defaults to `2000`.
-    * `:max_reconnection_attempts` - (integer or `nil`) the maximum number of
-      reconnection attempts that the Redix process is allowed to make. When the
-      Redix process "consumes" all the reconnection attempts allowed to it, it
-      will exit with the original error's reason. If the value is `nil`, there's
-      no limit to the reconnection attempts that can be made. Defaults to `nil`.
 
   In addition to these options, all options accepted by
   `Connection.start_link/3` (and thus `GenServer.start_link/3`) are forwarded to

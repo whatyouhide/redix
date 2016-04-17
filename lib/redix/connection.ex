@@ -15,8 +15,6 @@ defmodule Redix.Connection do
     socket: nil,
     # Options passed when the connection is started
     opts: nil,
-    # The number of times a reconnection has been attempted
-    reconnection_attempts: 0,
     # The receiver process
     receiver: nil,
 
@@ -62,9 +60,7 @@ defmodule Redix.Connection do
 
     # Backoff with 0 ms as the backoff time to churn through all the commands in
     # the mailbox before reconnecting.
-    state
-    |> reset_state
-    |> Utils.backoff_or_stop(0, reason)
+    {:backoff, 0, reset_state(state)}
   end
 
   @doc false

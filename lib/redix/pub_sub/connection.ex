@@ -12,7 +12,6 @@ defmodule Redix.PubSub.Connection do
     socket: nil,
     recipients: HashDict.new,
     monitors: HashDict.new,
-    reconnection_attempts: 0,
     queue: :queue.new,
     clients_to_notify_of_reconnection: [],
   }
@@ -56,7 +55,7 @@ defmodule Redix.PubSub.Connection do
                   Utils.format_error(reason)]
     :gen_tcp.close(state.socket)
     state = disconnect_and_notify_clients(state, reason)
-    Utils.backoff_or_stop(%{state | tail: "", socket: nil}, 0, reason)
+    {:backoff, 0, %{state | tail: "", socket: nil}}
   end
 
   @doc false
