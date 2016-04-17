@@ -23,7 +23,7 @@ defmodule Redix.Utils do
   ]
 
   @redis_opts [:host, :port, :password, :database]
-  @redix_opts [:socket_opts, :backoff]
+  @redix_opts [:socket_opts, :backoff, :sync_connect]
 
   @default_timeout 5000
 
@@ -53,18 +53,16 @@ defmodule Redix.Utils do
     Connection.start_link(conn_module, opts, connection_opts)
   end
 
-  @spec connect(term, Redix.Connection.state) :: term
-  def connect(info, %{opts: opts} = state) do
+  def connect(%{opts: opts} = state) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
+    # TODO: let's replace with `with` when we depend on ~> 1.2.
     case :gen_tcp.connect(host, port, socket_opts, timeout) do
       {:ok, socket} ->
         setup_socket_buffers(socket)
         Auth.auth_and_select_db(%{state | socket: socket})
-      {:error, reason} ->
-        Logger.error ["Error connecting to Redis (#{format_host(state)}): ",
-                      format_error(reason)]
-        handle_connection_error(state, info, reason)
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -102,21 +100,19 @@ defmodule Redix.Utils do
   from :inet.format_error/1
   """
   @spec format_error(term) :: binary
+  def format_error(reason)
+
+  # Apparently :inet.format_error/1 doesn't format :tcp_closed.
+  def format_error(:tcp_closed) do
+    "TCP connection closed"
+  end
+
   def format_error(reason) do
     case :inet.format_error(reason) do
       'unknown POSIX error' -> inspect(reason)
       message -> List.to_string(message)
     end
   end
-
-  # If `info` is :backoff then this is a *reconnection* attempt, so if there's
-  # an error let's try to just reconnect after a backoff time (if we're under
-  # the max number of retries). If `info` is :init, then this is the first
-  # connection attempt so if it fails let's just die.
-  defp handle_connection_error(state, :init, reason),
-    do: {:stop, reason, state}
-  defp handle_connection_error(state, :backoff, _reason),
-    do: {:backoff, state.opts[:backoff], state}
 
   # Extracts the TCP connection options (host, port and socket opts) from the
   # given `opts`.

@@ -58,11 +58,22 @@ defmodule RedixTest do
   end
 
   @tag :no_setup
-  test "start_link/1: when unable to connect to Redis" do
+  test "start_link/1: when unable to connect to Redis with sync_connect: true" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      assert {:ok, pid} = Redix.start_link(host: "nonexistent")
-      assert_receive {:EXIT, ^pid, :nxdomain}, 1000
+      assert {:error, :nxdomain} =
+        Redix.start_link([host: "nonexistent"], [sync_connect: true])
+      assert_receive {:EXIT, _pid, :nxdomain}, 1000
+    end
+  end
+
+  @tag :no_setup
+  test "start_link/1: when unable to connect to Redis with sync_connect: false" do
+    silence_log fn ->
+      Process.flag :trap_exit, true
+      assert {:ok, pid} =
+        Redix.start_link([host: "nonexistent"], [sync_connect: false])
+      refute_receive {:EXIT, ^pid, :nxdomain}
     end
   end
 

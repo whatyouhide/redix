@@ -28,17 +28,29 @@ defmodule Redix.Connection do
 
   @doc false
   def init(opts) do
-    {:connect, :init, Map.put(@initial_state, :opts, opts)}
+    state = Map.put(@initial_state, :opts, opts)
+
+    if opts[:sync_connect] do
+      sync_connect(state)
+    else
+      {:connect, :init, state}
+    end
   end
 
   @doc false
   def connect(info, state)
 
-  def connect(info, state) do
-    case Utils.connect(info, state) do
+  def connect(_info, state) do
+    case Utils.connect(state) do
       {:ok, state} ->
         state = start_receiver_and_hand_socket(state)
         {:ok, state}
+      {:error, reason} ->
+        Logger.error [
+          "Failed to connect to Redis (", Utils.format_host(state), "): ",
+          Utils.format_error(reason),
+        ]
+        {:backoff, state.opts[:backoff], state}
       other ->
         other
     end
@@ -89,6 +101,18 @@ defmodule Redix.Connection do
   end
 
   ## Helper functions
+
+  defp sync_connect(state) do
+    case Utils.connect(state) do
+      {:ok, state} ->
+        state = start_receiver_and_hand_socket(state)
+        {:ok, state}
+      {:error, reason} ->
+        {:stop, reason}
+      {:stop, reason, _state} ->
+        {:stop, reason}
+    end
+  end
 
   defp reset_state(state) do
     %{state | socket: nil}
