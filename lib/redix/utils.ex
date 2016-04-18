@@ -20,6 +20,7 @@ defmodule Redix.Utils do
   @redix_default_opts [
     socket_opts: [],
     backoff: 2000,
+    max_backoff: 30_000,
   ]
 
   @redis_opts [:host, :port, :password, :database]

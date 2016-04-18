@@ -15,7 +15,12 @@ defmodule Redix.PubSub.Connection do
     monitors: HashDict.new,
     queue: :queue.new,
     clients_to_notify_of_reconnection: [],
+    current_backoff: nil,
   }
+
+  @initial_backoff 500
+
+  @backoff_exponent 1.5
 
   ## Callbacks
 
@@ -50,7 +55,20 @@ defmodule Redix.PubSub.Connection do
           "Failed to connect to Redis (", Utils.format_host(state), "): ",
           Utils.format_error(reason),
         ]
-        {:backoff, state.opts[:backoff], state}
+
+        if info == :init do
+          {:backoff, @initial_backoff, %{state | current_backoff: @initial_backoff}}
+        else
+          max_backoff = state.opts[:max_backoff]
+          next_exponential_backoff = round(state.current_backoff * @backoff_exponent)
+          next_backoff =
+            if max_backoff == :infinity do
+              next_exponential_backoff
+            else
+              min(next_exponential_backoff, max_backoff)
+            end
+          {:backoff, next_backoff, %{state | current_backoff: next_backoff}}
+        end
       other ->
         other
     end
@@ -68,7 +86,7 @@ defmodule Redix.PubSub.Connection do
                   Utils.format_error(reason)]
     :gen_tcp.close(state.socket)
     state = disconnect_and_notify_clients(state, reason)
-    {:backoff, 0, %{state | tail: "", socket: nil}}
+    {:backoff, @initial_backoff, %{state | tail: "", socket: nil, current_backoff: @initial_backoff}}
   end
 
   @doc false

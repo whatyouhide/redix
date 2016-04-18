@@ -296,7 +296,8 @@ defmodule RedixTest do
 
     silence_log fn ->
       assert {:ok, _} = Redix.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
-      :timer.sleep(100)
+      # Redix retries the first reconnection after 500ms.
+      :timer.sleep(600)
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
     end
   end
