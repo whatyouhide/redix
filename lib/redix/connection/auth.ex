@@ -15,6 +15,7 @@ defmodule Redix.Connection.Auth do
   @spec auth_and_select_db(Redix.Connection.state) ::
     {:ok, Redix.Connection.state} | {:stop, term, Redix.Connection.state}
   def auth_and_select_db(state) do
+    # TODO: this *begs* for `with` once we depend on ~> 1.2.
     case auth(state, state.opts[:password]) do
       {:ok, state} ->
         case select_db(state, state.opts[:database]) do

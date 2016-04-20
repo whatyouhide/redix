@@ -22,23 +22,54 @@ defmodule Redix.Connection do
     tail: "",
     # TODO: document this
     continuation: nil,
+    # TODO: document this
+    current_backoff: nil,
   }
+
+  @initial_backoff 500
+
+  @backoff_exponent 1.5
 
   ## Callbacks
 
   @doc false
   def init(opts) do
-    {:connect, :init, Map.put(@initial_state, :opts, opts)}
+    state = Map.put(@initial_state, :opts, opts)
+
+    if opts[:sync_connect] do
+      sync_connect(state)
+    else
+      {:connect, :init, state}
+    end
   end
 
   @doc false
   def connect(info, state)
 
   def connect(info, state) do
-    case Utils.connect(info, state) do
+    case Utils.connect(state) do
       {:ok, state} ->
         state = start_receiver_and_hand_socket(state)
         {:ok, state}
+      {:error, reason} ->
+        Logger.error [
+          "Failed to connect to Redis (", Utils.format_host(state), "): ",
+          Utils.format_error(reason),
+        ]
+
+        if info == :init do
+          {:backoff, @initial_backoff, %{state | current_backoff: @initial_backoff}}
+        else
+          max_backoff = state.opts[:max_backoff]
+          next_exponential_backoff = round(state.current_backoff * @backoff_exponent)
+          next_backoff =
+            if max_backoff == :infinity do
+              next_exponential_backoff
+            else
+              min(next_exponential_backoff, max_backoff)
+            end
+          {:backoff, next_backoff, %{state | current_backoff: next_backoff}}
+        end
       other ->
         other
     end
@@ -57,9 +88,7 @@ defmodule Redix.Connection do
 
     :gen_tcp.close(state.socket)
 
-    # Backoff with 0 ms as the backoff time to churn through all the commands in
-    # the mailbox before reconnecting.
-    {:backoff, 0, reset_state(state)}
+    {:backoff, @initial_backoff, %{reset_state(state) | current_backoff: @initial_backoff}}
   end
 
   @doc false
@@ -89,6 +118,18 @@ defmodule Redix.Connection do
   end
 
   ## Helper functions
+
+  defp sync_connect(state) do
+    case Utils.connect(state) do
+      {:ok, state} ->
+        state = start_receiver_and_hand_socket(state)
+        {:ok, state}
+      {:error, reason} ->
+        {:stop, reason}
+      {:stop, reason, _state} ->
+        {:stop, reason}
+    end
+  end
 
   defp reset_state(state) do
     %{state | socket: nil}
