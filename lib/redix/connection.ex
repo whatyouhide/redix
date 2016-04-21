@@ -18,10 +18,6 @@ defmodule Redix.Connection do
     opts: nil,
     # The receiver process
     receiver: nil,
-    # TODO: remove but used by Auth right now
-    tail: "",
-    # TODO: document this
-    continuation: nil,
     # TODO: document this
     current_backoff: nil,
   ]
