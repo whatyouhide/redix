@@ -190,7 +190,7 @@ defmodule Redix.Protocol do
 
   defp take_elems(<<_, _ :: binary>> = data, n, acc) when n > 0 do
     resolve_cont parse(data), fn(elem, rest) ->
-      take_elems(rest, n - 1, [elem|acc])
+      take_elems(rest, n - 1, [elem | acc])
     end
   end
 

@@ -164,7 +164,7 @@ defmodule Redix.ProtocolTest do
     parser_fun.(data)
   end
 
-  defp parse_with_continuations([first|rest], parser_fun) do
+  defp parse_with_continuations([first | rest], parser_fun) do
     {rest, [last]} = Enum.split(rest, -1)
 
     assert {:continuation, c} = parser_fun.(first)
