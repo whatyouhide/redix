@@ -9,9 +9,9 @@ defmodule Redix.Connection do
 
   require Logger
 
-  @type state :: %{}
+  @type state :: %__MODULE__{}
 
-  @initial_state %{
+  defstruct [
     # The TCP socket that holds the connection to Redis
     socket: nil,
     # Options passed when the connection is started
@@ -24,7 +24,7 @@ defmodule Redix.Connection do
     continuation: nil,
     # TODO: document this
     current_backoff: nil,
-  }
+  ]
 
   @initial_backoff 500
 
@@ -34,7 +34,7 @@ defmodule Redix.Connection do
 
   @doc false
   def init(opts) do
-    state = Map.put(@initial_state, :opts, opts)
+    state = %__MODULE__{opts: opts}
 
     if opts[:sync_connect] do
       sync_connect(state)

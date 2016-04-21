@@ -8,7 +8,8 @@ defmodule Redix.PubSub.Connection do
 
   require Logger
 
-  @initial_state %{
+  defstruct [
+    opts: nil,
     tail: "",
     socket: nil,
     recipients: HashDict.new,
@@ -16,7 +17,7 @@ defmodule Redix.PubSub.Connection do
     queue: :queue.new,
     clients_to_notify_of_reconnection: [],
     current_backoff: nil,
-  }
+  ]
 
   @initial_backoff 500
 
@@ -26,7 +27,7 @@ defmodule Redix.PubSub.Connection do
 
   @doc false
   def init(opts) do
-    state = Map.put(@initial_state, :opts, opts)
+    state = %__MODULE__{opts: opts}
 
     if opts[:sync_connect] do
       sync_connect(state)
@@ -277,9 +278,8 @@ defmodule Redix.PubSub.Connection do
 
     state = %{state | queue: new_queue}
 
-    update_in state, [:recipients, {op_to_type(op), channel}], fn(set) ->
-      (set || HashSet.new) |> HashSet.put(recipient)
-    end
+    new_recipients = HashDict.update(state.recipients, {op_to_type(op), channel}, HashSet.put(HashSet.new, recipient), &HashSet.put(&1, recipient))
+    %{state | recipients: new_recipients}
   end
 
   defp handle_message(state, [op, channel, _count]) when op in ~w(unsubscribe punsubscribe) do
@@ -297,7 +297,7 @@ defmodule Redix.PubSub.Connection do
       state
     else
       send(recipient, msg(op, channel))
-      update_in state, [:recipients, {op_to_type(op), channel}], &HashSet.delete(&1, recipient)
+      %{state | recipients: HashDict.update!(state.recipients, {op_to_type(op), channel}, &HashSet.delete(&1, recipient))}
     end
   end
 
@@ -325,12 +325,7 @@ defmodule Redix.PubSub.Connection do
   defp op_to_type(op) when op in [:psubscribe, :punsubscribe], do: :pattern
 
   defp monitor_recipient(state, recipient) do
-    update_in state.monitors[recipient], fn
-      nil ->
-        Process.monitor(recipient)
-      ref when is_reference(ref) ->
-        ref
-    end
+    %{state | monitors: HashDict.put_new_lazy(state.monitors, recipient, fn -> Process.monitor(recipient) end)}
   end
 
   defp demonitor_recipient(state, recipient) do
@@ -343,10 +338,10 @@ defmodule Redix.PubSub.Connection do
 
   defp disconnect_and_notify_clients(state, error_reason) do
     # First, demonitor all the monitored clients and reset the state.
-    {clients, state} = get_and_update_in state.monitors, fn(monitors) ->
-      monitors |> HashDict.values |> Enum.each(&Process.demonitor/1)
-      {HashDict.keys(monitors), HashDict.new}
-    end
+    state.monitors |> HashDict.values |> Enum.each(&Process.demonitor/1)
+    clients = HashDict.keys(state.monitors)
+
+    state = %{state | monitors: HashDict.new}
 
     # Then, let's send a message to each of those clients.
     for client <- clients do
