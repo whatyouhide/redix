@@ -98,9 +98,19 @@ defmodule Redix.Connection do
     {:reply, {:error, :closed}, state}
   end
 
-  def handle_call({:commands, commands}, from, state) do
-    :ok = Receiver.enqueue(state.receiver, {:commands, from, length(commands)})
+  def handle_call({:commands, commands, request_id}, from, state) do
+    :ok = Receiver.enqueue(state.receiver, {:commands, from, length(commands), request_id})
     Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
+  end
+
+  def handle_call({:timed_out, request_id}, _from, state) do
+    :ok = Receiver.timed_out(state.receiver, request_id)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:cancel_timed_out, request_id}, _from, state) do
+    :ok = Receiver.cancel_timed_out(state.receiver, request_id)
+    {:reply, :ok, state}
   end
 
   @doc false

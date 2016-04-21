@@ -283,11 +283,11 @@ defmodule RedixTest do
   end
 
   test "command/2: timeout", %{conn: c} do
-    assert {:timeout, _} = catch_exit(Redix.command(c, ~w(PING), timeout: 0))
+    assert {:error, :timeout} = Redix.command(c, ~W(PING), timeout: 0)
   end
 
   test "pipeline/2: timeout", %{conn: c} do
-    assert {:timeout, _} = catch_exit(Redix.pipeline(c, [["PING"], ["PING"]], timeout: 0))
+    assert {:error, :timeout} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
   end
 
   @tag :no_setup
@@ -300,5 +300,13 @@ defmodule RedixTest do
       :timer.sleep(600)
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
     end
+  end
+
+  @tag :no_setup
+  test "timeouts" do
+    {:ok, c} = Redix.start_link
+
+    assert {:error, :timeout} = Redix.command(c, ~w(PING), timeout: 0)
+    refute_receive {_ref, _message}
   end
 end
