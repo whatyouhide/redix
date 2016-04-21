@@ -61,7 +61,16 @@ defmodule Redix.Utils do
     case :gen_tcp.connect(host, port, socket_opts, timeout) do
       {:ok, socket} ->
         setup_socket_buffers(socket)
-        Auth.auth_and_select_db(%{state | socket: socket})
+        state = %{state | socket: socket}
+        case Auth.auth_and_select_db(socket, opts) do
+          {:ok, ""} ->
+            :inet.setopts(socket, active: :once)
+            {:ok, state}
+          {:ok, tail} when byte_size(tail) > 0 ->
+            {:stop, :unexpected_tail_after_auth, state}
+          {:error, reason} ->
+            {:stop, reason, state}
+        end
       {:error, _reason} = error ->
         error
     end

@@ -11,80 +11,80 @@ defmodule Redix.Connection.Auth do
   function will send the appropriate `AUTH` command to the Redis connection in
   `state.socket`. If a database is specified, then the appropriate `SELECT`
   command will be issued.
+
+  The socket is expected to be in passive mode, and will be returned in passive
+  mode to the caller.
   """
-  @spec auth_and_select_db(Redix.Connection.state) ::
-    {:ok, Redix.Connection.state} | {:stop, term, Redix.Connection.state}
-  def auth_and_select_db(state) do
+  @spec auth_and_select_db(:gen_tcp.socket, Keyword.t) :: {:ok, binary} | {:error, term}
+  def auth_and_select_db(socket, opts) do
     # TODO: this *begs* for `with` once we depend on ~> 1.2.
-    case auth(state, state.opts[:password]) do
-      {:ok, state} ->
-        case select_db(state, state.opts[:database]) do
-          {:ok, state} ->
-            :ok = :inet.setopts(state.socket, active: :once)
-            {:ok, state}
-          o ->
-            o
-        end
-      o ->
-        o
+    case auth(socket, opts[:password]) do
+      {:ok, tail} ->
+        select_db(socket, opts[:database], tail)
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  defp auth(state, nil) do
-    {:ok, state}
+  @spec auth(:gen_tcp.socket, nil | binary) :: {:ok | binary} | {:error, term}
+  defp auth(socket, password)
+
+  defp auth(_socket, nil) do
+    {:ok, ""}
   end
 
-  defp auth(%{socket: socket} = state, password) when is_binary(password) do
+  defp auth(socket, password) when is_binary(password) do
     case :gen_tcp.send(socket, Protocol.pack(["AUTH", password])) do
       :ok ->
-        case wait_for_response(state) do
-          {:ok, "OK", state} ->
-            {:ok, state}
-          {:ok, error, state} ->
-            {:stop, error, state}
-          {:error, reason} ->
-            {:stop, reason, state}
+        case blocking_recv(socket, "") do
+          {:ok, "OK", tail} ->
+            {:ok, tail}
+          {:ok, error, _tail} ->
+            {:error, error}
+          {:error, _reason} = error ->
+            error
         end
-      {:error, reason} ->
-        {:stop, reason, state}
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  defp select_db(state, nil) do
-    {:ok, state}
+  @spec select_db(:gen_tcp.socket, nil | non_neg_integer | binary, binary) :: {:ok, binary} | {:error, term}
+  defp select_db(socket, db, tail)
+
+  defp select_db(_socket, nil, tail) do
+    {:ok, tail}
   end
 
-  defp select_db(%{socket: socket} = state, db) do
+  defp select_db(socket, db, tail) do
     case :gen_tcp.send(socket, Protocol.pack(["SELECT", db])) do
       :ok ->
-        case wait_for_response(state) do
-          {:ok, "OK", state} ->
-            {:ok, state}
-          {:ok, error, state} ->
-            {:stop, error, state}
-          {:error, reason} ->
-            {:stop, reason, state}
+        case blocking_recv(socket, tail) do
+          {:ok, "OK", tail} ->
+            {:ok, tail}
+          {:ok, error, _state} ->
+            {:error, error}
+          {:error, _reason} = error ->
+            error
         end
-      {:error, reason} ->
-        {:stop, reason, state}
+      {:error, _reason} = error ->
+        error
     end
   end
 
-  defp wait_for_response(%{socket: socket} = state) do
+  @spec blocking_recv(:gen_tcp.socket, binary, nil | (binary -> term)) :: {:ok, term, binary} | {:error, term}
+  defp blocking_recv(socket, tail, continuation \\ nil) do
     case :gen_tcp.recv(socket, 0) do
       {:ok, data} ->
-        data   = state.tail <> data
-        parser = state.continuation || &Protocol.parse/1
-
-        case parser.(data) do
-          {:ok, resp, rest} ->
-            {:ok, resp, %{state | tail: rest, continuation: nil}}
-          {:continuation, cont} ->
-            wait_for_response(%{state | continuation: cont, tail: ""})
+        parser = continuation || &Protocol.parse/1
+        case parser.(tail <> data) do
+          {:ok, _resp, _rest} = result ->
+            result
+          {:continuation, continuation} ->
+            blocking_recv(socket, "", continuation)
         end
-      {:error, _} = err ->
-        err
+      {:error, _reason} = error ->
+        error
     end
   end
-
 end
