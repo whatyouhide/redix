@@ -1,7 +1,6 @@
 %{"benchfella": {:git, "https://github.com/alco/benchfella.git", "9513b94538fd3df28d12e3b999d397658146c005", []},
   "certifi": {:hex, :certifi, "0.1.1"},
   "connection": {:hex, :connection, "1.0.1"},
-  "coverex": {:hex, :coverex, "1.4.8"},
   "dialyze": {:hex, :dialyze, "0.2.0"},
   "eredis": {:git, "https://github.com/wooga/eredis.git", "bf12ecb30253c84a2331f4f0d93fd68856fcb9f4", []},
   "ex_doc": {:hex, :ex_doc, "0.11.0"},

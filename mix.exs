@@ -15,7 +15,6 @@ defmodule Redix.Mixfile do
      elixir: "~> 1.0",
      build_embedded: Mix.env in [:prod, :bench],
      start_permanent: Mix.env == :prod,
-     test_coverage: [tool: Coverex.Task],
      deps: deps,
 
      # Hex
@@ -47,7 +46,6 @@ defmodule Redix.Mixfile do
      {:redo, github: "heroku/redo", only: :bench},
      {:eredis, github: "wooga/eredis", only: :bench},
      {:yar, github: "dantswain/yar", only: :bench},
-     {:coverex, "~> 1.4", only: :test},
      {:markdown, github: "devinus/markdown", only: :docs},
      {:ex_doc, ">= 0.0.0", only: :docs}]
   end
