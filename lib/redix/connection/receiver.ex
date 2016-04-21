@@ -5,20 +5,18 @@ defmodule Redix.Connection.Receiver do
 
   alias Redix.Protocol
 
-  @initial_state %{
+  defstruct [
     # The process that sends stuff to the socket and that spawns this process
     sender: nil,
     # The queue of commands issued to Redis
     queue: :queue.new,
     # The TCP socket, which should be passive when given to this process
     socket: nil,
-
-    initial_data: "",
-
+    # TODO: document this
     continuation: nil,
-
+    # TODO: document this
     timed_out_requests: HashSet.new,
-  }
+  ]
 
   @doc """
   Starts this genserver.
@@ -59,7 +57,7 @@ defmodule Redix.Connection.Receiver do
 
   @doc false
   def init(opts) do
-    state = Enum.into(opts, @initial_state)
+    state = struct(__MODULE__, opts)
     :inet.setopts(state.socket, active: :once)
     {:ok, state}
   end
@@ -87,12 +85,7 @@ defmodule Redix.Connection.Receiver do
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     :ok = :inet.setopts(socket, active: :once)
 
-    state =
-      if initial = state.initial_data do
-        new_data(%{state | initial_data: nil}, initial <> data)
-      else
-        new_data(state, data)
-      end
+    state = new_data(state, data)
 
     {:noreply, state}
   end
