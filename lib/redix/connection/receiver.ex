@@ -16,6 +16,8 @@ defmodule Redix.Connection.Receiver do
     initial_data: "",
 
     continuation: nil,
+
+    timed_out_requests: HashSet.new,
   }
 
   @doc """
@@ -36,6 +38,23 @@ defmodule Redix.Connection.Receiver do
     GenServer.cast(pid, {:enqueue, what})
   end
 
+  @doc """
+  Notifies the receiver that `request_id` timed out.
+  """
+  @spec timed_out(pid, reference) :: :ok
+  def timed_out(pid, request_id) do
+    GenServer.call(pid, {:timed_out, request_id})
+  end
+
+  @doc """
+  Cancels the "timed out" notification for `request_id` stored via
+  `timed_out/2`.
+  """
+  @spec cancel_timed_out(pid, reference) :: :ok
+  def cancel_timed_out(pid, request_id) do
+    GenServer.call(pid, {:cancel_timed_out, request_id})
+  end
+
   ## Callbacks
 
   @doc false
@@ -43,6 +62,19 @@ defmodule Redix.Connection.Receiver do
     state = Enum.into(opts, @initial_state)
     :inet.setopts(state.socket, active: :once)
     {:ok, state}
+  end
+
+  @doc false
+  def handle_call(operation, from, state)
+
+  def handle_call({:timed_out, request_id}, _from, state) do
+    state = %{state | timed_out_requests: HashSet.put(state.timed_out_requests, request_id)}
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:cancel_timed_out, request_id}, _from, state) do
+    state = %{state | timed_out_requests: HashSet.delete(state.timed_out_requests, request_id)}
+    {:reply, :ok, state}
   end
 
   @doc false
@@ -80,12 +112,18 @@ defmodule Redix.Connection.Receiver do
   end
 
   defp new_data(state, data) do
-    {{:value, {:commands, from, ncommands}}, new_queue} = :queue.out(state.queue)
+    {{:value, {:commands, from, ncommands, request_id}}, new_queue} = :queue.out(state.queue)
     parser = state.continuation || &Protocol.parse_multi(&1, ncommands)
 
     case parser.(data) do
       {:ok, resp, rest} ->
-        Connection.reply(from, format_resp(resp))
+        state =
+          if HashSet.member?(state.timed_out_requests, request_id) do
+            %{state | timed_out_requests: HashSet.delete(state.timed_out_requests, request_id)}
+          else
+            Connection.reply(from, format_resp(resp))
+            state
+          end
         state = %{state | queue: new_queue, continuation: nil}
         new_data(state, rest)
       {:continuation, cont} ->
