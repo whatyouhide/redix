@@ -10,11 +10,11 @@ defmodule Redix.PubSub.Connection do
 
   defstruct [
     opts: nil,
-    tail: "",
     socket: nil,
     recipients: HashDict.new,
     monitors: HashDict.new,
     queue: :queue.new,
+    continuation: nil,
     clients_to_notify_of_reconnection: [],
     current_backoff: nil,
   ]
@@ -87,7 +87,7 @@ defmodule Redix.PubSub.Connection do
                   Utils.format_error(reason)]
     :gen_tcp.close(state.socket)
     state = disconnect_and_notify_clients(state, reason)
-    {:backoff, @initial_backoff, %{state | tail: "", socket: nil, current_backoff: @initial_backoff}}
+    {:backoff, @initial_backoff, %{state | continuation: nil, socket: nil, current_backoff: @initial_backoff}}
   end
 
   @doc false
@@ -113,7 +113,7 @@ defmodule Redix.PubSub.Connection do
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     :ok = :inet.setopts(socket, active: :once)
-    state = new_data(state, state.tail <> data)
+    state = new_data(state, data)
     {:noreply, state}
   end
 
@@ -143,15 +143,19 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp new_data(state, <<>>) do
-    %{state | tail: <<>>}
+    state
   end
 
   defp new_data(state, data) do
-    case Protocol.parse(data) do
+    parser = state.continuation || &Protocol.parse/1
+    case parser.(data) do
       {:ok, resp, rest} ->
-        state |> handle_message(resp) |> new_data(rest)
-      {:error, :incomplete} ->
-        %{state | tail: data}
+        state
+        |> handle_message(resp)
+        |> Map.put(:continuation, nil)
+        |> new_data(rest)
+      {:continuation, continuation} ->
+        %{state | continuation: continuation}
     end
   end
 
