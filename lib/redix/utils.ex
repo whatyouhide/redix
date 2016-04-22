@@ -54,6 +54,7 @@ defmodule Redix.Utils do
     Connection.start_link(conn_module, opts, connection_opts)
   end
 
+  @spec connect(struct) :: {:ok, struct} | {:error, term} | {:stop, term, struct}
   def connect(%{opts: opts} = state) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 

@@ -14,6 +14,7 @@ defmodule Redix.Protocol do
   end
 
   @type redis_value :: binary | integer | nil | Redix.Error.t | [redis_value]
+  @type parse_return_value :: {:ok, redis_value, binary} | {:continuation, (binary -> parse_return_value)}
 
   @crlf "\r\n"
 
@@ -65,7 +66,7 @@ defmodule Redix.Protocol do
       {:ok, "OK", ""}
 
   """
-  @spec parse(binary) :: {:ok, redis_value, binary} | {:error, term}
+  @spec parse(binary) :: parse_return_value
   def parse(data)
 
   def parse("+" <> rest), do: parse_simple_string(rest)
