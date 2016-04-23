@@ -47,9 +47,6 @@ defmodule Redix.Connection.Receiver do
   end
 
   @doc false
-  def handle_call(operation, from, state)
-
-  @doc false
   def handle_cast({:enqueue, what}, state) do
     state = update_in(state.queue, &:queue.in(what, &1))
     {:noreply, state}
