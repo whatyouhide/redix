@@ -4,6 +4,7 @@ defmodule Redix.Connection.Receiver do
   use GenServer
 
   alias Redix.Protocol
+  alias Redix.Connection.TimeoutStore
 
   defstruct [
     # The process that sends stuff to the socket and that spawns this process
@@ -15,7 +16,7 @@ defmodule Redix.Connection.Receiver do
     # TODO: document this
     continuation: nil,
     # TODO: document this
-    timed_out_requests: HashSet.new,
+    timeout_store: nil,
   ]
 
   @doc """
@@ -36,23 +37,6 @@ defmodule Redix.Connection.Receiver do
     GenServer.cast(pid, {:enqueue, what})
   end
 
-  @doc """
-  Notifies the receiver that `request_id` timed out.
-  """
-  @spec timed_out(pid, reference) :: :ok
-  def timed_out(pid, request_id) do
-    GenServer.call(pid, {:timed_out, request_id})
-  end
-
-  @doc """
-  Cancels the "timed out" notification for `request_id` stored via
-  `timed_out/2`.
-  """
-  @spec cancel_timed_out(pid, reference) :: :ok
-  def cancel_timed_out(pid, request_id) do
-    GenServer.call(pid, {:cancel_timed_out, request_id})
-  end
-
   ## Callbacks
 
   @doc false
@@ -64,16 +48,6 @@ defmodule Redix.Connection.Receiver do
 
   @doc false
   def handle_call(operation, from, state)
-
-  def handle_call({:timed_out, request_id}, _from, state) do
-    state = %{state | timed_out_requests: HashSet.put(state.timed_out_requests, request_id)}
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:cancel_timed_out, request_id}, _from, state) do
-    state = %{state | timed_out_requests: HashSet.delete(state.timed_out_requests, request_id)}
-    {:reply, :ok, state}
-  end
 
   @doc false
   def handle_cast({:enqueue, what}, state) do
@@ -110,13 +84,9 @@ defmodule Redix.Connection.Receiver do
 
     case parser.(data) do
       {:ok, resp, rest} ->
-        state =
-          if HashSet.member?(state.timed_out_requests, request_id) do
-            %{state | timed_out_requests: HashSet.delete(state.timed_out_requests, request_id)}
-          else
-            Connection.reply(from, format_resp(resp))
-            state
-          end
+        unless TimeoutStore.timed_out?(state.timeout_store, request_id) do
+          Connection.reply(from, format_resp(resp))
+        end
         state = %{state | queue: new_queue, continuation: nil}
         new_data(state, rest)
       {:continuation, cont} ->

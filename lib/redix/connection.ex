@@ -6,6 +6,7 @@ defmodule Redix.Connection do
   alias Redix.Protocol
   alias Redix.Utils
   alias Redix.Connection.Receiver
+  alias Redix.Connection.TimeoutStore
 
   require Logger
 
@@ -18,6 +19,8 @@ defmodule Redix.Connection do
     opts: nil,
     # The receiver process
     receiver: nil,
+    # TODO: document this
+    timeout_store: nil,
     # TODO: document this
     current_backoff: nil,
   ]
@@ -80,6 +83,8 @@ defmodule Redix.Connection do
   def connect(info, state) do
     case Utils.connect(state) do
       {:ok, state} ->
+        {:ok, timeout_store} = TimeoutStore.start_link()
+        state = %{state | timeout_store: timeout_store}
         state = start_receiver_and_hand_socket(state)
         {:ok, state}
       {:error, reason} ->
@@ -135,12 +140,12 @@ defmodule Redix.Connection do
   end
 
   def handle_call({:timed_out, request_id}, _from, state) do
-    :ok = Receiver.timed_out(state.receiver, request_id)
+    :ok = TimeoutStore.add(state.timeout_store, request_id)
     {:reply, :ok, state}
   end
 
   def handle_call({:cancel_timed_out, request_id}, _from, state) do
-    :ok = Receiver.cancel_timed_out(state.receiver, request_id)
+    :ok = TimeoutStore.remove(state.timeout_store, request_id)
     {:reply, :ok, state}
   end
 
@@ -181,7 +186,7 @@ defmodule Redix.Connection do
       raise "there already is a receiver: #{inspect receiver}"
     end
 
-    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket)
+    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, timeout_store: state.timeout_store)
     :ok = :gen_tcp.controlling_process(socket, receiver)
     %{state | receiver: receiver}
   end
