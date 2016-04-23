@@ -52,8 +52,6 @@ defmodule Redix do
 
   @type command :: [binary]
 
-  alias Redix.Utils
-
   @default_timeout 5000
 
   @doc """
@@ -152,7 +150,7 @@ defmodule Redix do
   end
 
   def start_link(redis_opts, other_opts) do
-    Utils.start_link(Redix.Connection, redis_opts, other_opts)
+    Redix.Connection.start_link(redis_opts, other_opts)
   end
 
   @doc """
@@ -169,102 +167,7 @@ defmodule Redix do
   """
   @spec stop(GenServer.server) :: :ok
   def stop(conn) do
-    Connection.cast(conn, :stop)
-  end
-
-  @doc """
-  Issues a command on the Redis server.
-
-  This function sends `command` to the Redis server and returns the response
-  returned by Redis. `pid` must be the pid of a Redix connection. `command` must
-  be a list of strings making up the Redis command and its arguments.
-
-  The return value is `{:ok, response}` if the request is successful and the
-  response is not a Redis error. `{:error, reason}` is returned in case there's
-  an error in sending the response or in case the response is a Redis error. In
-  the latter case, `reason` will be the error returned by Redis.
-
-  If the given command (`cmd`) is an empty command (`[]`), `{:error,
-  :empty_command}` will be returned.
-
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
-
-  ## Examples
-
-      iex> Redix.command(conn, ["SET", "mykey", "foo"])
-      {:ok, "OK"}
-      iex> Redix.command(conn, ["GET", "mykey"])
-      {:ok, "foo"}
-
-      iex> Redix.command(conn, ["INCR", "mykey"])
-      {:error, "ERR value is not an integer or out of range"}
-
-  If Redis goes down (before a reconnection happens):
-
-      iex> Redix.command(conn, ["GET", "mykey"])
-      {:error, :closed}
-
-  """
-  @spec command(GenServer.server, command, Keyword.t) ::
-    {:ok, Redix.Protocol.redis_value} |
-    {:error, atom | Redix.Error.t}
-  def command(conn, cmd, opts \\ []) do
-    case pipeline(conn, [cmd], opts) do
-      {:ok, [%Redix.Error{} = error]} ->
-        {:error, error}
-      {:ok, [resp]} ->
-        {:ok, resp}
-      o ->
-        o
-    end
-  end
-
-  @doc """
-  Issues a command on the Redis server, raising if there's an error.
-
-  This function works exactly like `command/3` but:
-
-    * if the command is successful, then the result is returned not wrapped in a
-      `{:ok, result}` tuple.
-    * if there's a Redis error, a `Redix.Error` error is raised (with the
-      original message).
-    * if there's a network error (e.g., `{:error, :closed}`) a `Redix.ConnectionError`
-      error is raised.
-
-  This function accepts the same options as `command/3`.
-
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
-
-  ## Examples
-
-      iex> Redix.command!(conn, ["SET", "mykey", "foo"])
-      "OK"
-
-      iex> Redix.command!(conn, ["INCR", "mykey"])
-      ** (Redix.Error) ERR value is not an integer or out of range
-
-  If Redis goes down (before a reconnection happens):
-
-      iex> Redix.command!(conn, ["GET", "mykey"])
-      ** (Redix.ConnectionError) :closed
-
-  """
-  @spec command!(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value
-  def command!(conn, cmd, opts \\ []) do
-    case command(conn, cmd, opts) do
-      {:ok, resp} ->
-        resp
-      {:error, %Redix.Error{} = error} ->
-        raise error
-      {:error, error} ->
-        raise Redix.ConnectionError, error
-    end
+    Redix.Connection.stop(conn)
   end
 
   @doc """
@@ -321,30 +224,7 @@ defmodule Redix do
     if Enum.any?(commands, &(&1 == [])) do
       {:error, :empty_command}
     else
-      do_pipeline(conn, commands, opts)
-    end
-  end
-
-  defp do_pipeline(conn, commands, opts) do
-    request_id = make_ref()
-    try do
-      Connection.call(conn, {:commands, commands, request_id}, opts[:timeout] || @default_timeout)
-    catch
-      :exit, {:timeout, {:gen_server, :call, [^conn | _]}} ->
-        Connection.call(conn, {:timed_out, request_id})
-
-        receive do
-          {ref, _resp} when is_reference(ref) ->
-            # TODO: we shouldn't match on all ref messages like this, we
-            # should likely move to a custom call/response protocol (instead
-            # of relying on GenServer.call and such) so we know the request
-            # id here and can match directly on that.
-            :ok = Connection.call(conn, {:cancel_timed_out, request_id})
-        after
-          0 -> :noop
-        end
-
-        {:error, :timeout}
+      Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
     end
   end
 
@@ -383,11 +263,106 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec pipeline!(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value]
+  @spec pipeline!(GenServer.server, [command], Keyword.t) ::
+    [Redix.Protocol.redis_value] | no_return
   def pipeline!(conn, commands,  opts \\ []) do
     case pipeline(conn, commands, opts) do
+      {:ok, resp} -> resp
+      {:error, error} -> raise Redix.ConnectionError, error
+    end
+  end
+
+  @doc """
+  Issues a command on the Redis server.
+
+  This function sends `command` to the Redis server and returns the response
+  returned by Redis. `pid` must be the pid of a Redix connection. `command` must
+  be a list of strings making up the Redis command and its arguments.
+
+  The return value is `{:ok, response}` if the request is successful and the
+  response is not a Redis error. `{:error, reason}` is returned in case there's
+  an error in sending the response or in case the response is a Redis error. In
+  the latter case, `reason` will be the error returned by Redis.
+
+  If the given command (`cmd`) is an empty command (`[]`), `{:error,
+  :empty_command}` will be returned.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
+
+  ## Examples
+
+      iex> Redix.command(conn, ["SET", "mykey", "foo"])
+      {:ok, "OK"}
+      iex> Redix.command(conn, ["GET", "mykey"])
+      {:ok, "foo"}
+
+      iex> Redix.command(conn, ["INCR", "mykey"])
+      {:error, "ERR value is not an integer or out of range"}
+
+  If Redis goes down (before a reconnection happens):
+
+      iex> Redix.command(conn, ["GET", "mykey"])
+      {:error, :closed}
+
+  """
+  @spec command(GenServer.server, command, Keyword.t) ::
+    {:ok, Redix.Protocol.redis_value} |
+    {:error, atom | Redix.Error.t}
+  def command(conn, command, opts \\ []) do
+    case pipeline(conn, [command], opts) do
+      {:ok, [%Redix.Error{} = error]} ->
+        {:error, error}
+      {:ok, [resp]} ->
+        {:ok, resp}
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc """
+  Issues a command on the Redis server, raising if there's an error.
+
+  This function works exactly like `command/3` but:
+
+    * if the command is successful, then the result is returned not wrapped in a
+      `{:ok, result}` tuple.
+    * if there's a Redis error, a `Redix.Error` error is raised (with the
+      original message).
+    * if there's a network error (e.g., `{:error, :closed}`) a `Redix.ConnectionError`
+      error is raised.
+
+  This function accepts the same options as `command/3`.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`.
+
+  ## Examples
+
+      iex> Redix.command!(conn, ["SET", "mykey", "foo"])
+      "OK"
+
+      iex> Redix.command!(conn, ["INCR", "mykey"])
+      ** (Redix.Error) ERR value is not an integer or out of range
+
+  If Redis goes down (before a reconnection happens):
+
+      iex> Redix.command!(conn, ["GET", "mykey"])
+      ** (Redix.ConnectionError) :closed
+
+  """
+  @spec command!(GenServer.server, command, Keyword.t) ::
+    Redix.Protocol.redis_value | no_return
+  def command!(conn, command, opts \\ []) do
+    case command(conn, command, opts) do
       {:ok, resp} ->
         resp
+      {:error, %Redix.Error{} = error} ->
+        raise error
       {:error, error} ->
         raise Redix.ConnectionError, error
     end

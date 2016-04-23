@@ -115,7 +115,8 @@ defmodule Redix.PubSub do
   end
 
   def start_link(redis_opts, other_opts) do
-    Utils.start_link(Redix.PubSub.Connection, redis_opts, other_opts)
+    {redix_opts, connection_opts} = Utils.sanitize_starting_opts(redis_opts, other_opts)
+    Connection.start_link(Redix.PubSub.Connection, redix_opts, connection_opts)
   end
 
   @doc """

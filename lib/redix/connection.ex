@@ -26,6 +26,41 @@ defmodule Redix.Connection do
 
   @backoff_exponent 1.5
 
+  ## Public API
+
+  def start_link(redis_opts, other_opts) do
+    {redix_opts, connection_opts} = Utils.sanitize_starting_opts(redis_opts, other_opts)
+    Connection.start_link(__MODULE__, redix_opts, connection_opts)
+  end
+
+  def stop(conn) do
+    Connection.cast(conn, :stop)
+  end
+
+  def pipeline(conn, commands, timeout) do
+    request_id = make_ref()
+
+    try do
+      Connection.call(conn, {:commands, commands, request_id}, timeout)
+    catch
+      :exit, {:timeout, {:gen_server, :call, [^conn | _]}} ->
+        Connection.call(conn, {:timed_out, request_id})
+
+        receive do
+          {ref, _resp} when is_reference(ref) ->
+            # TODO: we shouldn't match on all ref messages like this, we
+            # should likely move to a custom call/response protocol (instead
+            # of relying on GenServer.call and such) so we know the request
+            # id here and can match directly on that.
+            :ok = Connection.call(conn, {:cancel_timed_out, request_id})
+        after
+          0 -> :noop
+        end
+
+        {:error, :timeout}
+    end
+  end
+
   ## Callbacks
 
   @doc false

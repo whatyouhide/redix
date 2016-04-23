@@ -12,46 +12,37 @@ defmodule Redix.Utils do
   # is harmless but inconsistent. Credit for this strategy goes to James Fish.
   @socket_opts [:binary, active: false, exit_on_close: false]
 
+  @redis_opts [:host, :port, :password, :database]
   @redis_default_opts [
     host: 'localhost',
     port: 6379,
   ]
 
-  @redix_default_opts [
+  @redix_behaviour_opts [:socket_opts, :backoff, :sync_connect]
+  @redix_default_behaviour_opts [
     socket_opts: [],
     backoff: 2000,
     max_backoff: 30_000,
   ]
 
-  @redis_opts [:host, :port, :password, :database]
-  @redix_opts [:socket_opts, :backoff, :sync_connect]
-
   @default_timeout 5000
 
-  @doc """
-  Calls `Connection.start_link/3` on the given `conn_module` after cleaning up
-  the given opts.
-
-  `redis_opts` are the options that specify how to connect to the Redis server:
-  host, port, password, and database. `other_opts` are a mixture of options to
-  tweak the behaviour of the Redix connection (e.g., the backoff time) and
-  options to be forwarded to `Connection.start_link/3`.
-  """
-  @spec start_link(module, Keyword.t, Keyword.t) :: GenServer.on_start
-  def start_link(conn_module, redis_opts, other_opts)
+  @spec sanitize_starting_opts(Keyword.t, Keyword.t) :: {Keyword.t, Keyword.t}
+  def sanitize_starting_opts(redis_opts, other_opts)
       when is_list(redis_opts) and is_list(other_opts) do
-    # `connection_opts` are the opts to be passed to `Connection.start_link/3`.
-    # `redix_opts` are the other options to tweak the behaviour of Redix (e.g.,
-    # the backoff time).
-    {redix_opts, connection_opts} = Keyword.split(other_opts, @redix_opts)
-
     check_redis_opts(redis_opts)
 
-    redis_opts = Keyword.merge(@redis_default_opts, redis_opts)
-    redix_opts = Keyword.merge(@redix_default_opts, redix_opts)
-    opts = Keyword.merge(redix_opts, redis_opts)
+    # `connection_opts` are the opts to be passed to `Connection.start_link/3`.
+    # `redix_behaviour_opts` are the other options to tweak the behaviour of
+    # Redix (e.g., the backoff time).
+    {redix_behaviour_opts, connection_opts} = Keyword.split(other_opts, @redix_behaviour_opts)
 
-    Connection.start_link(conn_module, opts, connection_opts)
+    redis_opts = Keyword.merge(@redis_default_opts, redis_opts)
+    redix_behaviour_opts = Keyword.merge(@redix_default_behaviour_opts, redix_behaviour_opts)
+
+    redix_opts = Keyword.merge(redix_behaviour_opts, redis_opts)
+
+    {redix_opts, connection_opts}
   end
 
   @spec connect(struct) :: {:ok, struct} | {:error, term} | {:stop, term, struct}
