@@ -27,11 +27,9 @@ defmodule Redix do
   If there's a network error sending data to Redis or if the connection to Redis
   drops, this happens:
 
-    * a reconnection attempt is made right away.
+    * a reconnection attempt is made right away
     * if this attempt fails, reconnections are attempted at a given "backoff"
-      interval. The duration of this interval can be specified with the
-      `:backoff` option passed to `start_link/2`. The default is `2000`
-      milliseconds.
+      interval
 
   These reconnections attempts only happen when the connection to Redis has been
   established at least once before. If a connection error happens when
@@ -119,8 +117,6 @@ defmodule Redix do
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
       overridden by Redix so that it functions properly. Defaults to `[]`.
-    * `:backoff` - (integer) the time (in milliseconds) to wait before trying to
-      reconnect when a network error occurs. Defaults to `2000`.
 
   In addition to these options, all options accepted by
   `Connection.start_link/3` (and thus `GenServer.start_link/3`) are forwarded to
