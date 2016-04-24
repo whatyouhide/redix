@@ -34,7 +34,7 @@ defmodule Redix.Mixfile do
   end
 
   defp package do
-    [maintainers: ["Andrea Leopardi"],
+    [maintainers: ["Andrea Leopardi", "Aleksei Magusev"],
      licenses: ["MIT"],
      links: %{"GitHub" => @repo_url}]
   end
