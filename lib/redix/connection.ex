@@ -44,6 +44,9 @@ defmodule Redix.Connection do
   def pipeline(conn, commands, timeout) do
     request_id = make_ref()
 
+    # All this try-catch dance is required in order to cleanly return {:error,
+    # :timeout} on timeouts instead of exiting (which is what `GenServer.call/3`
+    # does). The whole process is described in Redix.Connection.TimeoutStore.
     try do
       {^request_id, resp} = Connection.call(conn, {:commands, commands, request_id}, timeout)
       resp
