@@ -122,9 +122,9 @@ defmodule Redix.Connection do
     Logger.error ["Disconnected from Redis (#{Utils.format_host(state)}): ",
                   Utils.format_error(reason)]
 
-    :gen_tcp.close(state.socket)
+    :ok = :gen_tcp.close(state.socket)
 
-    {:backoff, @initial_backoff, %{reset_state(state) | current_backoff: @initial_backoff}}
+    {:backoff, @initial_backoff, %{state | socket: nil, current_backoff: @initial_backoff}}
   end
 
   @doc false
@@ -175,10 +175,6 @@ defmodule Redix.Connection do
       {:stop, reason, _state} ->
         {:stop, reason}
     end
-  end
-
-  defp reset_state(state) do
-    %{state | socket: nil}
   end
 
   defp start_receiver_and_hand_socket(%{socket: socket, receiver: receiver} = state) do
