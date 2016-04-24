@@ -19,9 +19,10 @@ defmodule Redix.Connection do
     opts: nil,
     # The receiver process
     receiver: nil,
-    # TODO: document this
+    # The timeout store process
     timeout_store: nil,
-    # TODO: document this
+    # The current backoff (used to compute the next backoff when reconnecting
+    # with exponential backoff)
     current_backoff: nil,
   ]
 

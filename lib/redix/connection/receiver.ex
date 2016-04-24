@@ -13,9 +13,9 @@ defmodule Redix.Connection.Receiver do
     queue: :queue.new,
     # The TCP socket, which should be passive when given to this process
     socket: nil,
-    # TODO: document this
+    # The parsing continuation returned by Redix.Protocol
     continuation: nil,
-    # TODO: document this
+    # The timeout store process
     timeout_store: nil,
   ]
 
