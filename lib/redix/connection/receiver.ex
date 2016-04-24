@@ -82,7 +82,7 @@ defmodule Redix.Connection.Receiver do
     case parser.(data) do
       {:ok, resp, rest} ->
         unless TimeoutStore.timed_out?(state.timeout_store, request_id) do
-          Connection.reply(from, format_resp(resp))
+          Connection.reply(from, {request_id, format_resp(resp)})
         end
         state = %{state | queue: new_queue, continuation: nil}
         new_data(state, rest)
@@ -93,8 +93,8 @@ defmodule Redix.Connection.Receiver do
 
   defp disconnect(msg, error, state) do
     # We notify all commands in the queue of the disconnection.
-    for {:commands, from, _, _} <- :queue.to_list(state.queue) do
-      Connection.reply(from, error)
+    for {:commands, from, _, request_id} <- :queue.to_list(state.queue) do
+      Connection.reply(from, {request_id, error})
     end
 
     send state.sender, {:receiver, self(), msg}

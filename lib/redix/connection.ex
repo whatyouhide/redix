@@ -45,20 +45,21 @@ defmodule Redix.Connection do
     request_id = make_ref()
 
     try do
-      Connection.call(conn, {:commands, commands, request_id}, timeout)
+      {^request_id, resp} = Connection.call(conn, {:commands, commands, request_id}, timeout)
+      resp
     catch
       :exit, {:timeout, {:gen_server, :call, [^conn | _]}} ->
         Connection.call(conn, {:timed_out, request_id})
 
+        # We try to flush the response because it may have arrived before the
+        # connection processed the :timed_out message. In case it arrived, we
+        # notify the conncetion that it arrived (canceling the :timed_out
+        # message).
         receive do
-          {ref, _resp} when is_reference(ref) ->
-            # TODO: we shouldn't match on all ref messages like this, we
-            # should likely move to a custom call/response protocol (instead
-            # of relying on GenServer.call and such) so we know the request
-            # id here and can match directly on that.
+          {ref, {^request_id, _resp}} when is_reference(ref) ->
             :ok = Connection.call(conn, {:cancel_timed_out, request_id})
         after
-          0 -> :noop
+          0 -> :ok
         end
 
         {:error, :timeout}
