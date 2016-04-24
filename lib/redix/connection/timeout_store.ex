@@ -7,6 +7,10 @@ defmodule Redix.Connection.TimeoutStore do
     GenServer.start_link(__MODULE__, nil)
   end
 
+  def stop(pid) do
+    GenServer.call(pid, :stop)
+  end
+
   def add(pid, request_id) do
     GenServer.cast(pid, {:add, request_id})
   end
@@ -23,6 +27,11 @@ defmodule Redix.Connection.TimeoutStore do
 
   def init(_) do
     {:ok, HashSet.new}
+  end
+
+  def handle_call(:stop, from, state) do
+    GenServer.reply(from, :ok)
+    {:stop, :normal, state}
   end
 
   def handle_call({:timed_out?, request_id}, _from, state) do

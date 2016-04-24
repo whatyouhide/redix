@@ -123,6 +123,7 @@ defmodule Redix.Connection do
                   Utils.format_error(reason)]
 
     :ok = :gen_tcp.close(state.socket)
+    :ok = TimeoutStore.stop(state.timeout_store)
 
     {:backoff, @initial_backoff, %{state | socket: nil, current_backoff: @initial_backoff}}
   end
