@@ -18,39 +18,26 @@ defmodule RedixTest do
       {:ok, %{}}
     else
       {:ok, conn} = Redix.start_link()
+      on_exit(fn -> Redix.stop(conn) end)
       {:ok, %{conn: conn}}
     end
   end
 
   @tag :no_setup
-  test "start_link/1: returns a pid" do
-    assert {:ok, pid} = Redix.start_link
-    assert is_pid(pid)
+  test "start_link/2: specifying a database" do
+    {:ok, c} = Redix.start_link(database: 1)
+    assert Redix.command(c, ~w(SET my_key my_value)) == {:ok, "OK"}
+
+    # Let's check we didn't write to the default database (which is 0).
+    {:ok, c} = Redix.start_link
+    assert Redix.command(c, ~w(GET my_key)) == {:ok, nil}
   end
 
   @tag :no_setup
-  test "start_link/1: specifying a database" do
-    assert {:ok, pid} = Redix.start_link(database: 1)
-    assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
-  end
-
-  @tag :no_setup
-  test "start_link/1: specifying a password when no password is set" do
+  test "start_link/2: specifying a non existing database" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      assert {:ok, pid} = Redix.start_link(password: "foo")
-      assert is_pid(pid)
-
-      error = %Error{message: "ERR Client sent AUTH, but no password is set"}
-      assert_receive {:EXIT, ^pid, ^error}, 500
-    end
-  end
-
-  @tag :no_setup
-  test "start_link/1: specifying a non existing database" do
-    silence_log fn ->
-      Process.flag :trap_exit, true
-      assert {:ok, pid} = Redix.start_link(database: 1_000)
+      {:ok, pid} = Redix.start_link(database: 1_000)
 
       error = %Error{message: "ERR invalid DB index"}
       assert_receive {:EXIT, ^pid, ^error}, 500
@@ -58,57 +45,121 @@ defmodule RedixTest do
   end
 
   @tag :no_setup
-  test "start_link/1: when unable to connect to Redis with sync_connect: true" do
+  test "start_link/2: specifying a password when no password is set" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      assert {:error, :nxdomain} =
-        Redix.start_link([host: "nonexistent"], [sync_connect: true])
+      {:ok, pid} = Redix.start_link(password: "foo")
+
+      error = %Error{message: "ERR Client sent AUTH, but no password is set"}
+      assert_receive {:EXIT, ^pid, ^error}, 500
+    end
+  end
+
+  @tag :no_setup
+  test "start_link/2: when unable to connect to Redis with sync_connect: true" do
+    silence_log fn ->
+      Process.flag :trap_exit, true
+      assert {:error, :nxdomain} = Redix.start_link([host: "nonexistent"], sync_connect: true)
       assert_receive {:EXIT, _pid, :nxdomain}, 1000
     end
   end
 
   @tag :no_setup
-  test "start_link/1: when unable to connect to Redis with sync_connect: false" do
+  test "start_link/2: when unable to connect to Redis with sync_connect: false" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      assert {:ok, pid} =
-        Redix.start_link([host: "nonexistent"], [sync_connect: false])
-      refute_receive {:EXIT, ^pid, :nxdomain}
+      {:ok, pid} = Redix.start_link([host: "nonexistent"], [sync_connect: false])
+      refute_receive {:EXIT, ^pid, :nxdomain}, 200
     end
   end
 
   @tag :no_setup
-  test "start_link/1: using a redis:// url" do
-    assert {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
+  test "start_link/2: using a redis:// url" do
+    {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+  end
+
+  @tag :no_setup
+  test "start_link/2: name registration" do
+    {:ok, pid} = Redix.start_link([], name: :redix_server)
+    assert Process.whereis(:redix_server) == pid
+    assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
   end
 
   @tag :no_setup
   test "start_link/2: passing options along with a Redis URI" do
-    assert {:ok, _pid} = Redix.start_link("redis://localhost:6379", name: :redix_uri)
-    assert (:redix_uri |> Process.whereis |> Process.alive?)
+    {:ok, pid} = Redix.start_link("redis://localhost:6379", name: :redix_uri)
+    assert Process.whereis(:redix_uri) == pid
   end
 
   @tag :no_setup
   test "stop/1" do
-    assert {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
-    assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
     assert Redix.stop(pid) == :ok
 
     Process.flag :trap_exit, true
     assert_receive {:EXIT, ^pid, :normal}, 500
   end
 
-  @tag :no_setup
-  test "start_link/1: name registration" do
-    assert {:ok, pid} = Redix.start_link([], name: :redix_server)
-    assert is_pid(pid)
-    assert Process.whereis(:redix_server) == pid
-    assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
-  end
-
   test "command/2", %{conn: c} do
     assert Redix.command(c, ["PING"]) == {:ok, "PONG"}
+  end
+
+  test "command/2: transactions - MULTI/EXEC", %{conn: c} do
+    assert Redix.command(c, ["MULTI"]) == {:ok, "OK"}
+    assert Redix.command(c, ["INCR", "multifoo"]) == {:ok, "QUEUED"}
+    assert Redix.command(c, ["INCR", "multibar"]) == {:ok, "QUEUED"}
+    assert Redix.command(c, ["INCRBY", "multifoo", 4]) == {:ok, "QUEUED"}
+    assert Redix.command(c, ["EXEC"]) == {:ok, [1, 1, 5]}
+  end
+
+  test "command/2: transactions - MULTI/DISCARD", %{conn: c} do
+    Redix.command!(c, ["SET", "discarding", "foo"])
+
+    assert Redix.command(c, ["MULTI"]) == {:ok, "OK"}
+    assert Redix.command(c, ["SET", "discarding", "bar"]) == {:ok, "QUEUED"}
+    # Discarding
+    assert Redix.command(c, ["DISCARD"]) == {:ok, "OK"}
+    assert Redix.command(c, ["GET", "discarding"]) == {:ok, "foo"}
+  end
+
+  test "command/2: Lua scripting - EVAL", %{conn: c} do
+    script = """
+    redis.call("SET", "evalling", "yes")
+    return {KEYS[1],ARGV[1],ARGV[2]}
+    """
+
+    cmds = ["eval", script, "1", "key", "first", "second"]
+
+    assert Redix.command(c, cmds) == {:ok, ["key", "first", "second"]}
+    assert Redix.command(c, ["GET", "evalling"]) == {:ok, "yes"}
+  end
+
+  test "command/2 - Lua scripting: SCRIPT LOAD, SCRIPT EXISTS, EVALSHA", %{conn: c} do
+    script = """
+    return 'hello world'
+    """
+
+    {:ok, sha} = Redix.command(c, ["SCRIPT", "LOAD", script])
+    assert is_binary(sha)
+    assert Redix.command(c, ["SCRIPT", "EXISTS", sha, "foo"]) == {:ok, [1, 0]}
+
+    # Eval'ing the script
+    assert Redix.command(c, ["EVALSHA", sha, 0]) == {:ok, "hello world"}
+  end
+
+  test "command/2: Redis errors", %{conn: c} do
+    {:ok, _} = Redix.command(c, ~w(SET errs foo))
+    msg = "ERR value is not an integer or out of range"
+    assert Redix.command(c, ~w(INCR errs)) == {:error, %Error{message: msg}}
+  end
+
+  test "command/2: passing an empty list returns an error", %{conn: c} do
+    assert Redix.command(c, []) == {:error, :empty_command}
+  end
+
+  test "command/2: timeout", %{conn: c} do
+    assert {:error, :timeout} = Redix.command(c, ~W(PING), timeout: 0)
   end
 
   test "pipeline/2", %{conn: c} do
@@ -136,101 +187,6 @@ defmodule RedixTest do
     assert Redix.pipeline(c, [["PING"]]) == {:ok, ["PONG"]}
   end
 
-  test "some commands: APPEND", %{conn: c} do
-    assert Redix.command(c, ~w(APPEND to_append hello)) == {:ok, 5}
-    assert Redix.command(c, ~w(APPEND to_append world)) == {:ok, 10}
-  end
-
-  test "some commands: DBSIZE", %{conn: c} do
-    {:ok, i} = Redix.command(c, ["DBSIZE"])
-    assert is_integer(i)
-  end
-
-  test "some commands: INCR and DECR", %{conn: c} do
-    assert Redix.command(c, ["INCR", "to_incr"]) == {:ok, 1}
-    assert Redix.command(c, ["DECR", "to_incr"]) == {:ok, 0}
-  end
-
-  test "some commands: transactions with MULTI/EXEC (executing)", %{conn: c} do
-    assert Redix.command(c, ["MULTI"]) == {:ok, "OK"}
-
-    assert Redix.command(c, ["INCR", "multifoo"]) == {:ok, "QUEUED"}
-    assert Redix.command(c, ["INCR", "multibar"]) == {:ok, "QUEUED"}
-    assert Redix.command(c, ["INCRBY", "multifoo", 4]) == {:ok, "QUEUED"}
-
-    assert Redix.command(c, ["EXEC"]) == {:ok, [1, 1, 5]}
-  end
-
-  test "some commands: transactions with MULTI/DISCARD", %{conn: c} do
-    {:ok, "OK"} = Redix.command(c, ["SET", "discarding", "foo"])
-
-    assert Redix.command(c, ["MULTI"]) == {:ok, "OK"}
-    assert Redix.command(c, ["SET", "discarding", "bar"]) == {:ok, "QUEUED"}
-
-    # Discarding
-    assert Redix.command(c, ["DISCARD"]) == {:ok, "OK"}
-    assert Redix.command(c, ["GET", "discarding"]) == {:ok, "foo"}
-  end
-
-  test "some commands: MULTI/EXEC always returns a list", %{conn: c} do
-    assert Redix.command(c, ["MULTI"]) == {:ok, "OK"}
-    assert Redix.command(c, ["PING"]) == {:ok, "QUEUED"}
-    assert Redix.command(c, ["EXEC"]) == {:ok, ["PONG"]}
-  end
-
-  test "some commands: TYPE", %{conn: c} do
-    assert Redix.command(c, ["SET", "string_type", "foo bar"]) == {:ok, "OK"}
-    assert Redix.command(c, ["TYPE", "string_type"]) == {:ok, "string"}
-  end
-
-  test "some commands: STRLEN", %{conn: c} do
-    assert Redix.command(c, ["SET", "string_length", "foo bar"]) == {:ok, "OK"}
-    assert Redix.command(c, ["STRLEN", "string_length"]) == {:ok, 7}
-  end
-
-  test "some commands: LPUSH, LLEN, LPOP, LINDEX", %{conn: c} do
-    assert Redix.command(c, ~w(LPUSH mylist world)) == {:ok, 1}
-    assert Redix.command(c, ~w(LPUSH mylist hello)) == {:ok, 2}
-    assert Redix.command(c, ~w(LLEN mylist)) == {:ok, 2}
-    assert Redix.command(c, ~w(LINDEX mylist 0)) == {:ok, "hello"}
-    assert Redix.command(c, ~w(LPOP mylist)) == {:ok, "hello"}
-  end
-
-  test "Lua scripting: EVAL", %{conn: c} do
-    script = """
-    redis.call("SET", "evalling", "yes")
-    return {KEYS[1],ARGV[1],ARGV[2]}
-    """
-
-    cmds = ["eval", script, "1", "key", "first", "second"]
-
-    assert Redix.command(c, cmds) == {:ok, ["key", "first", "second"]}
-    assert Redix.command(c, ["GET", "evalling"]) == {:ok, "yes"}
-  end
-
-  test "Lua scripting: SCRIPT LOAD, SCRIPT EXISTS, EVALSHA", %{conn: c} do
-    script = """
-    return 'hello world'
-    """
-
-    {:ok, sha} = Redix.command(c, ["SCRIPT", "LOAD", script])
-    assert is_binary(sha)
-    assert Redix.command(c, ["SCRIPT", "EXISTS", sha, "foo"]) == {:ok, [1, 0]}
-
-    # Eval'ing the script
-    assert Redix.command(c, ["EVALSHA", sha, 0]) == {:ok, "hello world"}
-  end
-
-  test "command/2: Redis errors", %{conn: c} do
-    {:ok, _} = Redix.command(c, ~w(SET errs foo))
-    msg = "ERR value is not an integer or out of range"
-    assert Redix.command(c, ~w(INCR errs)) == {:error, %Error{message: msg}}
-  end
-
-  test "command/2: passing an empty list returns an error", %{conn: c} do
-    assert Redix.command(c, []) == {:error, :empty_command}
-  end
-
   test "pipeline/2: Redis errors in the response", %{conn: c} do
     msg = "ERR value is not an integer or out of range"
     assert {:ok, resp} = Redix.pipeline(c, [~w(SET pipeline_errs foo), ~w(INCR pipeline_errs)])
@@ -245,6 +201,10 @@ defmodule RedixTest do
   test "pipeline/2: passing one or more empty commands returns an error", %{conn: c} do
     assert Redix.pipeline(c, [[]]) == {:error, :empty_command}
     assert Redix.pipeline(c, [["PING"], [], ["PING"]]) == {:error, :empty_command}
+  end
+
+  test "pipeline/2: timeout", %{conn: c} do
+    assert {:error, :timeout} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
   end
 
   test "command!/2: simple commands", %{conn: c} do
@@ -282,14 +242,6 @@ defmodule RedixTest do
     end
   end
 
-  test "command/2: timeout", %{conn: c} do
-    assert {:error, :timeout} = Redix.command(c, ~W(PING), timeout: 0)
-  end
-
-  test "pipeline/2: timeout", %{conn: c} do
-    assert {:error, :timeout} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
-  end
-
   @tag :no_setup
   test "client suicide and reconnections" do
     {:ok, c} = Redix.start_link
@@ -307,6 +259,9 @@ defmodule RedixTest do
     {:ok, c} = Redix.start_link
 
     assert {:error, :timeout} = Redix.command(c, ~w(PING), timeout: 0)
+
+    # Let's check that the Redix connection doesn't reply anyways, even if the
+    # timeout happened.
     refute_receive {_ref, _message}
   end
 
