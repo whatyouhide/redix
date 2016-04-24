@@ -24,17 +24,12 @@ defmodule Redix do
   Redix tries to be as resilient as possible: it tries to recover automatically
   from most network errors.
 
-  If there's a network error sending data to Redis or if the connection to Redis
-  drops, this happens:
-
-    * a reconnection attempt is made right away
-    * if this attempt fails, reconnections are attempted at a given "backoff"
-      interval
-
-  These reconnections attempts only happen when the connection to Redis has been
-  established at least once before. If a connection error happens when
-  connecting to Redis for the first time, the Redix process will just crash with
-  the proper error (see `start_link/2`).
+  If there's a network error when sending data to Redis or if the connection to Redis
+  drops, Redix tries to reconnect. The first reconnection attempt will happen
+  after a fixed time interval; if this attempt fails, reconnections are
+  attempted until successful, and the time interval between reconnections is
+  increased exponentially. Some aspects of this behaviour can be configured; see
+  `start_link/2` and the "Reconnections" page in the docs for more information.
 
   All this behaviour is implemented using the
   [connection](https://github.com/fishcakez/connection) library (a dependency of
@@ -55,12 +50,11 @@ defmodule Redix do
   @doc """
   Starts a connection to Redis.
 
-  This function returns `{:ok, pid}` if the connection is successful. The actual
-  TCP connection to the Redis server happens asynchronously: when `start_link/2`
-  is called, a pid is returned right away and the connection process starts. All
-  the calls to `Redix` that happen during the connection have to wait for the
-  connection to be established before being issued (and sent to the Redis
-  server).
+  This function returns `{:ok, pid}` if the connection is successful.
+
+  The actual TCP connection to the Redis server may happen either synchronously,
+  before `start_link/2` returns, or asynchronously: this behaviour is decided by
+  the `:sync_connect` option (see below).
 
   This function accepts two arguments: the options to connect to the Redis
   server (like host, port, and so on) and the options to manage the connection
@@ -117,10 +111,18 @@ defmodule Redix do
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
       overridden by Redix so that it functions properly. Defaults to `[]`.
+    * `:sync_connect` - (boolean) decides whether Redix should initiate the TCP
+      connection to the Redis server *before* or *after* returning from
+      `start_link/2`. This option also changes some reconnection semantics; read
+      the "Reconnections" page in the docs.
+    * `:backoff_max` - (integer) the maximum length (in milliseconds) of the
+      time interval used between reconnection attempts. See the "Reconnections"
+      page in the docs for more information.
 
   In addition to these options, all options accepted by
   `Connection.start_link/3` (and thus `GenServer.start_link/3`) are forwarded to
-  it. For example, a Redix connection can be registered with a name:
+  it. For example, a Redix connection can be registered with a name by using the
+  `:name` option:
 
       Redix.start_link([], name: :redix)
       Process.whereis(:redix)

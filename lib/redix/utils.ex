@@ -18,11 +18,11 @@ defmodule Redix.Utils do
     port: 6379,
   ]
 
-  @redix_behaviour_opts [:socket_opts, :sync_connect, :max_backoff]
+  @redix_behaviour_opts [:socket_opts, :sync_connect, :backoff_max]
   @redix_default_behaviour_opts [
     socket_opts: [],
     sync_connect: false,
-    max_backoff: 30_000,
+    backoff_max: 30_000,
   ]
 
   @default_timeout 5000

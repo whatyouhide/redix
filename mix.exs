@@ -26,7 +26,7 @@ defmodule Redix.Mixfile do
      docs: [main: "Redix",
             source_ref: "v#{@version}",
             source_url: @repo_url,
-            extras: ["README.md"]]]
+            extras: ["README.md", "pages/Reconnections.md"]]]
   end
 
   def application do

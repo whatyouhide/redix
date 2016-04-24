@@ -98,13 +98,13 @@ defmodule Redix.Connection do
         if info == :init do
           {:backoff, @initial_backoff, %{state | current_backoff: @initial_backoff}}
         else
-          max_backoff = state.opts[:max_backoff]
+          backoff_max = state.opts[:backoff_max]
           next_exponential_backoff = round(state.current_backoff * @backoff_exponent)
           next_backoff =
-            if max_backoff == :infinity do
+            if backoff_max == :infinity do
               next_exponential_backoff
             else
-              min(next_exponential_backoff, max_backoff)
+              min(next_exponential_backoff, backoff_max)
             end
           {:backoff, next_backoff, %{state | current_backoff: next_backoff}}
         end
