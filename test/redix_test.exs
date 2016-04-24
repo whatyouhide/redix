@@ -309,4 +309,21 @@ defmodule RedixTest do
     assert {:error, :timeout} = Redix.command(c, ~w(PING), timeout: 0)
     refute_receive {_ref, _message}
   end
+
+  @tag :no_setup
+  test "mid-command disconnections" do
+    {:ok, c} = Redix.start_link
+    parent = self()
+    ref = make_ref()
+
+    silence_log fn ->
+      spawn_link(fn ->
+        assert Redix.command(c, ~w(BLPOP my_list 0)) == {:error, :disconnected}
+        send parent, ref
+      end)
+
+      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      assert_receive ^ref, 200
+    end
+  end
 end

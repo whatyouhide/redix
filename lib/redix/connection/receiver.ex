@@ -92,17 +92,13 @@ defmodule Redix.Connection.Receiver do
   end
 
   defp disconnect(msg, error, state) do
-    state = reply_to_queue(error, state)
-    send state.sender, {:receiver, self(), msg}
-    {:stop, :normal, state}
-  end
-
-  defp reply_to_queue(error, state) do
-    for {:commands, from, _} <- :queue.to_list(state.queue) do
+    # We notify all commands in the queue of the disconnection.
+    for {:commands, from, _, _} <- :queue.to_list(state.queue) do
       Connection.reply(from, error)
     end
 
-    %{state | queue: :queue.new}
+    send state.sender, {:receiver, self(), msg}
+    {:stop, :normal, state}
   end
 
   defp format_resp(%Redix.Error{} = err), do: {:error, err}
