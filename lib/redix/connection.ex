@@ -26,6 +26,8 @@ defmodule Redix.Connection do
     current_backoff: nil,
   ]
 
+  # TODO: right now, if backoff_max is less then 500ms (=
+  # @initial_backoff), we do weird stuff.
   @initial_backoff 500
 
   @backoff_exponent 1.5
