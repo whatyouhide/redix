@@ -1,5 +1,5 @@
 defmodule Redix.PubSubTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case
 
   import Redix.TestHelpers
   alias Redix.PubSub
