@@ -45,7 +45,7 @@ defmodule Redix.Utils do
     {redix_opts, connection_opts}
   end
 
-  @spec connect(struct) :: {:ok, struct} | {:error, term} | {:stop, term, struct}
+  @spec connect(%{}) :: {:ok, %{}} | {:error, term} | {:stop, term, %{}}
   def connect(%{opts: opts} = state) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
