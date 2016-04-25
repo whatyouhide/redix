@@ -92,6 +92,9 @@ defmodule Redix.Connection.Receiver do
   end
 
   defp disconnect(msg, error, state) do
+    # First of all, we shut the socket down.
+    :ok = :gen_tcp.close(state.socket)
+
     # We notify all commands in the queue of the disconnection.
     for {:commands, from, _, request_id} <- :queue.to_list(state.queue) do
       Connection.reply(from, {request_id, error})

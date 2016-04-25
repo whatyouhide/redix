@@ -127,7 +127,8 @@ defmodule Redix.Connection do
     Logger.error ["Disconnected from Redis (#{Utils.format_host(state)}): ",
                   Utils.format_error(reason)]
 
-    :ok = :gen_tcp.close(state.socket)
+    # When we're here, the receiver already exited with :normal by itself, but
+    # we manually have to kill the TimeoutStore.
     :ok = TimeoutStore.stop(state.timeout_store)
 
     {:backoff, @initial_backoff, %{state | socket: nil, current_backoff: @initial_backoff}}
@@ -146,6 +147,20 @@ defmodule Redix.Connection do
   end
 
   def handle_call({:timed_out, request_id}, _from, state) do
+
+    # `Utils.send_noreply/2` can wither return `{:noreply, state}` or
+    # `{:disconnect, error, state}` where `error` is what is returned by
+    # `:gen_tcp.send/2`. What can happen is this: the TCP connection to Redis
+    # has problems, and the receiver gets notified about this (:tcp_closed or
+    # :tcp_error); the receiver will closed the socket, notify the sender, and
+    # die in peace (:normal). However, the sender may try to send messages to
+    # the socket before it processes the message from the receiver telling it
+    # the socket is closed. In this case, it's fine to still try to send,
+    # `:gen_tcp.send/2` will return `{:error, :closed}` and we'll disconnect
+    # from here as well. The socket is closed (so no need to do anything to it),
+    # the receiver process will not leak (when we spawn a new one when
+    # reconnecting) because the old one died right after notifying us. We should
+    # be ok.
     :ok = TimeoutStore.add(state.timeout_store, request_id)
     {:reply, :ok, state}
   end
