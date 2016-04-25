@@ -91,8 +91,8 @@ defmodule Redix.Connection do
     case Utils.connect(state) do
       {:ok, state} ->
         {:ok, timeout_store} = TimeoutStore.start_link()
-        state = %{state | timeout_store: timeout_store}
-        state = start_receiver_and_hand_socket(state)
+        receiver = start_receiver_and_hand_socket(state.socket, timeout_store)
+        state = %{state | timeout_store: timeout_store, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
         Logger.error [
@@ -100,17 +100,12 @@ defmodule Redix.Connection do
           Utils.format_error(reason),
         ]
 
+        # If this is the first time we connect, then we just retry after the
+        # initial backoff (there's no need to calculate backoff and so on).
         if info == :init do
           {:backoff, @initial_backoff, %{state | current_backoff: @initial_backoff}}
         else
-          backoff_max = state.opts[:backoff_max]
-          next_exponential_backoff = round(state.current_backoff * @backoff_exponent)
-          next_backoff =
-            if backoff_max == :infinity do
-              next_exponential_backoff
-            else
-              min(next_exponential_backoff, backoff_max)
-            end
+          next_backoff = calc_next_backoff(state.current_backoff, state.opts[:backoff_max])
           {:backoff, next_backoff, %{state | current_backoff: next_backoff}}
         end
       other ->
@@ -126,14 +121,21 @@ defmodule Redix.Connection do
   end
 
   def disconnect({:error, reason} = _error, state) do
-    Logger.error ["Disconnected from Redis (#{Utils.format_host(state)}): ",
-                  Utils.format_error(reason)]
+    Logger.error [
+      "Disconnected from Redis (", Utils.format_host(state), "): ", Utils.format_error(reason),
+    ]
 
     # When we're here, the receiver already exited with :normal by itself, but
     # we manually have to kill the TimeoutStore.
     :ok = TimeoutStore.stop(state.timeout_store)
 
-    {:backoff, @initial_backoff, %{state | socket: nil, current_backoff: @initial_backoff}}
+    state = %{state |
+      socket: nil,
+      receiver: nil,
+      timeout_store: nil,
+      current_backoff: @initial_backoff,
+    }
+    {:backoff, @initial_backoff, state}
   end
 
   @doc false
@@ -145,10 +147,6 @@ defmodule Redix.Connection do
 
   def handle_call({:commands, commands, request_id}, from, state) do
     :ok = Receiver.enqueue(state.receiver, {:commands, from, length(commands), request_id})
-    Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
-  end
-
-  def handle_call({:timed_out, request_id}, _from, state) do
 
     # `Utils.send_noreply/2` can wither return `{:noreply, state}` or
     # `{:disconnect, error, state}` where `error` is what is returned by
@@ -163,6 +161,10 @@ defmodule Redix.Connection do
     # the receiver process will not leak (when we spawn a new one when
     # reconnecting) because the old one died right after notifying us. We should
     # be ok.
+    Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
+  end
+
+  def handle_call({:timed_out, request_id}, _from, state) do
     :ok = TimeoutStore.add(state.timeout_store, request_id)
     {:reply, :ok, state}
   end
@@ -191,7 +193,9 @@ defmodule Redix.Connection do
   defp sync_connect(state) do
     case Utils.connect(state) do
       {:ok, state} ->
-        state = start_receiver_and_hand_socket(state)
+        {:ok, timeout_store} = TimeoutStore.start_link()
+        receiver = start_receiver_and_hand_socket(state.socket, timeout_store)
+        state = %{state | timeout_store: timeout_store, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
         {:stop, reason}
@@ -200,14 +204,10 @@ defmodule Redix.Connection do
     end
   end
 
-  defp start_receiver_and_hand_socket(%{socket: socket, receiver: receiver} = state) do
-    if receiver && Process.alive?(receiver) do
-      raise "there already is a receiver: #{inspect receiver}"
-    end
-
-    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, timeout_store: state.timeout_store)
+  defp start_receiver_and_hand_socket(socket, timeout_store) do
+    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, timeout_store: timeout_store)
     :ok = :gen_tcp.controlling_process(socket, receiver)
-    %{state | receiver: receiver}
+    receiver
   end
 
   defp handle_msg_from_receiver({:tcp_closed, socket}, %{socket: socket} = state) do
@@ -216,5 +216,15 @@ defmodule Redix.Connection do
 
   defp handle_msg_from_receiver({:tcp_error, socket, reason}, %{socket: socket} = state) do
     {:disconnect, {:error, reason}, state}
+  end
+
+  defp calc_next_backoff(current_backoff, backoff_max) do
+    next_exponential_backoff = round(current_backoff * @backoff_exponent)
+
+    if backoff_max == :infinity do
+      next_exponential_backoff
+    else
+      min(next_exponential_backoff, backoff_max)
+    end
   end
 end
