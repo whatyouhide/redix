@@ -14,8 +14,7 @@ defmodule Redix.Connection.TimeoutStore do
   # returns). The sender (which is not responsible for replying to callers),
   # will store this request_id in the timeout store (this module's GenServer)
   # with a cast; since the caller blocks until the sender returns, we're sure
-  # that when the caller finishes then the timed out request id will have been
-  # *sent* (not received, because of the cast) to the timeout store.
+  # that when the caller finishes then the timed out request id will be stored.
   #
   # Now, everytime a response arrives from Redis to the receiver, the receiver
   # will check if the request_id for the corresponding request in its queue is
@@ -48,7 +47,7 @@ defmodule Redix.Connection.TimeoutStore do
   end
 
   def add(pid, request_id) do
-    GenServer.cast(pid, {:add, request_id})
+    GenServer.call(pid, {:add, request_id})
   end
 
   def remove(pid, request_id) do
@@ -78,8 +77,8 @@ defmodule Redix.Connection.TimeoutStore do
     end
   end
 
-  def handle_cast({:add, request_id}, state) do
-    {:noreply, HashSet.put(state, request_id)}
+  def handle_call({:add, request_id}, _from, state) do
+    {:reply, :ok, HashSet.put(state, request_id)}
   end
 
   def handle_cast({:remove, request_id}, state) do
