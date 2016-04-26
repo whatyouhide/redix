@@ -282,4 +282,13 @@ defmodule RedixTest do
       assert_receive ^ref, 200
     end
   end
+
+  @tag :no_setup
+  test "commands when the socket is closed" do
+    {:ok, c} = Redix.start_link
+    silence_log fn ->
+      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      assert Redix.command(c, ~w(PING)) == {:error, :closed}
+    end
+  end
 end
