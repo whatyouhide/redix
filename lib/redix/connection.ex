@@ -135,7 +135,7 @@ defmodule Redix.Connection do
   @doc false
   def handle_call(operation, from, state)
 
-  def handle_call(_operation, _from, %{socket: nil} = state) do
+  def handle_call({:commands, _commands, _request_id}, _from, %{socket: nil} = state) do
     {:reply, {:error, :closed}, state}
   end
 

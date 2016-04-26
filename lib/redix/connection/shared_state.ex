@@ -57,9 +57,11 @@ defmodule Redix.Connection.SharedState do
   # Returns {timed_out_request?, client}.
   def handle_call(:dequeue, _from, state) do
     {{:value, {:commands, request_id, _from, _ncommands} = client}, new_queue} = :queue.out(state.clients_queue)
-    result = {HashSet.member?(state.timed_out_requests, request_id), client}
-    state = %{state | clients_queue: new_queue}
-    {:reply, result, state}
+
+    {timed_out_request?, new_timed_out_requests} = pop_from_set(state.timed_out_requests, request_id)
+
+    state = %{state | clients_queue: new_queue, timed_out_requests: new_timed_out_requests}
+    {:reply, {timed_out_request?, client}, state}
   end
 
   def handle_call(:disconnect_clients_and_stop, from, state) do
@@ -75,5 +77,15 @@ defmodule Redix.Connection.SharedState do
   def handle_cast({:enqueue, client}, %{clients_queue: queue} = state) do
     state = %{state | clients_queue: :queue.in(client, queue)}
     {:noreply, state}
+  end
+
+  ## Helpers
+
+  defp pop_from_set(set, elem) do
+    if HashSet.member?(set, elem) do
+      {true, HashSet.delete(set, elem)}
+    else
+      {false, set}
+    end
   end
 end
