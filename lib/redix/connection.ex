@@ -126,6 +126,16 @@ defmodule Redix.Connection do
     ]
 
     :ok = :gen_tcp.close(state.socket)
+
+    state =
+      if state.receiver do
+        :ok = Receiver.stop(state.receiver)
+        :ok = flush_messages_from_receiver(state)
+        %{state | receiver: nil}
+      else
+        state
+      end
+
     :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
 
     state = %{state | socket: nil, current_backoff: @initial_backoff}
@@ -147,8 +157,7 @@ defmodule Redix.Connection do
       :ok ->
         {:noreply, state}
       {:error, _reason} = error ->
-        if state.receiver, do: Receiver.stop(state.receiver)
-        {:disconnect, error, %{state | receiver: nil}}
+        {:disconnect, error, state}
     end
   end
 
@@ -206,6 +215,14 @@ defmodule Redix.Connection do
   defp handle_msg_from_receiver({:tcp_error, socket, reason}, %{socket: socket} = state) do
     state = %{state | receiver: nil}
     {:disconnect, {:error, reason}, state}
+  end
+
+  defp flush_messages_from_receiver(%{receiver: receiver} = state) do
+    receive do
+      {:receiver, ^receiver, _msg} -> flush_messages_from_receiver(state)
+    after
+      0 -> :ok
+    end
   end
 
   defp calc_next_backoff(current_backoff, backoff_max) do
