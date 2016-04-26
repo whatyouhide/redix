@@ -4,40 +4,35 @@ defmodule Redix.Connection.Receiver do
   use GenServer
 
   alias Redix.Protocol
-  alias Redix.Connection.TimeoutStore
+  alias Redix.Utils
+  alias Redix.Connection.SharedState
+
+  ## GenServer state
 
   defstruct [
     # The process that sends stuff to the socket and that spawns this process
     sender: nil,
-    # The queue of commands issued to Redis
-    queue: :queue.new,
     # The TCP socket, which should be passive when given to this process
     socket: nil,
     # The parsing continuation returned by Redix.Protocol
     continuation: nil,
+    # The client that we'll need to reply to once the current continuation is done
+    current_client: nil,
     # The timeout store process
-    timeout_store: nil,
+    shared_state: nil,
   ]
 
-  @doc """
-  Starts this genserver.
+  ## Public API
 
-  Options in `opts` are injected directly in the state of this genserver.
-  """
-  @spec start_link(Keyword.t) :: GenServer.on_start
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @doc """
-  Puts `what` in the internal queue of genserver `pid` asynchronously (cast).
-  """
-  @spec enqueue(pid, term) :: :ok
-  def enqueue(pid, what) do
-    GenServer.cast(pid, {:enqueue, what})
+  def stop(pid) do
+    GenServer.cast(pid, :stop)
   end
 
-  ## Callbacks
+  ## GenServer callbacks
 
   @doc false
   def init(opts) do
@@ -47,9 +42,8 @@ defmodule Redix.Connection.Receiver do
   end
 
   @doc false
-  def handle_cast({:enqueue, what}, state) do
-    state = update_in(state.queue, &:queue.in(what, &1))
-    {:noreply, state}
+  def handle_cast(:stop, state) do
+    {:stop, :normal, state}
   end
 
   @doc false
@@ -62,44 +56,45 @@ defmodule Redix.Connection.Receiver do
   end
 
   def handle_info({:tcp_closed, socket} = msg, %{socket: socket} = state) do
-    disconnect(msg, {:error, :disconnected}, state)
+    disconnect(msg, state)
   end
 
-  def handle_info({:tcp_error, socket, reason} = msg, %{socket: socket} = state) do
-    disconnect(msg, {:error, reason}, state)
+  def handle_info({:tcp_error, socket, _reason} = msg, %{socket: socket} = state) do
+    disconnect(msg, state)
   end
 
   ## Helpers
 
   defp new_data(state, <<>>) do
-    state
+    %{state | current_client: nil, continuation: nil}
   end
 
-  defp new_data(state, data) do
-    {{:value, {:commands, from, ncommands, request_id}}, new_queue} = :queue.out(state.queue)
-    parser = state.continuation || &Protocol.parse_multi(&1, ncommands)
-
-    case parser.(data) do
+  defp new_data(%{continuation: nil} = state, data) do
+    {timed_out_request?, {:commands, request_id, from, ncommands}} = client = SharedState.dequeue(state.shared_state)
+    case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
-        unless TimeoutStore.timed_out?(state.timeout_store, request_id) do
-          Connection.reply(from, {request_id, format_resp(resp)})
+        unless timed_out_request? do
+          Utils.reply_to_client(from, request_id, format_resp(resp))
         end
-        state = %{state | queue: new_queue, continuation: nil}
-        new_data(state, rest)
+        new_data(%{state | continuation: nil}, rest)
+      {:continuation, cont} ->
+        %{state | current_client: client, continuation: cont}
+    end
+  end
+
+  defp new_data(%{current_client: {timed_out_request?, {:commands, request_id, from, _ncommands}}} = state, data) do
+    case state.continuation.(data) do
+      {:ok, resp, rest} ->
+        unless timed_out_request? do
+          Utils.reply_to_client(from, request_id, format_resp(resp))
+        end
+        new_data(%{state | continuation: nil, current_client: nil}, rest)
       {:continuation, cont} ->
         %{state | continuation: cont}
     end
   end
 
-  defp disconnect(msg, error, state) do
-    # First of all, we shut the socket down.
-    :ok = :gen_tcp.close(state.socket)
-
-    # We notify all commands in the queue of the disconnection.
-    for {:commands, from, _, request_id} <- :queue.to_list(state.queue) do
-      Connection.reply(from, {request_id, error})
-    end
-
+  defp disconnect(msg, state) do
     send state.sender, {:receiver, self(), msg}
     {:stop, :normal, state}
   end

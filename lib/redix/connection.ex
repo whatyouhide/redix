@@ -6,7 +6,7 @@ defmodule Redix.Connection do
   alias Redix.Protocol
   alias Redix.Utils
   alias Redix.Connection.Receiver
-  alias Redix.Connection.TimeoutStore
+  alias Redix.Connection.SharedState
 
   require Logger
 
@@ -19,8 +19,8 @@ defmodule Redix.Connection do
     opts: nil,
     # The receiver process
     receiver: nil,
-    # The timeout store process
-    timeout_store: nil,
+    # The shared state store process
+    shared_state: nil,
     # The current backoff (used to compute the next backoff when reconnecting
     # with exponential backoff)
     current_backoff: nil,
@@ -90,9 +90,9 @@ defmodule Redix.Connection do
   def connect(info, state) do
     case Utils.connect(state) do
       {:ok, state} ->
-        {:ok, timeout_store} = TimeoutStore.start_link()
-        receiver = start_receiver_and_hand_socket(state.socket, timeout_store)
-        state = %{state | timeout_store: timeout_store, receiver: receiver}
+        {:ok, shared_state} = SharedState.start_link()
+        receiver = start_receiver_and_hand_socket(state.socket, shared_state)
+        state = %{state | shared_state: shared_state, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
         Logger.error [
@@ -125,16 +125,10 @@ defmodule Redix.Connection do
       "Disconnected from Redis (", Utils.format_host(state), "): ", Utils.format_error(reason),
     ]
 
-    # When we're here, the receiver already exited with :normal by itself, but
-    # we manually have to kill the TimeoutStore.
-    :ok = TimeoutStore.stop(state.timeout_store)
+    :ok = :gen_tcp.close(state.socket)
+    :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
 
-    state = %{state |
-      socket: nil,
-      receiver: nil,
-      timeout_store: nil,
-      current_backoff: @initial_backoff,
-    }
+    state = %{state | socket: nil, current_backoff: @initial_backoff}
     {:backoff, @initial_backoff, state}
   end
 
@@ -146,31 +140,25 @@ defmodule Redix.Connection do
   end
 
   def handle_call({:commands, commands, request_id}, from, state) do
-    :ok = Receiver.enqueue(state.receiver, {:commands, from, length(commands), request_id})
+    :ok = SharedState.enqueue(state.shared_state, {:commands, request_id, from, length(commands)})
 
-    # `Utils.send_noreply/2` can wither return `{:noreply, state}` or
-    # `{:disconnect, error, state}` where `error` is what is returned by
-    # `:gen_tcp.send/2`. What can happen is this: the TCP connection to Redis
-    # has problems, and the receiver gets notified about this (:tcp_closed or
-    # :tcp_error); the receiver will closed the socket, notify the sender, and
-    # die in peace (:normal). However, the sender may try to send messages to
-    # the socket before it processes the message from the receiver telling it
-    # the socket is closed. In this case, it's fine to still try to send,
-    # `:gen_tcp.send/2` will return `{:error, :closed}` and we'll disconnect
-    # from here as well. The socket is closed (so no need to do anything to it),
-    # the receiver process will not leak (when we spawn a new one when
-    # reconnecting) because the old one died right after notifying us. We should
-    # be ok.
-    Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
+    data = Enum.map(commands, &Protocol.pack/1)
+    case :gen_tcp.send(state.socket, data) do
+      :ok ->
+        {:noreply, state}
+      {:error, _reason} = error ->
+        if state.receiver, do: Receiver.stop(state.receiver)
+        {:disconnect, error, %{state | receiver: nil}}
+    end
   end
 
   def handle_call({:timed_out, request_id}, _from, state) do
-    :ok = TimeoutStore.add(state.timeout_store, request_id)
+    :ok = SharedState.add_timed_out_request(state.shared_state, request_id)
     {:reply, :ok, state}
   end
 
   def handle_call({:cancel_timed_out, request_id}, _from, state) do
-    :ok = TimeoutStore.remove(state.timeout_store, request_id)
+    :ok = SharedState.cancel_timed_out_request(state.shared_state, request_id)
     {:reply, :ok, state}
   end
 
@@ -193,9 +181,9 @@ defmodule Redix.Connection do
   defp sync_connect(state) do
     case Utils.connect(state) do
       {:ok, state} ->
-        {:ok, timeout_store} = TimeoutStore.start_link()
-        receiver = start_receiver_and_hand_socket(state.socket, timeout_store)
-        state = %{state | timeout_store: timeout_store, receiver: receiver}
+        {:ok, shared_state} = SharedState.start_link()
+        receiver = start_receiver_and_hand_socket(state.socket, shared_state)
+        state = %{state | shared_state: shared_state, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
         {:stop, reason}
@@ -204,17 +192,19 @@ defmodule Redix.Connection do
     end
   end
 
-  defp start_receiver_and_hand_socket(socket, timeout_store) do
-    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, timeout_store: timeout_store)
+  defp start_receiver_and_hand_socket(socket, shared_state) do
+    {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, shared_state: shared_state)
     :ok = :gen_tcp.controlling_process(socket, receiver)
     receiver
   end
 
   defp handle_msg_from_receiver({:tcp_closed, socket}, %{socket: socket} = state) do
-    {:disconnect, {:error, :tcp_closed}, state}
+    state = %{state | receiver: nil}
+    {:disconnect, {:error, :disconnected}, state}
   end
 
   defp handle_msg_from_receiver({:tcp_error, socket, reason}, %{socket: socket} = state) do
+    state = %{state | receiver: nil}
     {:disconnect, {:error, reason}, state}
   end
 

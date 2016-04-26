@@ -97,6 +97,10 @@ defmodule Redix.Utils do
     end
   end
 
+  def reply_to_client(from, request_id, reply) do
+    Connection.reply(from, {request_id, reply})
+  end
+
   @doc """
   This function unwraps the actual reason if an 'unknown POSIX error' is returned
   from :inet.format_error/1
