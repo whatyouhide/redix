@@ -175,11 +175,12 @@ defmodule RedixTest do
     assert {:ok, "OK"} = Redix.command(c, ~w(SET stress_pipeline foo))
 
     ncommands = 10_000
+    commands = List.duplicate(~w(GET stress_pipeline), ncommands)
 
     # Let's do it twice to be sure the server can handle the data.
-    {:ok, results} = Redix.pipeline(c, List.duplicate(~w(GET stress_pipeline), ncommands))
+    {:ok, results} = Redix.pipeline(c, commands)
     assert length(results) == ncommands
-    {:ok, results} = Redix.pipeline(c, List.duplicate(~w(GET stress_pipeline), ncommands))
+    {:ok, results} = Redix.pipeline(c, commands)
     assert length(results) == ncommands
   end
 
