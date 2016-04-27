@@ -88,6 +88,13 @@ defmodule Redix.Connection do
       {:ok, state} ->
         {:ok, shared_state} = SharedState.start_link()
         receiver = start_receiver_and_hand_socket(state.socket, shared_state)
+
+        # If this is a reconnection attempt, log that we successfully
+        # reconnected.
+        if info == :backoff do
+          Logger.info ["Reconnected to Redis (", Utils.format_host(state), ?)]
+        end
+
         state = %{state | shared_state: shared_state, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
