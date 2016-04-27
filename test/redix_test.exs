@@ -301,4 +301,25 @@ defmodule RedixTest do
       refute_receive {_ref, _message}
     end
   end
+
+  @tag :no_setup
+  test "no leaking messages when timeout happen at the same time as disconnections" do
+    {:ok, c} = Redix.start_link
+    parent = self()
+    ref = make_ref()
+
+    silence_log fn ->
+      spawn_link(fn ->
+        assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, :timeout}
+        # The fact that we timed out should be respected here, even if the
+        # connection is killed (no {:error, :disconnected} message should
+        # arrive).
+        refute_receive {_ref, _message}
+        send parent, ref
+      end)
+
+      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      assert_receive ^ref, 200
+    end
+  end
 end

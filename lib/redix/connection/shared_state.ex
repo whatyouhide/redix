@@ -67,7 +67,12 @@ defmodule Redix.Connection.SharedState do
   def handle_call(:disconnect_clients_and_stop, from, state) do
     # First, we notify all the clients.
     Enum.each(:queue.to_list(state.clients_queue), fn({:commands, request_id, from, _ncommands}) ->
-      Utils.reply_to_client(from, request_id, {:error, :disconnected})
+      # We don't care about "popping" the element out of the HashSet (returning
+      # the new set) because this process is going to die at the end of this
+      # function anyways.
+      unless HashSet.member?(state.timed_out_requests, request_id) do
+        Utils.reply_to_client(from, request_id, {:error, :disconnected})
+      end
     end)
 
     GenServer.reply(from, :ok)
