@@ -8,21 +8,20 @@ returned yet) when a disconnection happens, the `Redix` functions will return
 `{:error, :disconnected}` to the caller. The caller is responsible to retry the
 request if interested.
 
-The first reconnection attempts happens after a fixed backoff interval of `500`
-milliseconds. If this attempt succeeds, then Redix will start to function
-normally again. If this attempt fails, then subsequent reconnection attempts are
-made until one of them succeeds. The backof interval between these subsequent
-reconnection attempts is increased exponentially (currently, with a factor of
-`1.5`). This means that the first attempt will be made after `500` milliseconds,
-the second one after `750 = 500 * 1.5` milliseconds, the third one after
-`1125 = 750 * 1.5` milliseconds, and so on. Since this growth is exponential, it
+The first reconnection attempts happens after a backoff interval decided by the
+`:backoff_initial` option.  If this attempt succeeds, then Redix will start to
+function normally again. If this attempt fails, then subsequent reconnection
+attempts are made until one of them succeeds. The backoff interval between these
+subsequent reconnection attempts is increased exponentially (currently, with a
+fixed factor of `1.5`). This means that the first attempt will be made after `n`
+milliseconds, the second one after `n * 1.5` milliseconds, the third one after
+`n * 1.5 * 1.5` milliseconds, and so on. Since this growth is exponential, it
 won't take many attempts before this backoff interval becomes very large: for
 this reason, `Redix.start_link/2` also accepts a `:backoff_max` option. This
 option specifies the maximum backoff interval (in milliseconds) that should be
 used. The `:backoff_max` option can be used to simulate constant backoff after
-some exponential backoff attempts: for example, by passing `backoff_max: 5_000`,
-only the first few attempts are made with exponential backoff; after that,
-reconnection attempts will happen regularly every 5 seconds.
+some exponential backoff attempts: for example, by passing `backoff_max: 5_000`
+and `backoff_initial: 5_000`, attempts will be made regularly every 5 seconds.
 
 ## Synchronous or asynchronous connection
 

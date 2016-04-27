@@ -115,6 +115,10 @@ defmodule Redix do
       connection to the Redis server *before* or *after* returning from
       `start_link/2`. This option also changes some reconnection semantics; read
       the "Reconnections" page in the docs.
+    * `:backoff_initial` - (integer) the initial backoff time (in milliseconds),
+      which is the time that will be waited by the Redix process before
+      attempting to reconnect to Redis after a disconnection or failed first
+      connection. See the "Reconnections" page in the docs for more information.
     * `:backoff_max` - (integer) the maximum length (in milliseconds) of the
       time interval used between reconnection attempts. See the "Reconnections"
       page in the docs for more information.

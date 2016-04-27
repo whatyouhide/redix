@@ -26,10 +26,6 @@ defmodule Redix.Connection do
     backoff_current: nil,
   ]
 
-  # TODO: right now, if backoff_max is less then 500ms (=
-  # @backoff_initial), we do weird stuff.
-  @backoff_initial 500
-
   @backoff_exponent 1.5
 
   ## Public API
@@ -100,14 +96,8 @@ defmodule Redix.Connection do
           Utils.format_error(reason),
         ]
 
-        # If this is the first time we connect, then we just retry after the
-        # initial backoff (there's no need to calculate backoff and so on).
-        if info == :init do
-          {:backoff, @backoff_initial, %{state | backoff_current: @backoff_initial}}
-        else
-          next_backoff = calc_next_backoff(state.backoff_current, state.opts[:backoff_max])
-          {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
-        end
+        next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
+        {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
       other ->
         other
     end
@@ -138,8 +128,8 @@ defmodule Redix.Connection do
 
     :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
 
-    state = %{state | socket: nil, backoff_current: @backoff_initial}
-    {:backoff, @backoff_initial, state}
+    state = %{state | socket: nil, backoff_current: state.opts[:backoff_initial]}
+    {:backoff, state.opts[:backoff_initial], state}
   end
 
   @doc false
