@@ -23,12 +23,12 @@ defmodule Redix.Connection do
     shared_state: nil,
     # The current backoff (used to compute the next backoff when reconnecting
     # with exponential backoff)
-    current_backoff: nil,
+    backoff_current: nil,
   ]
 
   # TODO: right now, if backoff_max is less then 500ms (=
-  # @initial_backoff), we do weird stuff.
-  @initial_backoff 500
+  # @backoff_initial), we do weird stuff.
+  @backoff_initial 500
 
   @backoff_exponent 1.5
 
@@ -103,10 +103,10 @@ defmodule Redix.Connection do
         # If this is the first time we connect, then we just retry after the
         # initial backoff (there's no need to calculate backoff and so on).
         if info == :init do
-          {:backoff, @initial_backoff, %{state | current_backoff: @initial_backoff}}
+          {:backoff, @backoff_initial, %{state | backoff_current: @backoff_initial}}
         else
-          next_backoff = calc_next_backoff(state.current_backoff, state.opts[:backoff_max])
-          {:backoff, next_backoff, %{state | current_backoff: next_backoff}}
+          next_backoff = calc_next_backoff(state.backoff_current, state.opts[:backoff_max])
+          {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
         end
       other ->
         other
@@ -138,8 +138,8 @@ defmodule Redix.Connection do
 
     :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
 
-    state = %{state | socket: nil, current_backoff: @initial_backoff}
-    {:backoff, @initial_backoff, state}
+    state = %{state | socket: nil, backoff_current: @backoff_initial}
+    {:backoff, @backoff_initial, state}
   end
 
   @doc false
@@ -230,8 +230,8 @@ defmodule Redix.Connection do
     end
   end
 
-  defp calc_next_backoff(current_backoff, backoff_max) do
-    next_exponential_backoff = round(current_backoff * @backoff_exponent)
+  defp calc_next_backoff(backoff_current, backoff_max) do
+    next_exponential_backoff = round(backoff_current * @backoff_exponent)
 
     if backoff_max == :infinity do
       next_exponential_backoff
