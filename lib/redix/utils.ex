@@ -74,30 +74,6 @@ defmodule Redix.Utils do
     "#{opts[:host]}:#{opts[:port]}"
   end
 
-  @spec send_reply(Redix.Connection.state, iodata, term) ::
-    {:reply, term, Redix.Connection.state} |
-    {:disconnect, term, Redix.Connection.state}
-  def send_reply(%{socket: socket} = state, data, reply) do
-    case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:reply, reply, state}
-      {:error, _reason} = err ->
-        {:disconnect, err, state}
-    end
-  end
-
-  @spec send_noreply(Redix.Connection.state, iodata) ::
-    {:noreply, Redix.Connection.state} |
-    {:disconnect, term, Redix.Connection.state}
-  def send_noreply(%{socket: socket} = state, data) do
-    case :gen_tcp.send(socket, data) do
-      :ok ->
-        {:noreply, state}
-      {:error, _reason} = err ->
-        {:disconnect, err, state}
-    end
-  end
-
   def reply_to_client(from, request_id, reply) do
     Connection.reply(from, {request_id, reply})
   end

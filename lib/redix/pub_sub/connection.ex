@@ -172,7 +172,7 @@ defmodule Redix.PubSub.Connection do
     if channels_to_subscribe_to != [] do
       state
       |> enqueue(Enum.map(channels_to_subscribe_to, &{op, &1, recipient}))
-      |> Utils.send_reply(Protocol.pack([command | channels_to_subscribe_to]), :ok)
+      |> send_reply(Protocol.pack([command | channels_to_subscribe_to]), :ok)
     else
       {:reply, :ok, state}
     end
@@ -191,7 +191,7 @@ defmodule Redix.PubSub.Connection do
     if channels_to_unsubscribe_from != [] do
       state
       |> enqueue(Enum.map(channels_to_unsubscribe_from, &{op, &1, recipient}))
-      |> Utils.send_reply(Protocol.pack([command | channels_to_unsubscribe_from]), :ok)
+      |> send_reply(Protocol.pack([command | channels_to_unsubscribe_from]), :ok)
     else
       {:reply, :ok, state}
     end
@@ -238,7 +238,12 @@ defmodule Redix.PubSub.Connection do
       end
 
     if commands != [] do
-      Utils.send_noreply(state, Enum.map(commands, &Protocol.pack/1))
+      case :gen_tcp.send(state.socket, Enum.map(commands, &Protocol.pack/1)) do
+        :ok ->
+          {:noreply, state}
+        {:error, _reason} = error ->
+          {:disconnect, error, state}
+      end
     else
       {:noreply, state}
     end
@@ -360,5 +365,14 @@ defmodule Redix.PubSub.Connection do
     state.recipients
     |> Enum.filter(fn({_, recipients}) -> HashSet.member?(recipients, client) end)
     |> Enum.map(fn({channel, _recipients}) -> channel end)
+  end
+
+  defp send_reply(%{socket: socket} = state, data, reply) do
+    case :gen_tcp.send(socket, data) do
+      :ok ->
+        {:reply, reply, state}
+      {:error, _reason} = err ->
+        {:disconnect, err, state}
+    end
   end
 end
