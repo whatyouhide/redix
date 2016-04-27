@@ -291,4 +291,14 @@ defmodule RedixTest do
       assert Redix.command(c, ~w(PING)) == {:error, :closed}
     end
   end
+
+  @tag :no_setup
+  test "timing out right after the connection drops" do
+    {:ok, c} = Redix.start_link
+    silence_log fn ->
+      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      assert Redix.command(c, ~w(PING), timeout: 0) == {:error, :timeout}
+      refute_receive {_ref, _message}
+    end
+  end
 end

@@ -62,7 +62,7 @@ defmodule Redix.Connection do
         # message).
         receive do
           {ref, {^request_id, _resp}} when is_reference(ref) ->
-            :ok = Connection.call(conn, {:cancel_timed_out, request_id})
+            Connection.call(conn, {:cancel_timed_out, request_id})
         after
           0 -> :ok
         end
@@ -145,8 +145,13 @@ defmodule Redix.Connection do
   @doc false
   def handle_call(operation, from, state)
 
+  # When the socket is `nil`, that's a good way to tell we're disconnected.
   def handle_call({:commands, _commands, request_id}, _from, %{socket: nil} = state) do
     {:reply, {request_id, {:error, :closed}}, state}
+  end
+
+  def handle_call(_operation, _from, %{socket: nil} = state) do
+    {:reply, {:error, :closed}, state}
   end
 
   def handle_call({:commands, commands, request_id}, from, state) do
