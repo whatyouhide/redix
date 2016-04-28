@@ -139,13 +139,13 @@ defmodule Redix.Protocol do
         "", rest ->
           {:ok, i, rest}
         <<char, _ :: binary>>, _rest ->
-          raise ParseError, "expected CRLF, found: #{inspect <<char>>}"
+          raise ParseError, message: "expected CRLF, found: #{inspect <<char>>}"
       end
     end
   end
 
   defp parse_integer_without_sign(<<non_digit, _ :: binary>>) do
-    raise ParseError, "expected integer, found: #{inspect <<non_digit>>}"
+    raise ParseError, message: "expected integer, found: #{inspect <<non_digit>>}"
   end
 
   defp parse_integer_digits(<<digit, rest :: binary>>, acc) when digit in ?0..?9,

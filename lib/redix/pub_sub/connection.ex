@@ -333,8 +333,17 @@ defmodule Redix.PubSub.Connection do
   defp op_to_type(op) when op in [:subscribe, :unsubscribe], do: :channel
   defp op_to_type(op) when op in [:psubscribe, :punsubscribe], do: :pattern
 
-  defp monitor_recipient(state, recipient) do
-    %{state | monitors: HashDict.put_new_lazy(state.monitors, recipient, fn -> Process.monitor(recipient) end)}
+  defp monitor_recipient(%{monitors: monitors} = state, recipient) do
+    # TODO: put_new_lazy/3 is what we'll want to use here once depend on an
+    # Elixir version that has it available (1.1 or 1.2).
+    monitor =
+      if HashDict.has_key?(monitors, recipient) do
+        HashDict.fetch!(monitors, recipient)
+      else
+        Process.monitor(recipient)
+      end
+
+    %{state | monitors: HashDict.put(monitors, recipient, monitor)}
   end
 
   defp demonitor_recipient(state, recipient) do
