@@ -24,10 +24,12 @@ defmodule Redix.Connection.Receiver do
 
   ## Public API
 
+  @spec start_link(Keyword.t) :: GenServer.on_start
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
+  @spec stop(GenServer.server) :: :ok
   def stop(pid) do
     GenServer.cast(pid, :stop)
   end

@@ -5,6 +5,8 @@ defmodule Redix.Connection.SharedState do
 
   alias Redix.Utils
 
+  @type client :: {:commands, reference, GenServer.from, pos_integer}
+
   ## GenServer state
 
   defstruct [
@@ -14,26 +16,32 @@ defmodule Redix.Connection.SharedState do
 
   ## Public API
 
+  @spec start_link() :: GenServer.on_start
   def start_link() do
     GenServer.start_link(__MODULE__, nil)
   end
 
+  @spec enqueue(GenServer.server, client) :: :ok
   def enqueue(pid, client) do
     GenServer.cast(pid, {:enqueue, client})
   end
 
+  @spec dequeue(GenServer.server) :: {boolean, client}
   def dequeue(pid) do
     GenServer.call(pid, :dequeue)
   end
 
+  @spec add_timed_out_request(GenServer.server, reference) :: :ok
   def add_timed_out_request(pid, request_id) do
     GenServer.call(pid, {:add_timed_out_request, request_id})
   end
 
+  @spec cancel_timed_out_request(GenServer.server, reference) :: :ok
   def cancel_timed_out_request(pid, request_id) do
     GenServer.call(pid, {:cancel_timed_out_request, request_id})
   end
 
+  @spec disconnect_clients_and_stop(GenServer.server) :: :ok
   def disconnect_clients_and_stop(pid) do
     GenServer.call(pid, :disconnect_clients_and_stop)
   end
