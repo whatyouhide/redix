@@ -85,7 +85,7 @@ defmodule Redix.Utils do
   @spec format_error(term) :: binary
   def format_error(reason)
 
-  # Apparently :inet.format_error/1 doesn't format :tcp_closed.
+  # :inet.format_error/1 doesn't format :tcp_closed or :closed.
   def format_error(:tcp_closed) do
     "TCP connection closed"
   end

@@ -106,6 +106,9 @@ defmodule Redix.Connection do
         next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
         {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
       other ->
+        # {:stop, error, state} may be returned by Redix.Utils.connect/1 in case
+        # AUTH or SELECT fail (in that case, we don't want to try to reconnect
+        # anyways).
         other
     end
   end
@@ -113,6 +116,7 @@ defmodule Redix.Connection do
   @doc false
   def disconnect(reason, state)
 
+  # We disconnect with reason :stop when we call Redix.stop/1.
   def disconnect(:stop, state) do
     {:stop, :normal, state}
   end
@@ -124,6 +128,12 @@ defmodule Redix.Connection do
 
     :ok = :gen_tcp.close(state.socket)
 
+    # state.receiver may be nil if we already processed the message where it
+    # notifies us it stopped. If it's not nil, it means we noticed the TCP error
+    # when sending data through the socket; in that case, we stop it manually
+    # (with cast, so that if the receiver already died we don't error out),
+    # flush all messages coming from it (because it may still have noticed the
+    # TCP failure and notified us), and remove it from the state.
     state =
       if state.receiver do
         :ok = Receiver.stop(state.receiver)
@@ -133,9 +143,11 @@ defmodule Redix.Connection do
         state
       end
 
+    # We reply to clients in the queue, telling them we disconnected, and we sto
+    # the shared_state process.
     :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
 
-    state = %{state | socket: nil, backoff_current: state.opts[:backoff_initial]}
+    state = %{state | socket: nil, shared_state: nil, backoff_current: state.opts[:backoff_initial]}
     {:backoff, state.opts[:backoff_initial], state}
   end
 
@@ -143,12 +155,14 @@ defmodule Redix.Connection do
   def handle_call(operation, from, state)
 
   # When the socket is `nil`, that's a good way to tell we're disconnected.
+  # We only handle {:commands, ...} because we need to reply with the
+  # request_id and with the error.
+  #
+  # TODO: if we ever provide a Redix.format_error/1 public function, :closed
+  # should be handled there. It shouldn't be handled in
+  # Redix.Utils.format_error/1 because :closed is never a disconnection reason.
   def handle_call({:commands, _commands, request_id}, _from, %{socket: nil} = state) do
     {:reply, {request_id, {:error, :closed}}, state}
-  end
-
-  def handle_call(_operation, _from, %{socket: nil} = state) do
-    {:reply, {:error, :closed}, state}
   end
 
   def handle_call({:commands, commands, request_id}, from, state) do
@@ -161,6 +175,13 @@ defmodule Redix.Connection do
       {:error, _reason} = error ->
         {:disconnect, error, state}
     end
+  end
+
+  # If the socket is nil, it means we're disconnected. We don't want to
+  # communicate with the shared_state because it's not alive anymore.
+  def handle_call({operation, _request_id}, _from, %{socket: nil} = state)
+      when operation in [:timed_out, :cancel_timed_out] do
+    {:reply, :ok, state}
   end
 
   def handle_call({:timed_out, request_id}, _from, state) do
@@ -183,8 +204,18 @@ defmodule Redix.Connection do
   @doc false
   def handle_info(msg, state)
 
-  def handle_info({:receiver, pid, msg}, %{receiver: pid} = state) do
-    handle_msg_from_receiver(msg, state)
+  # Here and in the next handle_info/2 clause, we set the receiver to `nil`
+  # because if we're receiving this message, it means the receiver died
+  # peacefully by itself (so we don't want to communicate with it anymore, in
+  # any way, before reconnecting and restarting it).
+  def handle_info({:receiver, pid, {:tcp_closed, socket}}, %{receiver: pid, socket: socket} = state) do
+    state = %{state | receiver: nil}
+    {:disconnect, {:error, :tcp_closed}, state}
+  end
+
+  def handle_info({:receiver, pid, {:tcp_error, socket, reason}}, %{receiver: pid, socket: socket} = state) do
+    state = %{state | receiver: nil}
+    {:disconnect, {:error, reason}, state}
   end
 
   ## Helper functions
@@ -207,16 +238,6 @@ defmodule Redix.Connection do
     {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, shared_state: shared_state)
     :ok = :gen_tcp.controlling_process(socket, receiver)
     receiver
-  end
-
-  defp handle_msg_from_receiver({:tcp_closed, socket}, %{socket: socket} = state) do
-    state = %{state | receiver: nil}
-    {:disconnect, {:error, :disconnected}, state}
-  end
-
-  defp handle_msg_from_receiver({:tcp_error, socket, reason}, %{socket: socket} = state) do
-    state = %{state | receiver: nil}
-    {:disconnect, {:error, reason}, state}
   end
 
   defp flush_messages_from_receiver(%{receiver: receiver} = state) do

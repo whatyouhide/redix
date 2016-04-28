@@ -94,6 +94,7 @@ defmodule Redix.Connection.Receiver do
     end
   end
 
+  # We notify the sender of the error and stop normally.
   defp disconnect(msg, state) do
     send state.sender, {:receiver, self(), msg}
     {:stop, :normal, state}
