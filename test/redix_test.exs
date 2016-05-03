@@ -248,7 +248,7 @@ defmodule RedixTest do
     {:ok, c} = Redix.start_link
 
     silence_log fn ->
-      assert {:ok, _} = Redix.command(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      assert {:ok, _} = Redix.command(c, ~w(QUIT))
       # Redix retries the first reconnection after 500ms.
       :timer.sleep(600)
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
@@ -278,7 +278,7 @@ defmodule RedixTest do
         send parent, ref
       end)
 
-      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      Redix.command!(c, ~w(QUIT))
       assert_receive ^ref, 200
     end
   end
@@ -287,7 +287,7 @@ defmodule RedixTest do
   test "commands when the socket is closed" do
     {:ok, c} = Redix.start_link
     silence_log fn ->
-      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      Redix.command!(c, ~w(QUIT))
       assert Redix.command(c, ~w(PING)) == {:error, :closed}
     end
   end
@@ -296,7 +296,7 @@ defmodule RedixTest do
   test "timing out right after the connection drops" do
     {:ok, c} = Redix.start_link
     silence_log fn ->
-      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      Redix.command!(c, ~w(QUIT))
       assert Redix.command(c, ~w(PING), timeout: 0) == {:error, :timeout}
       refute_receive {_ref, _message}
     end
@@ -318,7 +318,7 @@ defmodule RedixTest do
         send parent, ref
       end)
 
-      Redix.command!(c, ~w(CLIENT KILL TYPE normal SKIPME no))
+      Redix.command!(c, ~w(QUIT))
       assert_receive ^ref, 200
     end
   end
