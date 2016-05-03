@@ -249,8 +249,16 @@ defmodule RedixTest do
 
     silence_log fn ->
       assert {:ok, _} = Redix.command(c, ~w(QUIT))
-      # Redix retries the first reconnection after 500ms.
-      :timer.sleep(600)
+
+      # When the socket is closed, we reply with {:error, :closed}. We sleep so
+      # we're sure that the socket is closed (and we don't get {:error,
+      # :disconnected} before the socket closed after we sent the PING command
+      # to Redix).
+      :timer.sleep(100)
+      assert Redix.command(c, ~w(PING)) == {:error, :closed}
+
+      # Redix retries the first reconnection after 500ms, and we waited 100 already.
+      :timer.sleep(500)
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
     end
   end
@@ -280,15 +288,6 @@ defmodule RedixTest do
 
       Redix.command!(c, ~w(QUIT))
       assert_receive ^ref, 200
-    end
-  end
-
-  @tag :no_setup
-  test "commands when the socket is closed" do
-    {:ok, c} = Redix.start_link
-    silence_log fn ->
-      Redix.command!(c, ~w(QUIT))
-      assert Redix.command(c, ~w(PING)) == {:error, :closed}
     end
   end
 
