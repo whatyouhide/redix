@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.4.0-dev
+
+* Add [@lexmag](https://github.com/lexmag) to the maintainers :tada:
+* Handle timeouts nicely by returning `{:error, :timeout}` instead of exiting
+  (which is the default `GenServer` behaviour).
+* Remove support for specifying a maximum number of reconnection attempts when
+  connecting to Redis (it was the `:max_reconnection_attempts` option).
+* Use exponential backoff when reconnecting.
+* Don't reconnect right away after the connection to Redis is lost, but wait for
+  a cooldown time first.
+* Add support for `:backoff_initial` and `:backoff_max` options in
+  `Redix.start_link/2`. These options are used for controlling the backoff
+  behaviour of a `Redix` connection.
+* Add support for the `:sync_connect` option when connecting to Redis.
+* Add a "Reconnections" page in the documentation.
+* Log successful reconnections to Redis (for `Redix` connections) using the
+  `info` level.
+
 ## v0.3.6
 
 * Fixed a bug in the integer parsing in `Redix.Protocol`.
