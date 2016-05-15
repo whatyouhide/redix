@@ -183,7 +183,7 @@ defmodule Redix.PubSubTest do
   end
 
   test "clients are notified of disconnections", %{conn: ps} do
-    PubSub.subscribe!(ps, "foo", self())
+    PubSub.subscribe(ps, "foo", self())
     assert_receive {:redix_pubsub, :subscribe, "foo", _}
 
     {:ok, c} = Redix.start_link

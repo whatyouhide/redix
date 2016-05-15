@@ -47,31 +47,30 @@ defmodule Redix.PubSub do
   The following is a list of all possible PubSub messages that Redix sends:
 
     * `{:redix_pubsub, :subscribe, channel, nil}` - sent when a client
-      successfully subscribes to a `channel` using `subscribe/4`. `client_count`
-      is the number of clients subscribed to `channel`. Note that when
+      successfully subscribes to a `channel` using `subscribe/4`. Note that when
       `subscribe/4` is called with more than one channel, a message like this
       one will be sent for each of the channels in the list.
     * `{:redix_pubsub, :psubscribe, pattern, nil}` - exactly like the
       previous message, except it's sent after calls to `psubscribe/4`.
-    * `{:redix_pubsub, :unsubscribe, channel, nil}` - sent when a
-      client successfully unsubscribes from a `channel` using `unsubscribe/4`.
-      `client_count` is the number of clients subscribed to `channel`. Note that
-      when `subscribe/4` is called with more than one channel, a message like
-      this one will be sent for each of the channels in the list.
+    * `{:redix_pubsub, :unsubscribe, channel, nil}` - sent when a client
+      successfully unsubscribes from a `channel` using `unsubscribe/4`.  Note
+      that when `unsubscribe/4` is called with more than one channel, a message
+      like this one will be sent for each of the channels in the list.
     * `{:redix_pubsub, :punsubscribes, pattern, nil}` - exactly like
       the previous message, except it's sent after calls to `punsubscribe/4`.
     * `{:redix_pubsub, :message, content, channel}` - sent when a message is
       published on `channel`. `content` is the content of the message.
     * `{:redix_pubsub, :pmessage, content, {pattern, originating_channel}}` -
-      sent when a message is published on `originating_channel` and delivered to
-      the recipient because that channels matches `pattern.
-    * `{:redix_pubsub, :disconnected, subscribed_channels, nil}` - sent when a
-      Redix PubSub connection disconnects from Redis. `subscribed_channels` is
+      sent when a message with content `content` is published on
+      `originating_channel` and delivered to the recipient because that channels
+      matches `pattern`.
+    * `{:redix_pubsub, :disconnected, subscribed_channels, nil}` - sent when the
+      connection to Redis is interrupted. `subscribed_channels` is
       the list of channels and patterns to which the recipient process was
       subscribed before the disconnection (elements of this list have the form
       `{:channel, channel}` or `{:pattern, pattern}`).
-    * `{:redix_pubsub, :reconnected, nil, nil}` - sent when a Redix PubSub
-      connection reconnects after a disconnection.
+    * `{:redix_pubsub, :reconnected, nil, nil}` - sent when the connection to
+      Redis is established again.
 
   ## Example
 
@@ -147,11 +146,6 @@ defmodule Redix.PubSub do
 
       {:redix_pubsub, :subscribe, channel, nil}
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
-
   ## Examples
 
       iex> Redix.subscribe(conn, ["foo", "bar", "baz"], self())
@@ -163,24 +157,9 @@ defmodule Redix.PubSub do
       :ok
 
   """
-  @spec subscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
-    :ok | {:error, term}
-  def subscribe(conn, channels, recipient, opts \\ []) do
-    timeout = opts[:timeout] || @default_timeout
-    Connection.call(conn, {:subscribe, List.wrap(channels), recipient}, timeout)
-  end
-
-  @doc """
-  Subscribes `recipient` to the given channel or list of channels, raising if
-  there's an error.
-
-  Works exactly like `subscribe/4` but raises if there's an error.
-  """
-  @spec subscribe!(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) :: :ok
-  def subscribe!(conn, channels, recipient, opts \\ []) do
-    conn
-    |> subscribe(channels, recipient, opts)
-    |> maybe_raise
+  @spec subscribe(GenServer.server, String.t | [String.t], pubsub_recipient) :: :ok
+  def subscribe(conn, channels, recipient) do
+    Connection.cast(conn, {:subscribe, List.wrap(channels), recipient})
   end
 
   @doc """
@@ -194,11 +173,6 @@ defmodule Redix.PubSub do
 
      {:redix_pubsub, :psubscribe, pattern, nil}
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
-
   ## Examples
 
       iex> Redix.psubscribe(conn, "ba*", self())
@@ -208,24 +182,9 @@ defmodule Redix.PubSub do
       :ok
 
   """
-  @spec psubscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
-    :ok | {:error, term}
-  def psubscribe(conn, patterns, recipient, opts \\ []) do
-    timeout = opts[:timeout] || @default_timeout
-    Connection.call(conn, {:psubscribe, List.wrap(patterns), recipient}, timeout)
-  end
-
-  @doc """
-  Subscribes `recipient` to the given pattern or list of patterns, raising if
-  there's an error.
-
-  Works exactly like `psubscribe/4` but raises if there's an error.
-  """
-  @spec psubscribe!(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) :: :ok
-  def psubscribe!(conn, patterns, recipient, opts \\ []) do
-    conn
-    |> psubscribe(patterns, recipient, opts)
-    |> maybe_raise
+  @spec psubscribe(GenServer.server, String.t | [String.t], pubsub_recipient) :: :ok
+  def psubscribe(conn, patterns, recipient) do
+    Connection.cast(conn, {:psubscribe, List.wrap(patterns), recipient})
   end
 
   @doc """
@@ -239,11 +198,6 @@ defmodule Redix.PubSub do
 
       {:redix_pubsub, :unsubscribe, channel, nil}
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
-
   ## Examples
 
       iex> Redix.unsubscribe(conn, ["foo", "bar", "baz"], self())
@@ -255,24 +209,9 @@ defmodule Redix.PubSub do
       :ok
 
   """
-  @spec unsubscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
-    :ok | {:error, term}
+  @spec unsubscribe(GenServer.server, String.t | [String.t], pubsub_recipient) :: :ok
   def unsubscribe(conn, channels, recipient, opts \\ []) do
-    timeout = opts[:timeout] || @default_timeout
-    Connection.call(conn, {:unsubscribe, List.wrap(channels), recipient}, timeout)
-  end
-
-  @doc """
-  Unsubscribes `recipient` from the given channel or list of channels, raising
-  if there's an error.
-
-  Works exactly like `unsubscribe/4` but raises if there's an error.
-  """
-  @spec unsubscribe!(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) :: :ok
-  def unsubscribe!(conn, channels, recipient, opts \\ []) do
-    conn
-    |> unsubscribe(channels, recipient, opts)
-    |> maybe_raise
+    Connection.cast(conn, {:unsubscribe, List.wrap(channels), recipient})
   end
 
   @doc """
@@ -286,11 +225,6 @@ defmodule Redix.PubSub do
 
       {:redix_pubsub, :punsubscribe, pattern, nil}
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
-
   ## Examples
 
       iex> Redix.punsubscribe(conn, "foo_*", self())
@@ -300,32 +234,8 @@ defmodule Redix.PubSub do
       :ok
 
   """
-  @spec punsubscribe(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) ::
-    :ok | {:error, term}
-  def punsubscribe(conn, patterns, recipient, opts \\ []) do
-    timeout = opts[:timeout] || @default_timeout
-    Connection.call(conn, {:punsubscribe, List.wrap(patterns), recipient}, timeout)
+  @spec punsubscribe(GenServer.server, String.t | [String.t], pubsub_recipient) :: :ok
+  def punsubscribe(conn, patterns, recipient) do
+    Connection.cast(conn, {:punsubscribe, List.wrap(patterns), recipient})
   end
-
-  @doc """
-  Unsubscribes `recipient` from the given pattern or list of patterns, raising
-  if there's an error.
-
-  Works exactly like `punsubscribe/4` but raises if there's an error.
-  """
-  @spec punsubscribe!(GenServer.server, String.t | [String.t], pubsub_recipient, Keyword.t) :: :ok
-  def punsubscribe!(conn, patterns, recipient, opts \\ []) do
-    conn
-    |> punsubscribe(patterns, recipient, opts)
-    |> maybe_raise
-  end
-
-  # Raises the appropriate error based on the result of a
-  # subscription/unsubscription.
-  defp maybe_raise(:ok),
-    do: :ok
-  defp maybe_raise({:error, %Redix.Error{} = err}),
-    do: raise(err)
-  defp maybe_raise({:error, err}),
-    do: raise(Redix.ConnectionError, err)
 end

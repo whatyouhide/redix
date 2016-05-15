@@ -16,10 +16,8 @@ defmodule Redix.PubSub.Connection do
     queue: :queue.new,
     continuation: nil,
     clients_to_notify_of_reconnection: [],
-    current_backoff: nil,
+    backoff_current: nil,
   ]
-
-  @initial_backoff 500
 
   @backoff_exponent 1.5
 
@@ -57,19 +55,8 @@ defmodule Redix.PubSub.Connection do
           Utils.format_error(reason),
         ]
 
-        if info == :init do
-          {:backoff, @initial_backoff, %{state | current_backoff: @initial_backoff}}
-        else
-          backoff_max = state.opts[:backoff_max]
-          next_exponential_backoff = round(state.current_backoff * @backoff_exponent)
-          next_backoff =
-            if backoff_max == :infinity do
-              next_exponential_backoff
-            else
-              min(next_exponential_backoff, backoff_max)
-            end
-          {:backoff, next_backoff, %{state | current_backoff: next_backoff}}
-        end
+        next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
+        {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
       other ->
         other
     end
@@ -79,30 +66,34 @@ defmodule Redix.PubSub.Connection do
   def disconnect(reason, state)
 
   def disconnect(:stop, state) do
+    # TODO: should we do something here as well?
     {:stop, :normal, state}
   end
 
   def disconnect({:error, reason}, state) do
-    Logger.error ["Disconnected from Redis (#{Utils.format_host(state)}): ",
-                  Utils.format_error(reason)]
-    :gen_tcp.close(state.socket)
+    Logger.error [
+      "Disconnected from Redis (", Utils.format_host(state), "): ", Utils.format_error(reason),
+    ]
+
+    :ok = :gen_tcp.close(state.socket)
+
     state = disconnect_and_notify_clients(state, reason)
-    {:backoff, @initial_backoff, %{state | continuation: nil, socket: nil, current_backoff: @initial_backoff}}
-  end
-
-  @doc false
-  def handle_call(operation, from, state)
-
-  def handle_call({op, channels, recipient}, _from, state) when op in [:subscribe, :psubscribe] do
-    subscribe(state, op, channels, recipient)
-  end
-
-  def handle_call({op, channels, recipient}, _from, state) when op in [:unsubscribe, :punsubscribe] do
-    unsubscribe(state, op, channels, recipient)
+    state = %{state | socket: nil, continuation: nil, backoff_current: state.opts[:backoff_initial]}
+    {:backoff, state.opts[:backoff_initial], state}
   end
 
   @doc false
   def handle_cast(operation, state)
+
+  def handle_cast({op, channels, recipient}, state)
+      when op in [:subscribe, :psubscribe] do
+    subscribe(state, op, channels, recipient)
+  end
+
+  def handle_cast({op, channels, recipient}, state)
+      when op in [:unsubscribe, :punsubscribe] do
+    unsubscribe(state, op, channels, recipient)
+  end
 
   def handle_cast(:stop, state) do
     {:disconnect, :stop, state}
@@ -147,13 +138,10 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp new_data(state, data) do
-    parser = state.continuation || &Protocol.parse/1
-    case parser.(data) do
+    case (state.continuation || &Protocol.parse/1).(data) do
       {:ok, resp, rest} ->
-        state
-        |> handle_message(resp)
-        |> Map.put(:continuation, nil)
-        |> new_data(rest)
+        state = handle_message(state, resp)
+        new_data(%{state | continuation: nil}, rest)
       {:continuation, continuation} ->
         %{state | continuation: continuation}
     end
@@ -172,9 +160,9 @@ defmodule Redix.PubSub.Connection do
     if channels_to_subscribe_to != [] do
       state
       |> enqueue(Enum.map(channels_to_subscribe_to, &{op, &1, recipient}))
-      |> send_reply(Protocol.pack([command | channels_to_subscribe_to]), :ok)
+      |> send_noreply(Protocol.pack([command | channels_to_subscribe_to]))
     else
-      {:reply, :ok, state}
+      {:noreply, state}
     end
   end
 
@@ -191,9 +179,9 @@ defmodule Redix.PubSub.Connection do
     if channels_to_unsubscribe_from != [] do
       state
       |> enqueue(Enum.map(channels_to_unsubscribe_from, &{op, &1, recipient}))
-      |> send_reply(Protocol.pack([command | channels_to_unsubscribe_from]), :ok)
+      |> send_noreply(Protocol.pack([command | channels_to_unsubscribe_from]))
     else
-      {:reply, :ok, state}
+      {:noreply, state}
     end
   end
 
@@ -376,12 +364,22 @@ defmodule Redix.PubSub.Connection do
     |> Enum.map(fn({channel, _recipients}) -> channel end)
   end
 
-  defp send_reply(%{socket: socket} = state, data, reply) do
+  defp send_noreply(%{socket: socket} = state, data) do
     case :gen_tcp.send(socket, data) do
       :ok ->
-        {:reply, reply, state}
+        {:noreply, state}
       {:error, _reason} = err ->
         {:disconnect, err, state}
+    end
+  end
+
+  defp calc_next_backoff(backoff_current, backoff_max) do
+    next_exponential_backoff = round(backoff_current * @backoff_exponent)
+
+    if backoff_max == :infinity do
+      next_exponential_backoff
+    else
+      min(next_exponential_backoff, backoff_max)
     end
   end
 end
