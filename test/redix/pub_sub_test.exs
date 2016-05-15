@@ -182,6 +182,7 @@ defmodule Redix.PubSubTest do
     :timer.sleep(100)
   end
 
+  @tag :skip
   test "clients are notified of disconnections", %{conn: ps} do
     PubSub.subscribe(ps, "foo", self())
     assert_receive {:redix_pubsub, :subscribe, "foo", _}
