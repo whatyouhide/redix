@@ -3,7 +3,7 @@ defmodule Redix.Utils do
 
   require Logger
 
-  alias Redix.Connection.Auth
+  alias Redix.Auth
 
   # We use exit_on_close: false so that we can consistently close the socket
   # (with :gen_tcp.close/1) in the disconnect/2 callback. If we left the default

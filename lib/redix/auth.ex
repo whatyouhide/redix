@@ -1,4 +1,4 @@
-defmodule Redix.Connection.Auth do
+defmodule Redix.Auth do
   @moduledoc false
 
   alias Redix.Protocol
