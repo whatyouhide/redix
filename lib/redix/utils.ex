@@ -46,8 +46,8 @@ defmodule Redix.Utils do
     {redix_opts, connection_opts}
   end
 
-  @spec connect(%{}) :: {:ok, %{}} | {:error, term} | {:stop, term, %{}}
-  def connect(%{opts: opts} = state) do
+  @spec connect(Keyword.t) :: {:ok, :gen_tcp.socket} | {:error, term} | {:stop, term, %{}}
+  def connect(opts) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
     # TODO: let's replace with `with` when we depend on ~> 1.2.
@@ -56,13 +56,12 @@ defmodule Redix.Utils do
         setup_socket_buffers(socket)
         case Auth.auth_and_select_db(socket, opts) do
           {:ok, ""} ->
-            state = %{state | socket: socket}
             :inet.setopts(socket, active: :once)
-            {:ok, state}
+            {:ok, socket}
           {:ok, tail} when byte_size(tail) > 0 ->
-            {:stop, :unexpected_tail_after_auth, state}
+            {:stop, :unexpected_tail_after_auth}
           {:error, reason} ->
-            {:stop, reason, state}
+            {:stop, reason}
         end
       {:error, _reason} = error ->
         error

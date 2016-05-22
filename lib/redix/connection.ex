@@ -88,8 +88,9 @@ defmodule Redix.Connection do
   def connect(info, state)
 
   def connect(info, state) do
-    case Utils.connect(state) do
-      {:ok, state} ->
+    case Utils.connect(state.opts) do
+      {:ok, socket} ->
+        state = %{state | socket: socket}
         {:ok, shared_state} = SharedState.start_link()
         receiver = start_receiver_and_hand_socket(state.socket, shared_state)
 
@@ -109,11 +110,11 @@ defmodule Redix.Connection do
 
         next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
         {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
-      other ->
+      {:stop, reason} ->
         # {:stop, error, state} may be returned by Redix.Utils.connect/1 in case
         # AUTH or SELECT fail (in that case, we don't want to try to reconnect
         # anyways).
-        other
+        {:stop, reason, state}
     end
   end
 
@@ -225,16 +226,17 @@ defmodule Redix.Connection do
   ## Helper functions
 
   defp sync_connect(state) do
-    case Utils.connect(state) do
-      {:ok, state} ->
+    case Utils.connect(state.opts) do
+      {:ok, socket} ->
+        state = %{state | socket: socket}
         {:ok, shared_state} = SharedState.start_link()
         receiver = start_receiver_and_hand_socket(state.socket, shared_state)
         state = %{state | shared_state: shared_state, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
         {:stop, reason}
-      {:stop, reason, _state} ->
-        {:stop, reason}
+      {:stop, _reason} = stop ->
+        stop
     end
   end
 
