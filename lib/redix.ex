@@ -15,10 +15,6 @@ defmodule Redix do
   response. This pattern avoids blocking the Redix process for each request (until
   a response arrives), increasing the performance of this driver.
 
-  This pattern is different when using PubSub since no commands can be sent to
-  Redis once PubSub is active. Have a look at the "PubSub" section below to know
-  more about PubSub support in Redix.
-
   ## Reconnections
 
   Redix tries to be as resilient as possible: it tries to recover automatically
@@ -34,13 +30,6 @@ defmodule Redix do
   All this behaviour is implemented using the
   [connection](https://github.com/fishcakez/connection) library (a dependency of
   Redix).
-
-  ## PubSub
-
-  Redix provides an interface for the [Redis PubSub
-  functionality](http://redis.io/topics/pubsub). You can read more about it in
-  the documentation for the `Redix.PubSub` module.
-
   """
 
   @type command :: [binary]

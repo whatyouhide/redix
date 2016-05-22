@@ -17,6 +17,9 @@
 * Add a "Reconnections" page in the documentation.
 * Log successful reconnections to Redis (for `Redix` connections) using the
   `info` level.
+* Extract the Pub/Sub functionality into a separate project
+  (https://github.com/whatyouhide/redix_pubsub).
+
 
 ## v0.3.6
 

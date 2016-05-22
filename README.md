@@ -117,41 +117,6 @@ Redix.command(conn, ~w(EXEC))
 #=> {:ok, [1, 2]}
 ```
 
-#### PubSub
-
-Redix supports the [PubSub functionality][redis-pubsub] provided by Redis.
-
-PubSub connections are different than regular Redix connections and have to be
-started using `Redix.PubSub.start_link/1-2`. Clients can then subscribe
-processes to channels (or patterns) using `Redix.PubSub.subscribe/4` (or
-`Redix.PubSub.psubscribe/4`). After that, recipient processes will receive
-(Elixir) messages for:
-
-  * successful subscriptions
-  * messages published on subscribed channels or patterns
-  * successful unsubscriptions (`Redix.PubSub.unsubscribe/4` and
-    `Redix.PubSub.punsubscribe/4`)
-  * disconnections and reconnections of the PubSub client
-
-Here's an example usage of the PubSub functionality:
-
-```elixir
-{:ok, conn} = Redix.PubSub.start_link
-
-:ok = Redix.PubSub.subscribe(conn, "ch1", self())
-
-# We receive a message for each channel we subscribe to. We are receiving it
-# because we passed self() to subscribe/3.
-receive do msg -> msg end
-#=> {:redix_pubsub, :subscribe, "ch1", 1}
-
-{:ok, other_conn} = Redix.start_link
-{:ok, _} = Redix.command(other_conn, ~w(PUBLISH ch1 hello_world))
-
-receive do msg -> msg end
-#=> {:redix_pubsub, :message, "hello_world", "ch1"}
-```
-
 #### Resiliency
 
 Redix takes full advantage of the [connection][connection] library by James
@@ -261,7 +226,6 @@ MIT &copy; 2015 Andrea Leopardi, see the [license file](LICENSE.txt).
 
 
 [redis]: http://redis.io
-[redis-pubsub]: http://redis.io/topics/pubsub
 [connection]: https://github.com/fishcakez/connection
 [redo]: https://github.com/heroku/redo
 [eredis]: https://github.com/wooga/eredis
