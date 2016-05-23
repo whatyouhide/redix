@@ -58,10 +58,11 @@ named Redix processes, and to distribute the load between the Redixes using
 their name.
 
 For example, we can start five Redix processes under our supervision tree and
-name them `:redix_1` to `:redix_5`:
+name them `:redix_0` to `:redix_4`:
 
 ```elixir
-children = for i <- 1..5 do
+pool_size = 5
+children = for 0..(pool_size - 1)
   worker(Redix, [[], [name: :"redix_#{i}"]], id: {Redix, i})
 end
 ```
@@ -77,9 +78,7 @@ defmodule MyApp.Redix do
   end
 
   defp random_index() do
-    System.unique_integer([:positive])
-    |> rem(5)
-    |> Kernel.+(1)
+    rem(System.unique_integer([:positive]), 5)
   end
 end
 ```
