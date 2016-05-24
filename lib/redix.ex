@@ -39,7 +39,8 @@ defmodule Redix do
   @doc """
   Starts a connection to Redis.
 
-  This function returns `{:ok, pid}` if the connection is successful.
+  This function returns `{:ok, pid}` if the Redix process is started
+  successfully.
 
   The actual TCP connection to the Redis server may happen either synchronously,
   before `start_link/2` returns, or asynchronously: this behaviour is decided by
