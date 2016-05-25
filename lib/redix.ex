@@ -213,10 +213,18 @@ defmodule Redix do
   end
 
   def pipeline(conn, commands, opts) do
-    if Enum.any?(commands, &(&1 == [])) do
-      {:error, :empty_command}
-    else
+    try do
+      Enum.each(commands, fn
+        [] ->
+          throw(:empty_command)
+        [command | _] when command in ~w(SUBSCRIBE PSUBSCRIBE UNSUBSCRIBE PUNSUBSCRIBE) ->
+          throw({:pubsub_command, command})
+        _ ->
+          :ok
+      end)
       Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
+    catch
+      :throw, error -> {:error, error}
     end
   end
 

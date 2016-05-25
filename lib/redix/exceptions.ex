@@ -21,10 +21,16 @@ defmodule Redix.ConnectionError do
     %__MODULE__{message: reason}
   end
 
-  def exception(reason) when is_atom(reason) do
+  def exception(reason) do
     %__MODULE__{message: format_reason(reason)}
   end
 
-  defp format_reason(:empty_command), do: "an empty command ([]) is not a valid Redis command"
-  defp format_reason(other), do: Utils.format_error(other)
+  defp format_reason(:empty_command),
+    do: "an empty command ([]) is not a valid Redis command"
+  defp format_reason({:pubsub_command, command}) when is_binary(command),
+    do: "Pub/Sub commands (#{command} in this case) are not supported by Redix." <>
+        "Use the Redix.PubSub project (https://github.com/whatyouhide/redix_pubsub) " <>
+        "for Pub/Sub functionality support"
+  defp format_reason(other),
+    do: Utils.format_error(other)
 end

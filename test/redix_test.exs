@@ -204,6 +204,11 @@ defmodule RedixTest do
     assert Redix.pipeline(c, [["PING"], [], ["PING"]]) == {:error, :empty_command}
   end
 
+  test "pipeline/2: passing a PubSub command causes an error", %{conn: c} do
+    assert Redix.pipeline(c, [["PING"], ["SUBSCRIBE", "foo"]]) ==
+           {:error, {:pubsub_command, "SUBSCRIBE"}}
+  end
+
   test "pipeline/2: timeout", %{conn: c} do
     assert {:error, :timeout} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
   end
@@ -240,6 +245,13 @@ defmodule RedixTest do
     msg = "an empty command ([]) is not a valid Redis command"
     assert_raise ConnectionError, msg, fn ->
       Redix.pipeline!(c, [["PING"], []])
+    end
+  end
+
+  test "pipeline!/2: pubsub commands", %{conn: c} do
+    msg = ~r[Pub/Sub commands \(PSUBSCRIBE in this case\) are not supported by Redix]
+    assert_raise ConnectionError, msg, fn ->
+      Redix.pipeline!(c, [["PING"], ["PSUBSCRIBE", "foo"]])
     end
   end
 
