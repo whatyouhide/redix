@@ -118,7 +118,7 @@ reconnections.
 #### Pub/Sub
 
 Redix doesn't support the Pub/Sub features of Redis. For that, there's
-[`redix_pub_sub`][redix-pub-sub] :).
+[`redix_pubsub`][redix-pubsub] :).
 
 ## Using Redix in the Real World™
 
@@ -144,6 +144,6 @@ MIT &copy; 2015 Andrea Leopardi, see the [license file](LICENSE.txt).
 [redis]: http://redis.io
 [connection]: https://github.com/fishcakez/connection
 [poolboy]: https://github.com/devinus/poolboy
-[redix-pub-sub]: https://github.com/whatyouhide/redix_pub_sub
+[redix-pubsub]: https://github.com/whatyouhide/redix_pubsub
 [docs-reconnections]: http://hexdocs.pm/redix/reconnections.html
 [docs-real-world-usage]: http://hexdocs.pm/redix/real-world-usage.html
