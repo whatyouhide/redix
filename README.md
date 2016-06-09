@@ -10,6 +10,10 @@ Redix is a [Redis][redis] client written in pure Elixir with focus on speed,
 correctness and resiliency (that is, being able to automatically reconnect to
 Redis in case of network errors).
 
+Note that this README refers to the `master` branch of Redix, not the latest
+released version on Hex. See [the documentation](http://hexdocs.pm/redix) for
+the documentation of the version you're using.
+
 ## Installation
 
 Add the `:redix` dependency to your `mix.exs` file:
