@@ -61,10 +61,15 @@ For example, we can start five Redix processes under our supervision tree and
 name them `:redix_0` to `:redix_4`:
 
 ```elixir
+# lib/my_app.ex
+
+# create the redix children list of workers
 pool_size = 5
-children = for 0..(pool_size - 1)
+redix_children = for i <- 0..(pool_size - 1) do
   worker(Redix, [[], [name: :"redix_#{i}"]], id: {Redix, i})
 end
+# add them to the supervisior children list
+children = children ++ redix_children
 ```
 
 Then, we can build a simple wrapper module around Redix which will dispatch to
@@ -72,6 +77,8 @@ one of the five Redix processes (with whatever strategy makes sense, e.g.,
 randomly):
 
 ```elixir
+# lib/my_app/redix.ex 
+
 defmodule MyApp.Redix do
   def command(command) do
     Redix.command(:"redix_#{random_index()}", command)
@@ -82,3 +89,9 @@ defmodule MyApp.Redix do
   end
 end
 ```
+
+And then to use the new wrapper in your appplication:
+```elixir
+MyApp.Redix.command(~w(PING))
+```
+Note: You no longer need to pass `conn` as the wrapper is picking one at random.
