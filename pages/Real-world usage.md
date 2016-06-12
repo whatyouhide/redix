@@ -68,13 +68,6 @@ redix_workers = for i <- 0..(pool_size - 1) do
 end
 ```
 
-If you then wanted to have these supervised by your app supervisor, you could add the workers to the children list in `lib/my_app.ex` by appending them to the children array.
-
-```elixir
-# Add them to the supervisior list of children:
-children = children ++ redix_workers
-```
-
 Then, we can build a simple wrapper module around Redix which will dispatch to
 one of the five Redix processes (with whatever strategy makes sense, e.g.,
 randomly):
