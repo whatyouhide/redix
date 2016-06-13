@@ -58,7 +58,7 @@ defmodule Redix.Connection do
 
         # We try to flush the response because it may have arrived before the
         # connection processed the :timed_out message. In case it arrived, we
-        # notify the conncetion that it arrived (canceling the :timed_out
+        # notify the connection that it arrived (canceling the :timed_out
         # message).
         receive do
           {ref, {^request_id, _resp}} when is_reference(ref) ->
