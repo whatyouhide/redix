@@ -61,8 +61,9 @@ For example, we can start five Redix processes under our supervision tree and
 name them `:redix_0` to `:redix_4`:
 
 ```elixir
+# Create the redix children list of workers:
 pool_size = 5
-children = for 0..(pool_size - 1)
+redix_workers = for i <- 0..(pool_size - 1) do
   worker(Redix, [[], [name: :"redix_#{i}"]], id: {Redix, i})
 end
 ```
@@ -81,4 +82,10 @@ defmodule MyApp.Redix do
     rem(System.unique_integer([:positive]), 5)
   end
 end
+```
+
+And then to use the new wrapper in your appplication:
+
+```elixir
+MyApp.Redix.command(~w(PING))
 ```
