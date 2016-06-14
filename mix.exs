@@ -9,16 +9,16 @@ defmodule Redix.Mixfile do
 
   @version "0.3.6"
 
-  def project do
+  def project() do
     [app: :redix,
      version: @version,
      elixir: "~> 1.0",
      build_embedded: Mix.env in [:prod, :bench],
      start_permanent: Mix.env == :prod,
-     deps: deps,
+     deps: deps(),
 
      # Hex
-     package: package,
+     package: package(),
      description: @description,
 
      # Docs
@@ -29,17 +29,17 @@ defmodule Redix.Mixfile do
             extras: ["README.md", "pages/Reconnections.md", "pages/Real world usage.md"]]]
   end
 
-  def application do
+  def application() do
     [applications: [:logger, :connection]]
   end
 
-  defp package do
+  defp package() do
     [maintainers: ["Andrea Leopardi", "Aleksei Magusev"],
      licenses: ["MIT"],
      links: %{"GitHub" => @repo_url}]
   end
 
-  defp deps do
+  defp deps() do
     [{:connection, "~> 1.0.0"},
      {:dialyze, "~> 0.2", only: :dev},
      {:markdown, github: "devinus/markdown", only: :docs},
