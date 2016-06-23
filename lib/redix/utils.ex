@@ -14,8 +14,8 @@ defmodule Redix.Utils do
 
   @redis_opts [:host, :port, :password, :database]
   @redis_default_opts [
-    host: 'localhost',
-    port: 6379,
+    host: System.get_env("REDIS_HOST") || "localhost" |> String.to_char_list,
+    port: System.get_env("REDIS_PORT") || 6379
   ]
 
   @redix_behaviour_opts [:socket_opts, :sync_connect, :backoff_initial, :backoff_max]

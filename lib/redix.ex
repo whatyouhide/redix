@@ -81,9 +81,9 @@ defmodule Redix do
   Redis (instead of a URI as described above):
 
     * `:host` - (string) the host where the Redis server is running. Defaults to
-      `"localhost"`.
+      `"localhost"` or to whatever value the environment variable `REDIS_HOST` is set.
     * `:port` - (integer) the port on which the Redis server is
-      running. Defaults to `6379`.
+      running. Defaults to `6379`  or to whatever value the environment variable `REDIS_PORT` is set.
     * `:password` - (string) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
       does is issue an `AUTH` command to Redis in order to authenticate.
