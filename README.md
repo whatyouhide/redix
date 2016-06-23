@@ -137,7 +137,8 @@ information on this.
 
 Clone the repository and run `$ mix test` to make sure everything is
 working. For tests to pass, you must have a Redis server running on `localhost`,
-port `6379`. Tests will wipe clean all the databases on the running Redis
+port `6379`. Both may be configured using the environment variables `REDIS_HOST` and
+`REDIS_PORT` respectively. Tests will wipe clean all the databases on the running Redis
 server, as they call `FLUSHALL` multiple times, so *be careful*.
 
 ## License
