@@ -6,6 +6,9 @@ defmodule RedixTest do
 
   import Redix.TestHelpers
 
+  @redis_host Application.get_env(:redix, :redis_host)
+  @redis_port Application.get_env(:redix, :redis_port)
+
   setup_all do
     {:ok, conn} = Redix.start_link
     Redix.command!(conn, ["FLUSHDB"])
@@ -75,7 +78,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: using a redis:// url" do
-    {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
+    {:ok, pid} = Redix.start_link("redis://#{@redis_host}:#{@redis_port}/3")
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
   end
 
@@ -88,13 +91,13 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: passing options along with a Redis URI" do
-    {:ok, pid} = Redix.start_link("redis://localhost:6379", name: :redix_uri)
+    {:ok, pid} = Redix.start_link("redis://#{@redis_host}:#{@redis_port}", name: :redix_uri)
     assert Process.whereis(:redix_uri) == pid
   end
 
   @tag :no_setup
   test "stop/1" do
-    {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
+    {:ok, pid} = Redix.start_link("redis://#{@redis_host}:#{@redis_port}/3")
     assert Redix.stop(pid) == :ok
 
     Process.flag :trap_exit, true
