@@ -7,7 +7,7 @@ case :gen_tcp.connect(redis_host, redis_port, []) do
   {:ok, socket} ->
     :gen_tcp.close(socket)
   {:error, reason} ->
-    Mix.raise "Cannot connect to Redis (http://localhost:6379): #{:inet.format_error(reason)}"
+    Mix.raise "Cannot connect to Redis (http://#{redis_host}:#{redis_port}): #{:inet.format_error(reason)}"
 end
 
 defmodule Redix.TestHelpers do
