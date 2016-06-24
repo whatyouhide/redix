@@ -14,9 +14,9 @@
   `Redix.start_link/2`. These options are used for controlling the backoff
   behaviour of a `Redix` connection.
 * Add support for the `:sync_connect` option when connecting to Redis.
+* Add support for the `:exit_on_disconnection` option when connecting to Redis.
+* Add support for the `:log` option when connecting to Redis.
 * Add a "Reconnections" page in the documentation.
-* Log successful reconnections to Redis (for `Redix` connections) using the
-  `info` level.
 * Extract the Pub/Sub functionality into a separate project
   (https://github.com/whatyouhide/redix_pubsub).
 
