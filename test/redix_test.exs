@@ -6,10 +6,9 @@ defmodule RedixTest do
 
   import Redix.TestHelpers
 
-  @redis_host (System.get_env("REDIS_HOST") || "localhost") |> String.to_char_list
-  @redis_port System.get_env("REDIS_PORT") || 6379
-  @resis_host_and_port "#{@redis_host}:#{@redis_port}"
-  @connection_args [host: @redis_host, port: @redis_port]
+  @host (System.get_env("HOST") || "localhost") |> String.to_char_list
+  @port System.get_env("PORT") || 6379
+  @connection_args [host: @host, port: @port]
 
   setup_all do
     {:ok, conn} = Redix.start_link @connection_args
@@ -80,7 +79,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: using a redis:// url" do
-    {:ok, pid} = Redix.start_link("redis://#{@resis_host_and_port}/3")
+    {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
   end
 
@@ -93,13 +92,13 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: passing options along with a Redis URI" do
-    {:ok, pid} = Redix.start_link("redis://#{@resis_host_and_port}", name: :redix_uri)
+    {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}", name: :redix_uri)
     assert Process.whereis(:redix_uri) == pid
   end
 
   @tag :no_setup
   test "stop/1" do
-    {:ok, pid} = Redix.start_link("redis://#{@resis_host_and_port}/3")
+    {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
     assert Redix.stop(pid) == :ok
 
     Process.flag :trap_exit, true
