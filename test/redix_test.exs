@@ -6,8 +6,13 @@ defmodule RedixTest do
 
   import Redix.TestHelpers
 
+  @redis_host System.get_env("REDIS_HOST") || "localhost" |> String.to_char_list
+  @redis_port System.get_env("REDIS_PORT") || 6379
+  @resis_host_and_port "#{@redis_host}:#{@redis_port}"
+  @connection_args [host: @redis_host, port: @redis_port]
+
   setup_all do
-    {:ok, conn} = Redix.start_link
+    {:ok, conn} = Redix.start_link @connection_args
     Redix.command!(conn, ["FLUSHDB"])
     Redix.stop(conn)
     :ok
@@ -17,7 +22,7 @@ defmodule RedixTest do
     if context[:no_setup] do
       {:ok, %{}}
     else
-      {:ok, conn} = Redix.start_link()
+      {:ok, conn} = Redix.start_link @connection_args
       on_exit(fn -> Redix.stop(conn) end)
       {:ok, %{conn: conn}}
     end
@@ -25,11 +30,11 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: specifying a database" do
-    {:ok, c} = Redix.start_link(database: 1)
+    {:ok, c} = Redix.start_link(@connection_args ++ [database: 1])
     assert Redix.command(c, ~w(SET my_key my_value)) == {:ok, "OK"}
 
     # Let's check we didn't write to the default database (which is 0).
-    {:ok, c} = Redix.start_link
+    {:ok, c} = Redix.start_link(@connection_args)
     assert Redix.command(c, ~w(GET my_key)) == {:ok, nil}
   end
 
@@ -37,7 +42,7 @@ defmodule RedixTest do
   test "start_link/2: specifying a non existing database" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      {:ok, pid} = Redix.start_link(database: 1_000)
+      {:ok, pid} = Redix.start_link(@connection_args ++ [database: 1_000])
 
       error = %Error{message: "ERR invalid DB index"}
       assert_receive {:EXIT, ^pid, ^error}, 500
@@ -48,7 +53,7 @@ defmodule RedixTest do
   test "start_link/2: specifying a password when no password is set" do
     silence_log fn ->
       Process.flag :trap_exit, true
-      {:ok, pid} = Redix.start_link(password: "foo")
+      {:ok, pid} = Redix.start_link(@connection_args ++ [password: "foo"])
 
       error = %Error{message: "ERR Client sent AUTH, but no password is set"}
       assert_receive {:EXIT, ^pid, ^error}, 500
@@ -75,26 +80,26 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: using a redis:// url" do
-    {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
+    {:ok, pid} = Redix.start_link("redis://#{@resis_host_and_port}/3")
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
   end
 
   @tag :no_setup
   test "start_link/2: name registration" do
-    {:ok, pid} = Redix.start_link([], name: :redix_server)
+    {:ok, pid} = Redix.start_link(@connection_args, name: :redix_server)
     assert Process.whereis(:redix_server) == pid
     assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
   end
 
   @tag :no_setup
   test "start_link/2: passing options along with a Redis URI" do
-    {:ok, pid} = Redix.start_link("redis://localhost:6379", name: :redix_uri)
+    {:ok, pid} = Redix.start_link("redis://#{@resis_host_and_port}", name: :redix_uri)
     assert Process.whereis(:redix_uri) == pid
   end
 
   @tag :no_setup
   test "stop/1" do
-    {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
+    {:ok, pid} = Redix.start_link("redis://#{@resis_host_and_port}/3")
     assert Redix.stop(pid) == :ok
 
     Process.flag :trap_exit, true
@@ -257,7 +262,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "client suicide and reconnections" do
-    {:ok, c} = Redix.start_link
+    {:ok, c} = Redix.start_link(@connection_args)
 
     silence_log fn ->
       assert {:ok, _} = Redix.command(c, ~w(QUIT))
@@ -277,7 +282,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "timeouts" do
-    {:ok, c} = Redix.start_link
+    {:ok, c} = Redix.start_link(@connection_args)
 
     assert {:error, :timeout} = Redix.command(c, ~w(PING), timeout: 0)
 
@@ -288,7 +293,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "mid-command disconnections" do
-    {:ok, c} = Redix.start_link
+    {:ok, c} = Redix.start_link(@connection_args)
     parent = self()
     ref = make_ref()
 
@@ -305,7 +310,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "timing out right after the connection drops" do
-    {:ok, c} = Redix.start_link
+    {:ok, c} = Redix.start_link(@connection_args)
     silence_log fn ->
       Redix.command!(c, ~w(QUIT))
       assert Redix.command(c, ~w(PING), timeout: 0) == {:error, :timeout}
@@ -315,7 +320,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "no leaking messages when timeout happen at the same time as disconnections" do
-    {:ok, c} = Redix.start_link
+    {:ok, c} = Redix.start_link(@connection_args)
     parent = self()
     ref = make_ref()
 
