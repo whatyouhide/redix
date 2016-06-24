@@ -112,6 +112,10 @@ defmodule Redix do
     * `:backoff_max` - (integer) the maximum length (in milliseconds) of the
       time interval used between reconnection attempts. See the "Reconnections"
       page in the docs for more information.
+    * `:exit_on_disconnection` - (boolean) if `true`, the Redix server will exit
+      if it fails to connect or disconnects from Redis. Note that setting this
+      option to `true` means that the `:backoff_initial` and `:backoff_max` options
+      will be ignored. Defaults to `false`.
     * `:log` - (keyword list) a keyword list of `{action, level}` where `level` is
       the log level to use to log `action`. The possible actions and their default
       values are:

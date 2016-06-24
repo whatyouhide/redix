@@ -342,4 +342,15 @@ defmodule RedixTest do
       assert_receive ^ref, 200
     end
   end
+
+  @tag :no_setup
+  test ":exit_on_disconnection option" do
+    {:ok, c} = Redix.start_link([host: @host, port: @port], exit_on_disconnection: true)
+    Process.flag(:trap_exit, true)
+
+    TestHelpers.silence_log fn ->
+      Redix.command!(c, ~w(QUIT))
+      assert_receive {:EXIT, ^c, :tcp_closed}
+    end
+  end
 end

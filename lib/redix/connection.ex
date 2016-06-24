@@ -109,7 +109,11 @@ defmodule Redix.Connection do
         ]
 
         next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
-        {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
+        if state.opts[:exit_on_disconnection] do
+          {:stop, reason, state}
+        else
+          {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
+        end
       {:stop, reason} ->
         # {:stop, error, state} may be returned by Redix.Utils.connect/1 in case
         # AUTH or SELECT fail (in that case, we don't want to try to reconnect
@@ -153,7 +157,11 @@ defmodule Redix.Connection do
     :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
 
     state = %{state | socket: nil, shared_state: nil, backoff_current: state.opts[:backoff_initial]}
-    {:backoff, state.opts[:backoff_initial], state}
+    if state.opts[:exit_on_disconnection] do
+      {:stop, reason, state}
+    else
+      {:backoff, state.opts[:backoff_initial], state}
+    end
   end
 
   @doc false
