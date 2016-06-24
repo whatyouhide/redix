@@ -1,7 +1,7 @@
 ExUnit.start()
 
-host = (System.get_env("HOST") || "localhost") |> String.to_char_list
-port = System.get_env("PORT") || 6379
+host = String.to_char_list(System.get_env("REDIX_TEST_HOST") || "localhost")
+port = String.to_integer(System.get_env("REDIX_TEST_PORT") || "6379")
 
 case :gen_tcp.connect(host, port, []) do
   {:ok, socket} ->
@@ -18,4 +18,7 @@ defmodule Redix.TestHelpers do
   after
     Logger.add_backend :console, flush: true
   end
+
+  def test_host(), do: unquote(host)
+  def test_port(), do: unquote(port)
 end
