@@ -1,10 +1,13 @@
 ExUnit.start()
 
-case :gen_tcp.connect('localhost', 6379, []) do
+host = (System.get_env("HOST") || "localhost") |> String.to_char_list
+port = System.get_env("PORT") || 6379
+
+case :gen_tcp.connect(host, port, []) do
   {:ok, socket} ->
     :gen_tcp.close(socket)
   {:error, reason} ->
-    Mix.raise "Cannot connect to Redis (http://localhost:6379): #{:inet.format_error(reason)}"
+    Mix.raise "Cannot connect to Redis (http://#{host}:#{port}): #{:inet.format_error(reason)}"
 end
 
 defmodule Redix.TestHelpers do
