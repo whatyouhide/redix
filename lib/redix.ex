@@ -112,6 +112,15 @@ defmodule Redix do
     * `:backoff_max` - (integer) the maximum length (in milliseconds) of the
       time interval used between reconnection attempts. See the "Reconnections"
       page in the docs for more information.
+    * `:log` - (keyword list) a keyword list of `{action, level}` where `level` is
+      the log level to use to log `action`. The possible actions and their default
+      values are:
+        * `:disconnection` (defaults to `:error`) - logged when the connection to
+          Redis is lost
+        * `:failed_connection` (defaults to `:error`) - logged when Redix can't
+          establish a connection to Redis
+        * `:reconnection` (defaults to `:info`) - logged when Redix manages to
+          reconnect to Redis after the connection was lost
 
   In addition to these options, all options accepted by
   `Connection.start_link/3` (and thus `GenServer.start_link/3`) are forwarded to

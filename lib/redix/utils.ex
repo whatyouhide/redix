@@ -18,12 +18,19 @@ defmodule Redix.Utils do
     port: 6379,
   ]
 
-  @redix_behaviour_opts [:socket_opts, :sync_connect, :backoff_initial, :backoff_max]
+  @redix_behaviour_opts [:socket_opts, :sync_connect, :backoff_initial, :backoff_max, :log]
   @redix_default_behaviour_opts [
     socket_opts: [],
     sync_connect: false,
     backoff_initial: 500,
     backoff_max: 30_000,
+    log: [],
+  ]
+
+  @log_default_opts [
+    disconnection: :error,
+    failed_connection: :error,
+    reconnection: :info,
   ]
 
   @default_timeout 5000
@@ -40,6 +47,15 @@ defmodule Redix.Utils do
 
     redis_opts = Keyword.merge(@redis_default_opts, redis_opts)
     redix_behaviour_opts = Keyword.merge(@redix_default_behaviour_opts, redix_behaviour_opts)
+
+    redix_behaviour_opts = Keyword.update!(redix_behaviour_opts, :log, fn(log_opts) ->
+      unless Keyword.keyword?(log_opts) do
+        raise ArgumentError,
+          "the :log option must be a keyword list of {action, level}, got: #{inspect log_opts}"
+      end
+
+      Keyword.merge(@log_default_opts, log_opts)
+    end)
 
     redix_opts = Keyword.merge(redix_behaviour_opts, redis_opts)
 

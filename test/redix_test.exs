@@ -103,6 +103,13 @@ defmodule RedixTest do
     assert_receive {:EXIT, ^pid, :normal}, 500
   end
 
+  @tag :no_setup
+  test "the :log option given to start_link/2 must be a list" do
+    assert_raise ArgumentError, ~r/the :log option must be a keyword list/, fn ->
+      Redix.start_link([host: @host, port: @port], log: :not_a_list)
+    end
+  end
+
   test "command/2", %{conn: c} do
     assert Redix.command(c, ["PING"]) == {:ok, "PONG"}
   end

@@ -97,13 +97,13 @@ defmodule Redix.Connection do
         # If this is a reconnection attempt, log that we successfully
         # reconnected.
         if info == :backoff do
-          Logger.info ["Reconnected to Redis (", Utils.format_host(state), ?)]
+          log(state, :reconnection, ["Reconnected to Redis (", Utils.format_host(state), ?)])
         end
 
         state = %{state | shared_state: shared_state, receiver: receiver}
         {:ok, state}
       {:error, reason} ->
-        Logger.error [
+        log state, :failed_connection, [
           "Failed to connect to Redis (", Utils.format_host(state), "): ",
           Utils.format_error(reason),
         ]
@@ -127,7 +127,7 @@ defmodule Redix.Connection do
   end
 
   def disconnect({:error, reason} = _error, state) do
-    Logger.error [
+    log state, :disconnection, [
       "Disconnected from Redis (", Utils.format_host(state), "): ", Utils.format_error(reason),
     ]
 
@@ -262,5 +262,13 @@ defmodule Redix.Connection do
     else
       min(next_exponential_backoff, backoff_max)
     end
+  end
+
+  defp log(state, action, message) do
+    level =
+      state.opts
+      |> Keyword.fetch!(:log)
+      |> Keyword.fetch!(action)
+    Logger.log(level, message)
   end
 end
