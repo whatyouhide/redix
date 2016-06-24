@@ -1,6 +1,6 @@
 ExUnit.start()
 
-redis_host = System.get_env("REDIS_HOST") |> String.to_char_list || 'localhost'
+redis_host = (System.get_env("REDIS_HOST") || "localhost") |> String.to_char_list
 redis_port = System.get_env("REDIS_PORT") || 6379
 
 case :gen_tcp.connect(redis_host, redis_port, []) do

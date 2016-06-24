@@ -6,7 +6,7 @@ defmodule RedixTest do
 
   import Redix.TestHelpers
 
-  @redis_host System.get_env("REDIS_HOST") || "localhost" |> String.to_char_list
+  @redis_host (System.get_env("REDIS_HOST") || "localhost") |> String.to_char_list
   @redis_port System.get_env("REDIS_PORT") || 6379
   @resis_host_and_port "#{@redis_host}:#{@redis_port}"
   @connection_args [host: @redis_host, port: @redis_port]
