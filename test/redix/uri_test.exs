@@ -5,8 +5,8 @@ defmodule Redix.URITest do
   alias Redix.URI.URIError
 
   test "opts_from_uri/1: invalid scheme" do
-    msg = "scheme is not redis:// but 'foo://'"
-    assert_raise URIError, msg, fn ->
+    message = "expected scheme to be redis://, got: foo://"
+    assert_raise URIError, message, fn ->
       opts_from_uri("foo://example.com")
     end
   end
