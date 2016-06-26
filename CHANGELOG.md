@@ -20,6 +20,7 @@
   for stuff like empty commands.
 * Raise `Redix.Error` exceptions from `Redix.command/3` instead of returning
   them wrapped in `{:error, _}`.
+* Expose `Redix.format_error/1`.
 * Add a "Reconnections" page in the documentation.
 * Extract the Pub/Sub functionality into a separate project
   (https://github.com/whatyouhide/redix_pubsub).
