@@ -346,4 +346,12 @@ defmodule RedixTest do
       assert_receive {:EXIT, ^c, :tcp_closed}
     end
   end
+
+  test "format_error/1 with known error" do
+    assert Redix.format_error(:eaddrinuse) == "address already in use"
+  end
+
+  test "format_error/1 with unknown error" do
+    assert Redix.format_error(:unknown_error) == ":unknown_error"
+  end
 end

@@ -105,7 +105,7 @@ defmodule Redix.Connection do
       {:error, reason} ->
         log state, :failed_connection, [
           "Failed to connect to Redis (", Utils.format_host(state), "): ",
-          Utils.format_error(reason),
+          Redix.format_error(reason),
         ]
 
         next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
@@ -132,7 +132,7 @@ defmodule Redix.Connection do
 
   def disconnect({:error, reason} = _error, state) do
     log state, :disconnection, [
-      "Disconnected from Redis (", Utils.format_host(state), "): ", Utils.format_error(reason),
+      "Disconnected from Redis (", Utils.format_host(state), "): ", Redix.format_error(reason),
     ]
 
     :ok = :gen_tcp.close(state.socket)
@@ -170,10 +170,6 @@ defmodule Redix.Connection do
   # When the socket is `nil`, that's a good way to tell we're disconnected.
   # We only handle {:commands, ...} because we need to reply with the
   # request_id and with the error.
-  #
-  # TODO: if we ever provide a Redix.format_error/1 public function, :closed
-  # should be handled there. It shouldn't be handled in
-  # Redix.Utils.format_error/1 because :closed is never a disconnection reason.
   def handle_call({:commands, _commands, request_id}, _from, %{socket: nil} = state) do
     {:reply, {request_id, {:error, :closed}}, state}
   end

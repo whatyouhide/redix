@@ -3,14 +3,6 @@ defmodule Redix.UtilsTest do
 
   import Redix.Utils
 
-  test "format_error/1 known error" do
-    assert format_error(:eaddrinuse) == "address already in use"
-  end
-
-  test "format_error/1 unknown error" do
-    assert format_error(:unknown_error) == ":unknown_error"
-  end
-
   test "format_host/1" do
     assert format_host(%{opts: [host: 'example.com', port: 6379]}) == "example.com:6379"
   end

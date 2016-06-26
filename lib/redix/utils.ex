@@ -95,25 +95,6 @@ defmodule Redix.Utils do
     Connection.reply(from, {request_id, reply})
   end
 
-  @doc """
-  This function unwraps the actual reason if an 'unknown POSIX error' is returned
-  from :inet.format_error/1
-  """
-  @spec format_error(term) :: binary
-  def format_error(reason)
-
-  # :inet.format_error/1 doesn't format :tcp_closed or :closed.
-  def format_error(:tcp_closed) do
-    "TCP connection closed"
-  end
-
-  def format_error(reason) do
-    case :inet.format_error(reason) do
-      'unknown POSIX error' -> inspect(reason)
-      message -> List.to_string(message)
-    end
-  end
-
   # Extracts the TCP connection options (host, port and socket opts) from the
   # given `opts`.
   defp tcp_connection_opts(opts) do
