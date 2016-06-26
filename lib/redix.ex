@@ -192,10 +192,9 @@ defmodule Redix do
   responsibility to the user. That said, errors other than Redis errors (like
   network errors) always cause the return value to be `{:error, reason}`.
 
-  If `commands` is an empty list (`[]`), then a `Redix.ConnectionError` will be
-  raised right away. If any of the commands in `commands` is an empty command
-  (`[]`), `{:error, :empty_command}` will be returned (which mirrors the
-  behaviour of `command/3` in case of empty commands).
+  If `commands` is an empty list (`[]`) or any of the commands in `commands` is
+  an empty command (`[]`) then an `ArgumentError` exception is raised right
+  away.
 
   ## Options
 
@@ -221,24 +220,9 @@ defmodule Redix do
     {:error, atom}
   def pipeline(conn, commands, opts \\ [])
 
-  def pipeline(_conn, [], _opts) do
-    raise(Redix.ConnectionError, "no commands passed to the pipeline")
-  end
-
   def pipeline(conn, commands, opts) do
-    try do
-      Enum.each(commands, fn
-        [] ->
-          throw(:empty_command)
-        [command | _] when command in ~w(SUBSCRIBE PSUBSCRIBE UNSUBSCRIBE PUNSUBSCRIBE) ->
-          throw({:pubsub_command, command})
-        _ ->
-          :ok
-      end)
-      Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
-    catch
-      :throw, error -> {:error, error}
-    end
+    assert_valid_pipeline_commands(commands)
+    Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
   end
 
   @doc """
@@ -297,8 +281,8 @@ defmodule Redix do
   an error in sending the response or in case the response is a Redis error. In
   the latter case, `reason` will be the error returned by Redis.
 
-  If the given command (`cmd`) is an empty command (`[]`), `{:error,
-  :empty_command}` will be returned.
+  If the given command (`cmd`) is an empty command (`[]`), an `ArgumentError`
+  exception is raised.
 
   ## Options
 
@@ -379,5 +363,23 @@ defmodule Redix do
       {:error, error} ->
         raise Redix.ConnectionError, error
     end
+  end
+
+  defp assert_valid_pipeline_commands([] = _commands) do
+    raise ArgumentError, "no commands passed to the pipeline"
+  end
+
+  defp assert_valid_pipeline_commands(commands) do
+    Enum.each(commands, fn
+      [] ->
+        raise ArgumentError, "got an empty command ([]), which is not a valid Redis command"
+      [first | _] = command when first in ~w(SUBSCRIBE PSUBSCRIBE UNSUBSCRIBE PUNSUBSCRIBE) ->
+        raise ArgumentError,
+          "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
+          "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
+          "functionality support. Offending command: #{inspect(command)}"
+      _ ->
+        :ok
+    end)
   end
 end
