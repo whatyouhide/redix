@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.4.0-dev
+## v0.4.0
 
 * Add [@lexmag](https://github.com/lexmag) to the maintainers :tada:
 * Handle timeouts nicely by returning `{:error, :timeout}` instead of exiting
