@@ -6,11 +6,10 @@ defmodule Redix.Auth do
   @doc """
   Authenticates and selects the right database based on the state `state`.
 
-  This function checks the state `state` to see if in the options a password
-  and/or a database are specified. If a password is specified, then this
-  function will send the appropriate `AUTH` command to the Redis connection in
-  `state.socket`. If a database is specified, then the appropriate `SELECT`
-  command will be issued.
+  This function checks the given options to see if a password and/or a database
+  are specified. If a password is specified, then this function will send the
+  appropriate `AUTH` command to the Redis connection in `state.socket`. If a
+  database is specified, then the appropriate `SELECT` command will be issued.
 
   The socket is expected to be in passive mode, and will be returned in passive
   mode to the caller.
