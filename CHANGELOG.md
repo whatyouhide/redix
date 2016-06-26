@@ -16,6 +16,10 @@
 * Add support for the `:sync_connect` option when connecting to Redis.
 * Add support for the `:exit_on_disconnection` option when connecting to Redis.
 * Add support for the `:log` option when connecting to Redis.
+* Raise `ArgumentError` exceptions instead of `Redix.ConnectionError` exceptions
+  for stuff like empty commands.
+* Raise `Redix.Error` exceptions from `Redix.command/3` instead of returning
+  them wrapped in `{:error, _}`.
 * Add a "Reconnections" page in the documentation.
 * Extract the Pub/Sub functionality into a separate project
   (https://github.com/whatyouhide/redix_pubsub).
