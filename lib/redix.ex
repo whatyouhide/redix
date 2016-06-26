@@ -278,10 +278,15 @@ defmodule Redix do
 
   The return value is `{:ok, response}` if the request is successful and the
   response is not a Redis error. `{:error, reason}` is returned in case there's
-  an error in sending the response or in case the response is a Redis error. In
-  the latter case, `reason` will be the error returned by Redis.
+  an error in the request (such as losing the connection to Redis in between the
+  request). If Redis returns an error (such as a type error), a `Redix.Error`
+  exception is raised; the reason for this is that these errors are semantic
+  errors that most of the times won't go away by themselves over time and users
+  of Redix should be notified of them as soon as possible. Connection errors,
+  instead, are often temporary errors that will go away when the connection is
+  back.
 
-  If the given command (`cmd`) is an empty command (`[]`), an `ArgumentError`
+  If the given command is an empty command (`[]`), an `ArgumentError`
   exception is raised.
 
   ## Options
@@ -311,7 +316,7 @@ defmodule Redix do
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
-        {:error, error}
+        raise error
       {:ok, [resp]} ->
         {:ok, resp}
       {:error, _reason} = error ->
@@ -358,8 +363,6 @@ defmodule Redix do
     case command(conn, command, opts) do
       {:ok, resp} ->
         resp
-      {:error, %Redix.Error{} = error} ->
-        raise error
       {:error, error} ->
         raise Redix.ConnectionError, error
     end
