@@ -89,3 +89,5 @@ And then to use the new wrapper in your appplication:
 ```elixir
 MyApp.Redix.command(~w(PING))
 ```
+
+[poolboy]: https://github.com/devinus/poolboy
