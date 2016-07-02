@@ -1,6 +1,9 @@
 defmodule Redix.Auth do
   @moduledoc false
 
+  # This module is responsible for providing functions to perform authentication
+  # and db selection on Redis (AUTH and SELECT).
+
   alias Redix.Protocol
 
   @doc """
@@ -15,7 +18,7 @@ defmodule Redix.Auth do
   mode to the caller.
   """
   @spec auth_and_select_db(:gen_tcp.socket, Keyword.t) :: {:ok, binary} | {:error, term}
-  def auth_and_select_db(socket, opts) do
+  def auth_and_select_db(socket, opts) when is_list(opts) do
     # TODO: this *begs* for `with` once we depend on ~> 1.2.
     case auth(socket, opts[:password]) do
       {:ok, tail} ->

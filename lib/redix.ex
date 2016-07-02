@@ -32,6 +32,11 @@ defmodule Redix do
   Redix).
   """
 
+  # This module is only a "wrapper" module that exposes the public API alongside
+  # documentation for it. The real work is done in Redix.Connection and every
+  # function in this module goes through Redix.Connection.pipeline/3 one way or
+  # another.
+
   @type command :: [binary]
 
   @default_timeout 5000

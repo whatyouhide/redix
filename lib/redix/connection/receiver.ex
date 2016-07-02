@@ -18,7 +18,7 @@ defmodule Redix.Connection.Receiver do
     continuation: nil,
     # The client that we'll need to reply to once the current continuation is done
     current_client: nil,
-    # The timeout store process
+    # The shared state process
     shared_state: nil,
   ]
 
