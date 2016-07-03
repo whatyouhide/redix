@@ -5,12 +5,7 @@ defmodule Redix.Utils do
 
   alias Redix.Auth
 
-  # We use exit_on_close: false so that we can consistently close the socket
-  # (with :gen_tcp.close/1) in the disconnect/2 callback. If we left the default
-  # value of exit_on_close: true and still called :gen_tcp.close/1 in
-  # disconnect/2, then we would sometimes close an already closed socket, which
-  # is harmless but inconsistent. Credit for this strategy goes to James Fish.
-  @socket_opts [:binary, active: false, exit_on_close: false]
+  @socket_opts [:binary, active: false]
 
   @redis_opts [:host, :port, :password, :database]
   @redis_default_opts [
