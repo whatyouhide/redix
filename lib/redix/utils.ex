@@ -92,8 +92,7 @@ defmodule Redix.Utils do
 
   defp check_port!(port) when is_integer(port), do: port
   defp check_port!(port) do
-    raise ArgumentError, "invalid port number type: #{inspect port}." <>
-      " The port number expects an integer value."
+    raise ArgumentError, "expected an integer as the value of the :port option, got: #{inspect(port)}"
   end
 
   # Extracts the TCP connection options (host, port and socket opts) from the
