@@ -19,5 +19,10 @@ defmodule Redix.UtilsTest do
     assert_raise ArgumentError, ~r/unknown Redis connection option: :foo/, fn ->
       sanitize_starting_opts([foo: 1], [])
     end
+
+    message = "expected an integer as the value of the :port option, got: %{}"
+    assert_raise ArgumentError, message, fn ->
+      sanitize_starting_opts([port: %{}], [])
+    end
   end
 end

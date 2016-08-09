@@ -90,16 +90,11 @@ defmodule Redix.Utils do
     Connection.reply(from, {request_id, reply})
   end
 
-  defp check_port!(port) when is_integer(port), do: port
-  defp check_port!(port) do
-    raise ArgumentError, "expected an integer as the value of the :port option, got: #{inspect(port)}"
-  end
-
   # Extracts the TCP connection options (host, port and socket opts) from the
   # given `opts`.
   defp tcp_connection_opts(opts) do
     host = to_char_list(Keyword.fetch!(opts, :host))
-    port = check_port!(Keyword.fetch!(opts, :port))
+    port = Keyword.fetch!(opts, :port)
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
     timeout = opts[:timeout] || @default_timeout
 
@@ -124,6 +119,13 @@ defmodule Redix.Utils do
           " contain Redis-specific options (host, port," <>
           " password, database)"
       end
+    end
+
+    case Keyword.get(opts, :port) do
+      port when is_nil(port) or is_integer(port) ->
+        :ok
+      other ->
+        raise ArgumentError, "expected an integer as the value of the :port option, got: #{inspect(other)}"
     end
   end
 end
