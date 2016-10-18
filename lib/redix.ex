@@ -405,7 +405,7 @@ defmodule Redix do
     raise ArgumentError, "no commands passed to the pipeline"
   end
 
-  defp assert_valid_pipeline_commands(commands) do
+  defp assert_valid_pipeline_commands(commands) when is_list(commands) do
     Enum.each(commands, fn
       [] ->
         raise ArgumentError, "got an empty command ([]), which is not a valid Redis command"
@@ -414,8 +414,14 @@ defmodule Redix do
           "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
           "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
           "functionality support. Offending command: #{inspect(command)}"
-      _ ->
+      command when is_list(command) ->
         :ok
+      other ->
+        raise ArgumentError, "expected a list of binaries as each Redis command, got: #{inspect(other)}"
     end)
+  end
+
+  defp assert_valid_pipeline_commands(other) do
+    raise ArgumentError, "expected a list of Redis commands, got: #{inspect(other)}"
   end
 end

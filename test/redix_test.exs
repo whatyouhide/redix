@@ -172,6 +172,13 @@ defmodule RedixTest do
     assert {:error, :timeout} = Redix.command(c, ~W(PING), timeout: 0)
   end
 
+  test "command/2: passing a non-list as the command", %{conn: c} do
+    message = "expected a list of binaries as each Redis command, got: \"PING\""
+    assert_raise ArgumentError, message, fn ->
+      Redix.command(c, "PING")
+    end
+  end
+
   test "pipeline/2", %{conn: c} do
     commands = [
       ["SET", "pipe", "10"],
@@ -227,6 +234,18 @@ defmodule RedixTest do
 
   test "pipeline/2: timeout", %{conn: c} do
     assert {:error, :timeout} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
+  end
+
+  test "pipeline/2: commands must be lists of binaries", %{conn: c} do
+    message = "expected a list of Redis commands, got: \"PING\""
+    assert_raise ArgumentError, message, fn ->
+      Redix.pipeline(c, "PING")
+    end
+
+    message = "expected a list of binaries as each Redis command, got: \"PING\""
+    assert_raise ArgumentError, message, fn ->
+      Redix.pipeline(c, ["PING"])
+    end
   end
 
   test "command!/2: simple commands", %{conn: c} do
