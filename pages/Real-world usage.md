@@ -3,7 +3,7 @@
 Redix is a low-level driver, but it's still built to handle most stuff thrown at it.
 
 There's a tendency to use pooling when using Redix (through something like
-[poolboy][poolboy]). This makes Redix more "scalable" (e.g., the size of the
+[poolboy](https://github.com/devinus/poolboy)). This makes Redix more "scalable" (e.g., the size of the
 pool is configurable), but it doesn't really take advantage of Redix.
 
 Redix is built to handle multiple Elixir processes sending commands to Redis
