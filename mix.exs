@@ -40,7 +40,7 @@ defmodule Redix.Mixfile do
   end
 
   defp deps() do
-    [{:connection, "~> 1.0.0"},
+    [{:connection, "~> 1.0"},
      {:dialyze, "~> 0.2", only: :dev},
      {:markdown, github: "devinus/markdown", only: :docs},
      {:ex_doc, ">= 0.0.0", only: :docs}]
