@@ -204,7 +204,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
+      server doesn't reply within this timeout, `{:error, :timeout}`
+      is returned.
 
   ## Examples
 
@@ -249,7 +251,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
+      server doesn't reply within this timeout, `{:error, :timeout}`
+      is returned.
 
   ## Examples
 
@@ -297,7 +301,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
+      server doesn't reply within this timeout, `{:error, :timeout}`
+      is returned.
 
   ## Examples
 
@@ -346,7 +352,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
+      server doesn't reply within this timeout, `{:error, :timeout}`
+      is returned.
 
   ## Examples
 
