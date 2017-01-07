@@ -11,7 +11,7 @@ defmodule Redix.Connection.SharedState do
 
   defstruct [
     clients_queue: :queue.new,
-    timed_out_requests: HashSet.new,
+    timed_out_requests: MapSet.new,
   ]
 
   ## Public API
@@ -53,12 +53,12 @@ defmodule Redix.Connection.SharedState do
   end
 
   def handle_call({:add_timed_out_request, request_id}, _from, state) do
-    state = %{state | timed_out_requests: HashSet.put(state.timed_out_requests, request_id)}
+    state = %{state | timed_out_requests: MapSet.put(state.timed_out_requests, request_id)}
     {:reply, :ok, state}
   end
 
   def handle_call({:cancel_timed_out_request, request_id}, _from, state) do
-    state = %{state | timed_out_requests: HashSet.delete(state.timed_out_requests, request_id)}
+    state = %{state | timed_out_requests: MapSet.delete(state.timed_out_requests, request_id)}
     {:reply, :ok, state}
   end
 
@@ -75,10 +75,10 @@ defmodule Redix.Connection.SharedState do
   def handle_call(:disconnect_clients_and_stop, from, state) do
     # First, we notify all the clients.
     Enum.each(:queue.to_list(state.clients_queue), fn({:commands, request_id, from, _ncommands}) ->
-      # We don't care about "popping" the element out of the HashSet (returning
+      # We don't care about "popping" the element out of the MapSet (returning
       # the new set) because this process is going to die at the end of this
       # function anyways.
-      unless HashSet.member?(state.timed_out_requests, request_id) do
+      unless MapSet.member?(state.timed_out_requests, request_id) do
         Utils.reply_to_client(from, request_id, {:error, :disconnected})
       end
     end)
@@ -95,8 +95,8 @@ defmodule Redix.Connection.SharedState do
   ## Helpers
 
   defp pop_from_set(set, elem) do
-    if HashSet.member?(set, elem) do
-      {true, HashSet.delete(set, elem)}
+    if MapSet.member?(set, elem) do
+      {true, MapSet.delete(set, elem)}
     else
       {false, set}
     end
