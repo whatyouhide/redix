@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.5.0
+
+* Drop support for Elixir < 1.2 and OTP 17 or earlier.
+
 ## v0.4.0
 
 * Add [@lexmag](https://github.com/lexmag) to the maintainers :tada:
