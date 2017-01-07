@@ -11,14 +11,6 @@ case :gen_tcp.connect(host, port, []) do
 end
 
 defmodule Redix.TestHelpers do
-  # TODO: replace with ExUnit.CaptureIO once we can depend on ~> 1.1
-  def silence_log(fun) do
-    Logger.remove_backend :console
-    fun.()
-  after
-    Logger.add_backend :console, flush: true
-  end
-
   def test_host(), do: unquote(host)
   def test_port(), do: unquote(port)
 end

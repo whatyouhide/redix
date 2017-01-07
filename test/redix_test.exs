@@ -1,6 +1,8 @@
 defmodule RedixTest do
   use ExUnit.Case
 
+  import ExUnit.CaptureLog
+
   alias Redix.Error
   alias Redix.TestHelpers
 
@@ -36,7 +38,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: specifying a non existing database" do
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       Process.flag :trap_exit, true
       {:ok, pid} = Redix.start_link(host: @host, port: @port, database: 1_000)
 
@@ -47,7 +49,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: specifying a password when no password is set" do
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       Process.flag :trap_exit, true
       {:ok, pid} = Redix.start_link(host: @host, port: @port, password: "foo")
 
@@ -58,7 +60,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: when unable to connect to Redis with sync_connect: true" do
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       Process.flag :trap_exit, true
       assert {:error, :nxdomain} = Redix.start_link([host: "nonexistent"], sync_connect: true)
       assert_receive {:EXIT, _pid, :nxdomain}, 1000
@@ -67,7 +69,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: when unable to connect to Redis with sync_connect: false" do
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       Process.flag :trap_exit, true
       {:ok, pid} = Redix.start_link([host: "nonexistent"], [sync_connect: false])
       refute_receive {:EXIT, ^pid, :nxdomain}, 200
@@ -280,7 +282,7 @@ defmodule RedixTest do
   test "client suicide and reconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
 
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       assert {:ok, _} = Redix.command(c, ~w(QUIT))
 
       # When the socket is closed, we reply with {:error, :closed}. We sleep so
@@ -313,7 +315,7 @@ defmodule RedixTest do
     parent = self()
     ref = make_ref()
 
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       spawn_link(fn ->
         assert Redix.command(c, ~w(BLPOP my_list 0)) == {:error, :disconnected}
         send parent, ref
@@ -327,7 +329,7 @@ defmodule RedixTest do
   @tag :no_setup
   test "timing out right after the connection drops" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       Redix.command!(c, ~w(QUIT))
       assert Redix.command(c, ~w(PING), timeout: 0) == {:error, :timeout}
       refute_receive {_ref, _message}
@@ -340,7 +342,7 @@ defmodule RedixTest do
     parent = self()
     ref = make_ref()
 
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       spawn_link(fn ->
         assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, :timeout}
         # The fact that we timed out should be respected here, even if the
@@ -360,7 +362,7 @@ defmodule RedixTest do
     {:ok, c} = Redix.start_link([host: @host, port: @port], exit_on_disconnection: true)
     Process.flag(:trap_exit, true)
 
-    TestHelpers.silence_log fn ->
+    capture_log fn ->
       Redix.command!(c, ~w(QUIT))
       assert_receive {:EXIT, ^c, :tcp_closed}
     end
