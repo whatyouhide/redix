@@ -62,21 +62,17 @@ defmodule Redix.Utils do
   def connect(opts) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
-    # TODO: let's replace with `with` when we depend on ~> 1.2.
-    case :gen_tcp.connect(host, port, socket_opts, timeout) do
-      {:ok, socket} ->
-        setup_socket_buffers(socket)
-        case Auth.auth_and_select_db(socket, opts) do
-          {:ok, ""} ->
-            :inet.setopts(socket, active: :once)
-            {:ok, socket}
-          {:ok, tail} when byte_size(tail) > 0 ->
-            {:stop, :unexpected_tail_after_auth}
-          {:error, reason} ->
-            {:stop, reason}
-        end
-      {:error, _reason} = error ->
-        error
+    with {:ok, socket} <-:gen_tcp.connect(host, port, socket_opts, timeout) do
+      setup_socket_buffers(socket)
+      case Auth.auth_and_select_db(socket, opts) do
+        {:ok, ""} ->
+          :inet.setopts(socket, active: :once)
+          {:ok, socket}
+        {:ok, tail} when byte_size(tail) > 0 ->
+          {:stop, :unexpected_tail_after_auth}
+        {:error, reason} ->
+          {:stop, reason}
+      end
     end
   end
 

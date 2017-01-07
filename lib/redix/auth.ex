@@ -19,13 +19,8 @@ defmodule Redix.Auth do
   """
   @spec auth_and_select_db(:gen_tcp.socket, Keyword.t) :: {:ok, binary} | {:error, term}
   def auth_and_select_db(socket, opts) when is_list(opts) do
-    # TODO: this *begs* for `with` once we depend on ~> 1.2.
-    case auth(socket, opts[:password]) do
-      {:ok, tail} ->
-        select_db(socket, opts[:database], tail)
-      {:error, _reason} = error ->
-        error
-    end
+    with {:ok, tail} <- auth(socket, opts[:password]),
+         do: select_db(socket, opts[:database], tail)
   end
 
   @spec auth(:gen_tcp.socket, nil | binary) :: {:ok | binary} | {:error, term}
@@ -36,18 +31,15 @@ defmodule Redix.Auth do
   end
 
   defp auth(socket, password) when is_binary(password) do
-    case :gen_tcp.send(socket, Protocol.pack(["AUTH", password])) do
-      :ok ->
-        case blocking_recv(socket, "") do
-          {:ok, "OK", tail} ->
-            {:ok, tail}
-          {:ok, error, _tail} ->
-            {:error, error}
-          {:error, _reason} = error ->
-            error
-        end
-      {:error, _reason} = error ->
-        error
+    with :ok <- :gen_tcp.send(socket, Protocol.pack(["AUTH", password])),
+      case blocking_recv(socket, "") do
+        {:ok, "OK", tail} ->
+          {:ok, tail}
+        {:ok, error, _tail} ->
+          {:error, error}
+        {:error, _reason} = error ->
+          error
+      end
     end
   end
 
@@ -59,34 +51,28 @@ defmodule Redix.Auth do
   end
 
   defp select_db(socket, db, tail) do
-    case :gen_tcp.send(socket, Protocol.pack(["SELECT", db])) do
-      :ok ->
-        case blocking_recv(socket, tail) do
-          {:ok, "OK", tail} ->
-            {:ok, tail}
-          {:ok, error, _state} ->
-            {:error, error}
-          {:error, _reason} = error ->
-            error
-        end
-      {:error, _reason} = error ->
-        error
+    with :ok <- :gen_tcp.send(socket, Protocol.pack(["SELECT", db])) do
+      case blocking_recv(socket, tail) do
+        {:ok, "OK", tail} ->
+          {:ok, tail}
+        {:ok, error, _state} ->
+          {:error, error}
+        {:error, _reason} = error ->
+          error
+      end
     end
   end
 
   @spec blocking_recv(:gen_tcp.socket, binary, nil | (binary -> term)) :: {:ok, term, binary} | {:error, term}
   defp blocking_recv(socket, tail, continuation \\ nil) do
-    case :gen_tcp.recv(socket, 0) do
-      {:ok, data} ->
-        parser = continuation || &Protocol.parse/1
-        case parser.(tail <> data) do
-          {:ok, _resp, _rest} = result ->
-            result
-          {:continuation, continuation} ->
-            blocking_recv(socket, "", continuation)
-        end
-      {:error, _reason} = error ->
-        error
+    with {:ok, data} <- :gen_tcp.recv(socket, 0) do
+      parser = continuation || &Protocol.parse/1
+      case parser.(tail <> data) do
+        {:ok, _resp, _rest} = result ->
+          result
+        {:continuation, continuation} ->
+          blocking_recv(socket, "", continuation)
+      end
     end
   end
 end
