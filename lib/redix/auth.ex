@@ -31,7 +31,7 @@ defmodule Redix.Auth do
   end
 
   defp auth(socket, password) when is_binary(password) do
-    with :ok <- :gen_tcp.send(socket, Protocol.pack(["AUTH", password])),
+    with :ok <- :gen_tcp.send(socket, Protocol.pack(["AUTH", password])) do
       case blocking_recv(socket, "") do
         {:ok, "OK", tail} ->
           {:ok, tail}
