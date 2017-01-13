@@ -36,9 +36,9 @@ defmodule Redix.Connection do
     Connection.start_link(__MODULE__, redix_opts, connection_opts)
   end
 
-  @spec stop(GenServer.server) :: :ok
-  def stop(conn) do
-    Connection.cast(conn, :stop)
+  @spec stop(GenServer.server, timeout) :: :ok
+  def stop(conn, timeout) do
+    GenServer.stop(conn, :normal, timeout)
   end
 
   @spec pipeline(GenServer.server, [Redix.command], timeout) ::
@@ -125,11 +125,6 @@ defmodule Redix.Connection do
   @doc false
   def disconnect(reason, state)
 
-  # We disconnect with reason :stop when we call Redix.stop/1.
-  def disconnect(:stop, state) do
-    {:stop, :normal, state}
-  end
-
   def disconnect({:error, reason} = _error, state) do
     log state, :disconnection, [
       "Disconnected from Redis (", Utils.format_host(state), "): ", Redix.format_error(reason),
@@ -204,13 +199,6 @@ defmodule Redix.Connection do
   end
 
   @doc false
-  def handle_cast(operation, state)
-
-  def handle_cast(:stop, state) do
-    {:disconnect, :stop, state}
-  end
-
-  @doc false
   def handle_info(msg, state)
 
   # Here and in the next handle_info/2 clause, we set the receiver to `nil`
@@ -225,6 +213,13 @@ defmodule Redix.Connection do
   def handle_info({:receiver, pid, {:tcp_error, socket, reason}}, %{receiver: pid, socket: socket} = state) do
     state = %{state | receiver: nil}
     {:disconnect, {:error, reason}, state}
+  end
+
+  def terminate(reason, %{receiver: receiver, shared_state: shared_state} = _state) do
+    if reason == :normal do
+      :ok = GenServer.stop(receiver, :normal)
+      :ok = GenServer.stop(shared_state, :normal)
+    end
   end
 
   ## Helper functions

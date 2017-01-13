@@ -21,7 +21,6 @@ defmodule RedixTest do
       {:ok, %{}}
     else
       {:ok, conn} = Redix.start_link(host: @host, port: @port)
-      on_exit(fn -> Redix.stop(conn) end)
       {:ok, %{conn: conn}}
     end
   end
@@ -98,10 +97,10 @@ defmodule RedixTest do
   @tag :no_setup
   test "stop/1" do
     {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
+    ref = Process.monitor(pid)
     assert Redix.stop(pid) == :ok
 
-    Process.flag :trap_exit, true
-    assert_receive {:EXIT, ^pid, :normal}, 500
+    assert_receive {:DOWN, ^ref, _, _, :normal}, 500
   end
 
   @tag :no_setup
