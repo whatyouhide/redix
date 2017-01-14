@@ -166,8 +166,10 @@ defmodule Redix do
   @doc """
   Closes the connection to the Redis server.
 
-  This function is asynchronous: it returns `:ok` as soon as it's called and
-  performs the closing of the connection after that.
+  This function is synchronous and blocks until the given Redix connection frees
+  all its resources and disconnects from the Redis server. `timeout` can be
+  passed to limit the amout of time allowed for the connection to exit; if it
+  doesn't exit in the given interval, this call exits.
 
   ## Examples
 
@@ -175,9 +177,9 @@ defmodule Redix do
       :ok
 
   """
-  @spec stop(GenServer.server) :: :ok
-  def stop(conn) do
-    Redix.Connection.stop(conn)
+  @spec stop(GenServer.server, timeout) :: :ok
+  def stop(conn, timeout \\ :infinity) do
+    Redix.Connection.stop(conn, timeout)
   end
 
   @doc """
