@@ -5,7 +5,7 @@
 
 > Superfast, pipelined, resilient Redis client for Elixir.
 
-![](http://i.imgur.com/ZG2RXsb.png)
+![Cover image](http://i.imgur.com/ZG2RXsb.png)
 
 Redix is a [Redis][redis] client written in pure Elixir with focus on speed,
 correctness and resiliency (that is, being able to automatically reconnect to
@@ -144,7 +144,7 @@ server, as they call `FLUSHALL` multiple times, so *be careful*.
 
 ## License
 
-MIT &copy; 2015 Andrea Leopardi, see the [license file](LICENSE.txt).
+Redix is released under the MIT license. See the [license file](LICENSE.txt).
 
 
 [redis]: http://redis.io
