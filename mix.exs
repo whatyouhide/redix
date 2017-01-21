@@ -1,9 +1,7 @@
 defmodule Redix.Mixfile do
   use Mix.Project
 
-  @description """
-  Superfast, pipelined, resilient Redis driver for Elixir.
-  """
+  @description "Superfast, pipelined, resilient Redis driver for Elixir."
 
   @repo_url "https://github.com/whatyouhide/redix"
 
