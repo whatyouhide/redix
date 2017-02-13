@@ -115,7 +115,7 @@ defmodule Redix.Connection do
           {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
         end
       {:stop, reason} ->
-        # {:stop, error, state} may be returned by Redix.Utils.connect/1 in case
+        # {:stop, error} may be returned by Redix.Utils.connect/1 in case
         # AUTH or SELECT fail (in that case, we don't want to try to reconnect
         # anyways).
         {:stop, reason, state}
