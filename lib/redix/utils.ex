@@ -62,7 +62,7 @@ defmodule Redix.Utils do
   def connect(opts) do
     {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
 
-    with {:ok, socket} <-:gen_tcp.connect(host, port, socket_opts, timeout) do
+    with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout) do
       setup_socket_buffers(socket)
       case Auth.auth_and_select_db(socket, opts) do
         {:ok, ""} ->
