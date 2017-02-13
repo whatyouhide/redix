@@ -79,7 +79,7 @@ defmodule Redix.Connection.SharedState do
       # the new set) because this process is going to die at the end of this
       # function anyways.
       unless MapSet.member?(state.timed_out_requests, request_id) do
-        Utils.reply_to_client(from, request_id, {:error, :disconnected})
+        Utils.reply_to_client(from, request_id, {:error, %Redix.ConnectionError{reason: :disconnected}})
       end
     end)
 

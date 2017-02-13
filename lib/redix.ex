@@ -206,9 +206,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
-      server doesn't reply within this timeout, `{:error, :timeout}`
-      is returned.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
 
   ## Examples
 
@@ -220,8 +220,9 @@ defmodule Redix do
 
   If Redis goes down (before a reconnection happens):
 
-      iex> Redix.pipeline(conn, [~w(SET mykey foo), ~w(GET mykey)])
-      {:error, :closed}
+      iex> {:error, error} = Redix.pipeline(conn, [~w(SET mykey foo), ~w(GET mykey)])
+      iex> error.reason
+      :closed
 
   """
   @spec pipeline(GenServer.server, [command], Keyword.t) ::
@@ -253,9 +254,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
-      server doesn't reply within this timeout, `{:error, :timeout}`
-      is returned.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
 
   ## Examples
 
@@ -276,7 +277,7 @@ defmodule Redix do
   def pipeline!(conn, commands,  opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, resp} -> resp
-      {:error, error} -> raise Redix.ConnectionError, error
+      {:error, error} -> raise error
     end
   end
 
@@ -303,9 +304,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
-      server doesn't reply within this timeout, `{:error, :timeout}`
-      is returned.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
 
   ## Examples
 
@@ -319,8 +320,9 @@ defmodule Redix do
 
   If Redis goes down (before a reconnection happens):
 
-      iex> Redix.command(conn, ["GET", "mykey"])
-      {:error, :closed}
+      iex> {:error, error} = Redix.command(conn, ["GET", "mykey"])
+      iex> error.reason
+      :closed
 
   """
   @spec command(GenServer.server, command, Keyword.t) ::
@@ -346,7 +348,7 @@ defmodule Redix do
       `{:ok, result}` tuple.
     * if there's a Redis error, a `Redix.Error` error is raised (with the
       original message).
-    * if there's a network error (e.g., `{:error, :closed}`) a `Redix.ConnectionError`
+    * if there's a connection error, a `Redix.ConnectionError`
       error is raised.
 
   This function accepts the same options as `command/3`.
@@ -354,9 +356,9 @@ defmodule Redix do
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis
-      server doesn't reply within this timeout, `{:error, :timeout}`
-      is returned.
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
 
   ## Examples
 
@@ -379,37 +381,21 @@ defmodule Redix do
       {:ok, resp} ->
         resp
       {:error, error} ->
-        raise Redix.ConnectionError, error
+        raise error
     end
   end
 
-  @doc """
-  This function formats an error reason into a human-readable string.
-
-  This function can be used to turn an error reason (returned in
-  `{:error, reason}` by `command/3` and `pipeline/3`) into a
-  human-readable message string.
-  """
-  @spec format_error(term) :: binary
-  def format_error(reason)
-
-  # :inet.format_error/1 doesn't format :tcp_closed or :closed.
-  def format_error(:tcp_closed) do
-    "TCP connection closed"
+  def format_error(%Redix.ConnectionError{reason: reason}) do
+    format_error(reason)
   end
 
-  # Manually returned by us when the connection is closed and someone tries to
-  # send a command to Redis.
-  def format_error(:closed) do
-    "the connection to Redis is closed"
-  end
-
+  # TODO: remove by 0.7 or 1.0, whatever comes first.
   def format_error(reason) do
-    case :inet.format_error(reason) do
-      'unknown POSIX error' -> inspect(reason)
-      message -> List.to_string(message)
-    end
+    IO.puts :stderr, "Redix.format_error/1 is deprecated, use Exception.message/1 " <>
+                     "on the returned Redix.ConnectionError instead"
+    Redix.ConnectionError.format_reason(reason)
   end
+
 
   defp assert_valid_pipeline_commands([] = _commands) do
     raise ArgumentError, "no commands passed to the pipeline"
