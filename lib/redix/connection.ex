@@ -3,6 +3,7 @@ defmodule Redix.Connection do
 
   use Connection
 
+  alias Redix.ConnectionError
   alias Redix.Protocol
   alias Redix.Utils
   alias Redix.Connection.Receiver
@@ -67,7 +68,7 @@ defmodule Redix.Connection do
           0 -> :ok
         end
 
-        {:error, :timeout}
+        {:error, %ConnectionError{reason: :timeout}}
     end
   end
 
@@ -105,7 +106,7 @@ defmodule Redix.Connection do
       {:error, reason} ->
         log state, :failed_connection, [
           "Failed to connect to Redis (", Utils.format_host(state), "): ",
-          Redix.format_error(reason),
+          Exception.message(%ConnectionError{reason: reason}),
         ]
 
         next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
@@ -125,9 +126,9 @@ defmodule Redix.Connection do
   @doc false
   def disconnect(reason, state)
 
-  def disconnect({:error, reason} = _error, state) do
+  def disconnect({:error, %ConnectionError{} = error} = _error, state) do
     log state, :disconnection, [
-      "Disconnected from Redis (", Utils.format_host(state), "): ", Redix.format_error(reason),
+      "Disconnected from Redis (", Utils.format_host(state), "): ", Exception.message(error),
     ]
 
     :ok = :gen_tcp.close(state.socket)
@@ -153,7 +154,7 @@ defmodule Redix.Connection do
 
     state = %{state | socket: nil, shared_state: nil, backoff_current: state.opts[:backoff_initial]}
     if state.opts[:exit_on_disconnection] do
-      {:stop, reason, state}
+      {:stop, error, state}
     else
       {:backoff, state.opts[:backoff_initial], state}
     end
@@ -166,7 +167,7 @@ defmodule Redix.Connection do
   # We only handle {:commands, ...} because we need to reply with the
   # request_id and with the error.
   def handle_call({:commands, _commands, request_id}, _from, %{socket: nil} = state) do
-    {:reply, {request_id, {:error, :closed}}, state}
+    {:reply, {request_id, {:error, %ConnectionError{reason: :closed}}}, state}
   end
 
   def handle_call({:commands, commands, request_id}, from, state) do
@@ -176,8 +177,8 @@ defmodule Redix.Connection do
     case :gen_tcp.send(state.socket, data) do
       :ok ->
         {:noreply, state}
-      {:error, _reason} = error ->
-        {:disconnect, error, state}
+      {:error, reason} ->
+        {:disconnect, %ConnectionError{reason: reason}, state}
     end
   end
 
@@ -207,12 +208,12 @@ defmodule Redix.Connection do
   # any way, before reconnecting and restarting it).
   def handle_info({:receiver, pid, {:tcp_closed, socket}}, %{receiver: pid, socket: socket} = state) do
     state = %{state | receiver: nil}
-    {:disconnect, {:error, :tcp_closed}, state}
+    {:disconnect, {:error, %ConnectionError{reason: :tcp_closed}}, state}
   end
 
   def handle_info({:receiver, pid, {:tcp_error, socket, reason}}, %{receiver: pid, socket: socket} = state) do
     state = %{state | receiver: nil}
-    {:disconnect, {:error, reason}, state}
+    {:disconnect, {:error, %ConnectionError{reason: reason}}, state}
   end
 
   def terminate(reason, %{receiver: receiver, shared_state: shared_state} = _state) do
@@ -232,10 +233,8 @@ defmodule Redix.Connection do
         receiver = start_receiver_and_hand_socket(state.socket, shared_state)
         state = %{state | shared_state: shared_state, receiver: receiver}
         {:ok, state}
-      {:error, reason} ->
-        {:stop, reason}
-      {:stop, _reason} = stop ->
-        stop
+      {error_or_stop, reason} when error_or_stop in [:error, :stop] ->
+        {:stop, %ConnectionError{reason: reason}}
     end
   end
 

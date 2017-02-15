@@ -4,6 +4,7 @@ defmodule RedixTest do
   import ExUnit.CaptureLog
 
   alias Redix.Error
+  alias Redix.ConnectionError
   alias Redix.TestHelpers
 
   @host TestHelpers.test_host()
@@ -61,8 +62,10 @@ defmodule RedixTest do
   test "start_link/2: when unable to connect to Redis with sync_connect: true" do
     capture_log fn ->
       Process.flag :trap_exit, true
-      assert {:error, :nxdomain} = Redix.start_link([host: "nonexistent"], sync_connect: true)
-      assert_receive {:EXIT, _pid, :nxdomain}, 1000
+      error = %Redix.ConnectionError{reason: :nxdomain}
+      assert Redix.start_link([host: "nonexistent"], sync_connect: true) ==
+             {:error, error}
+      assert_receive {:EXIT, _pid, ^error}, 1000
     end
   end
 
@@ -170,7 +173,7 @@ defmodule RedixTest do
   end
 
   test "command/2: timeout", %{conn: c} do
-    assert {:error, :timeout} = Redix.command(c, ~W(PING), timeout: 0)
+    assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~W(PING), timeout: 0)
   end
 
   test "command/2: passing a non-list as the command", %{conn: c} do
@@ -234,7 +237,7 @@ defmodule RedixTest do
   end
 
   test "pipeline/2: timeout", %{conn: c} do
-    assert {:error, :timeout} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
+    assert {:error, %ConnectionError{reason: :timeout}} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
   end
 
   test "pipeline/2: commands must be lists of binaries", %{conn: c} do
@@ -296,12 +299,12 @@ defmodule RedixTest do
     capture_log fn ->
       assert {:ok, _} = Redix.command(c, ~w(QUIT))
 
-      # When the socket is closed, we reply with {:error, :closed}. We sleep so
+      # When the socket is closed, we reply with {:error, closed}. We sleep so
       # we're sure that the socket is closed (and we don't get {:error,
-      # :disconnected} before the socket closed after we sent the PING command
+      # disconnected} before the socket closed after we sent the PING command
       # to Redix).
       :timer.sleep(100)
-      assert Redix.command(c, ~w(PING)) == {:error, :closed}
+      assert Redix.command(c, ~w(PING)) == {:error, %ConnectionError{reason: :closed}}
 
       # Redix retries the first reconnection after 500ms, and we waited 100 already.
       :timer.sleep(500)
@@ -313,7 +316,7 @@ defmodule RedixTest do
   test "timeouts" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
 
-    assert {:error, :timeout} = Redix.command(c, ~w(PING), timeout: 0)
+    assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~w(PING), timeout: 0)
 
     # Let's check that the Redix connection doesn't reply anyways, even if the
     # timeout happened.
@@ -328,7 +331,9 @@ defmodule RedixTest do
 
     capture_log fn ->
       spawn_link(fn ->
-        assert Redix.command(c, ~w(BLPOP my_list 0)) == {:error, :disconnected}
+        # BLPOP with a timeout of 0 blocks indefinitely
+        assert Redix.command(c, ~w(BLPOP mid_command_disconnection 0)) ==
+               {:error, %ConnectionError{reason: :disconnected}}
         send parent, ref
       end)
 
@@ -342,7 +347,7 @@ defmodule RedixTest do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
     capture_log fn ->
       Redix.command!(c, ~w(QUIT))
-      assert Redix.command(c, ~w(PING), timeout: 0) == {:error, :timeout}
+      assert Redix.command(c, ~w(PING), timeout: 0) == {:error, %ConnectionError{reason: :timeout}}
       refute_receive {_ref, _message}
     end
   end
@@ -355,7 +360,7 @@ defmodule RedixTest do
 
     capture_log fn ->
       spawn_link(fn ->
-        assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, :timeout}
+        assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, %ConnectionError{reason: :timeout}}
         # The fact that we timed out should be respected here, even if the
         # connection is killed (no {:error, :disconnected} message should
         # arrive).
@@ -375,15 +380,7 @@ defmodule RedixTest do
 
     capture_log fn ->
       Redix.command!(c, ~w(QUIT))
-      assert_receive {:EXIT, ^c, :tcp_closed}
+      assert_receive {:EXIT, ^c, %ConnectionError{reason: :tcp_closed}}
     end
-  end
-
-  test "format_error/1 with known error" do
-    assert Redix.format_error(:eaddrinuse) == "address already in use"
-  end
-
-  test "format_error/1 with unknown error" do
-    assert Redix.format_error(:unknown_error) == ":unknown_error"
   end
 end

@@ -5,8 +5,8 @@ for some reason, a Redix process will try to reconnect to the Redis server.
 
 If there are pending requests to Redix (e.g., `Redix.command/2`s that haven't
 returned yet) when a disconnection happens, the `Redix` functions will return
-`{:error, :disconnected}` to the caller. The caller is responsible to retry the
-request if interested.
+`{:error, %Redix.ConnectionError{reason: :disconnected}}` to the caller. The
+caller is responsible to retry the request if interested.
 
 The first reconnection attempts happens after a backoff interval decided by the
 `:backoff_initial` option.  If this attempt succeeds, then Redix will start to
