@@ -326,19 +326,16 @@ defmodule RedixTest do
   @tag :no_setup
   test "mid-command disconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
-    parent = self()
-    ref = make_ref()
 
     capture_log fn ->
-      spawn_link(fn ->
+      {_pid, ref} = Process.spawn(fn ->
         # BLPOP with a timeout of 0 blocks indefinitely
         assert Redix.command(c, ~w(BLPOP mid_command_disconnection 0)) ==
                {:error, %ConnectionError{reason: :disconnected}}
-        send parent, ref
-      end)
+      end, [:monitor, :link])
 
       Redix.command!(c, ~w(QUIT))
-      assert_receive ^ref, 200
+      assert_receive {:DOWN, ^ref, _, _, _}, 200
     end
   end
 
@@ -355,21 +352,18 @@ defmodule RedixTest do
   @tag :no_setup
   test "no leaking messages when timeout happen at the same time as disconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
-    parent = self()
-    ref = make_ref()
 
     capture_log fn ->
-      spawn_link(fn ->
+      {_pid, ref} = Process.spawn(fn ->
         assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, %ConnectionError{reason: :timeout}}
         # The fact that we timed out should be respected here, even if the
         # connection is killed (no {:error, :disconnected} message should
         # arrive).
         refute_receive {_ref, _message}
-        send parent, ref
-      end)
+      end, [:link, :monitor])
 
       Redix.command!(c, ~w(QUIT))
-      assert_receive ^ref, 200
+      assert_receive {:DOWN, ^ref, _, _, _}, 200
     end
   end
 
