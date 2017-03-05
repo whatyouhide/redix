@@ -86,11 +86,14 @@ defmodule Redix.Utils do
     Connection.reply(from, {request_id, reply})
   end
 
+  defp normalize_port(port) when is_bitstring(port), do: String.to_integer(port)
+  defp normalize_port(port) when is_integer(port),   do: port
+
   # Extracts the TCP connection options (host, port and socket opts) from the
   # given `opts`.
   defp tcp_connection_opts(opts) do
     host = to_char_list(Keyword.fetch!(opts, :host))
-    port = Keyword.fetch!(opts, :port)
+    port = normalize_port(Keyword.fetch!(opts, :port))
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
     timeout = opts[:timeout] || @default_timeout
 
