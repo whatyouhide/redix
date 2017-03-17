@@ -92,16 +92,30 @@ defmodule Redix.Connection do
       {:ok, socket} ->
         state = %{state | socket: socket}
         {:ok, shared_state} = SharedState.start_link()
-        receiver = start_receiver_and_hand_socket(state.socket, shared_state)
 
-        # If this is a reconnection attempt, log that we successfully
-        # reconnected.
-        if info == :backoff do
-          log(state, :reconnection, ["Reconnected to Redis (", Utils.format_host(state), ?)])
+        case start_receiver_and_hand_socket(state.socket, shared_state) do
+          {:ok, receiver} ->
+            # If this is a reconnection attempt, log that we successfully
+            # reconnected.
+            if info == :backoff do
+              log(state, :reconnection, ["Reconnected to Redis (", Utils.format_host(state), ")"])
+            end
+
+            state = %{state | shared_state: shared_state, receiver: receiver}
+            {:ok, state}
+          {:error, reason} ->
+            log state, :failed_connection, [
+              "Failed to connect to Redis (", Utils.format_host(state), "): ",
+              Redix.format_error(reason),
+            ]
+
+            next_backoff = calc_next_backoff(state.backoff_current || state.opts[:backoff_initial], state.opts[:backoff_max])
+            if state.opts[:exit_on_disconnection] do
+              {:stop, reason, state}
+            else
+              {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
+            end
         end
-
-        state = %{state | shared_state: shared_state, receiver: receiver}
-        {:ok, state}
       {:error, reason} ->
         log state, :failed_connection, [
           "Failed to connect to Redis (", Utils.format_host(state), "): ",
@@ -229,9 +243,13 @@ defmodule Redix.Connection do
       {:ok, socket} ->
         state = %{state | socket: socket}
         {:ok, shared_state} = SharedState.start_link()
-        receiver = start_receiver_and_hand_socket(state.socket, shared_state)
-        state = %{state | shared_state: shared_state, receiver: receiver}
-        {:ok, state}
+        case start_receiver_and_hand_socket(state.socket, shared_state) do
+          {:ok, receiver} ->
+            state = %{state | shared_state: shared_state, receiver: receiver}
+            {:ok, state}
+          {:error, reason} ->
+            {:stop, reason}
+        end
       {:error, reason} ->
         {:stop, reason}
       {:stop, _reason} = stop ->
@@ -241,8 +259,8 @@ defmodule Redix.Connection do
 
   defp start_receiver_and_hand_socket(socket, shared_state) do
     {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, shared_state: shared_state)
-    :ok = :gen_tcp.controlling_process(socket, receiver)
-    receiver
+    with :ok <- :gen_tcp.controlling_process(socket, receiver),
+         do: {:ok, receiver}
   end
 
   defp flush_messages_from_receiver(%{receiver: receiver} = state) do
