@@ -192,7 +192,7 @@ defmodule Redix.Connection do
       :ok ->
         {:noreply, state}
       {:error, reason} ->
-        {:disconnect, %ConnectionError{reason: reason}, state}
+        {:disconnect, {:error, %ConnectionError{reason: reason}}, state}
     end
   end
 
