@@ -66,7 +66,6 @@ defmodule Redix.Utils do
       setup_socket_buffers(socket)
       case Auth.auth_and_select_db(socket, opts) do
         {:ok, ""} ->
-          :inet.setopts(socket, active: :once)
           {:ok, socket}
         {:ok, tail} when byte_size(tail) > 0 ->
           {:stop, :unexpected_tail_after_auth}

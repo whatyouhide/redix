@@ -259,7 +259,12 @@ defmodule Redix.Connection do
 
   defp start_receiver_and_hand_socket(socket, shared_state) do
     {:ok, receiver} = Receiver.start_link(sender: self(), socket: socket, shared_state: shared_state)
+
     with :ok <- :gen_tcp.controlling_process(socket, receiver),
+         # We activate the socket after transferring control to the receiver
+         # process, so that we don't get any :tcp_closed messages before
+         # transferring control.
+         :ok <- :inet.setopts(socket, active: :once),
          do: {:ok, receiver}
   end
 
