@@ -38,8 +38,9 @@ defmodule Redix.Connection.Receiver do
 
   @doc false
   def init(opts) do
+    # The socket will be activated once this process is made the controlling
+    # process of the socket.
     state = struct(__MODULE__, opts)
-    :inet.setopts(state.socket, active: :once)
     {:ok, state}
   end
 
