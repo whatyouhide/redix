@@ -79,11 +79,6 @@ defmodule Redix.Utils do
     "#{opts[:host]}:#{opts[:port]}"
   end
 
-  @spec reply_to_client({pid, reference}, reference, term) :: :ok
-  def reply_to_client(from, request_id, reply) do
-    Connection.reply(from, {request_id, reply})
-  end
-
   # Setups the `:buffer` option of the given socket.
   defp setup_socket_buffers(socket) do
     with {:ok, opts} <- :inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do

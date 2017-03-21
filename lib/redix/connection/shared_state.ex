@@ -3,8 +3,6 @@ defmodule Redix.Connection.SharedState do
 
   use GenServer
 
-  alias Redix.Utils
-
   @type client :: {:commands, reference, GenServer.from, pos_integer}
 
   ## GenServer state
@@ -79,7 +77,7 @@ defmodule Redix.Connection.SharedState do
       # the new set) because this process is going to die at the end of this
       # function anyways.
       unless MapSet.member?(state.timed_out_requests, request_id) do
-        Utils.reply_to_client(from, request_id, {:error, %Redix.ConnectionError{reason: :disconnected}})
+        Connection.reply(from, {request_id, {:error, %Redix.ConnectionError{reason: :disconnected}}})
       end
     end)
 

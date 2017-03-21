@@ -4,7 +4,6 @@ defmodule Redix.Connection.Receiver do
   use GenServer
 
   alias Redix.Protocol
-  alias Redix.Utils
   alias Redix.Connection.SharedState
 
   ## GenServer state
@@ -77,7 +76,7 @@ defmodule Redix.Connection.Receiver do
     case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
         unless timed_out_request? do
-          Utils.reply_to_client(from, request_id, format_resp(resp))
+          Connection.reply(from, {request_id, format_resp(resp)})
         end
         new_data(%{state | continuation: nil}, rest)
       {:continuation, cont} ->
@@ -89,7 +88,7 @@ defmodule Redix.Connection.Receiver do
     case state.continuation.(data) do
       {:ok, resp, rest} ->
         unless timed_out_request? do
-          Utils.reply_to_client(from, request_id, format_resp(resp))
+          Connection.reply(from, {request_id, format_resp(resp)})
         end
         new_data(%{state | continuation: nil, current_client: nil}, rest)
       {:continuation, cont} ->
