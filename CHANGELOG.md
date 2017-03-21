@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.6.0
+
+* Start using `Redix.ConnectionError` when returning errors instead of just an
+  atom. This is a breaking change since now `Redix.command/2` and the other
+  functions return `{:error, %Redix.ConnectionError{reason: reason}}` instead of
+  `{:error, reason}`. If you're matching on specific error reasons, make sure to
+  update your code; if you're formatting errors through `Redix.format_error/1`,
+  you can now use `Exception.message/1` on the `Redix.ConnectionError` structs.
+
 ## v0.5.2
 
 * Fix some TCP error handling during the connection setup phase.
