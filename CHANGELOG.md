@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.5.2
+
+* Fix some TCP error handling during the connection setup phase.
+
+## v0.5.1
+
+* Fix `Redix.stop/1` to be synchronous and not leave zombie processes.
+
 ## v0.5.0
 
 * Drop support for Elixir < 1.2 and OTP 17 or earlier.
