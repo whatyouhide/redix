@@ -9,7 +9,7 @@ defmodule Redix.Utils do
 
   @redis_opts [:host, :port, :password, :database]
   @redis_default_opts [
-    host: 'localhost',
+    host: "localhost",
     port: 6379,
   ]
 
@@ -60,17 +60,16 @@ defmodule Redix.Utils do
 
   @spec connect(Keyword.t) :: {:ok, :gen_tcp.socket} | {:error, term} | {:stop, term, %{}}
   def connect(opts) do
-    {host, port, socket_opts, timeout} = tcp_connection_opts(opts)
+    host = opts |> Keyword.fetch!(:host) |> String.to_char_list()
+    port = Keyword.fetch!(opts, :port)
+    socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
+    timeout = opts[:timeout] || @default_timeout
 
-    with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout) do
-      setup_socket_buffers(socket)
+    with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
+         :ok <- setup_socket_buffers(socket) do
       case Auth.auth_and_select_db(socket, opts) do
-        {:ok, ""} ->
-          {:ok, socket}
-        {:ok, tail} when byte_size(tail) > 0 ->
-          {:stop, :unexpected_tail_after_auth}
-        {:error, reason} ->
-          {:stop, reason}
+        :ok -> {:ok, socket}
+        {:error, reason} -> {:stop, reason}
       end
     end
   end
@@ -85,24 +84,12 @@ defmodule Redix.Utils do
     Connection.reply(from, {request_id, reply})
   end
 
-  # Extracts the TCP connection options (host, port and socket opts) from the
-  # given `opts`.
-  defp tcp_connection_opts(opts) do
-    host = to_char_list(Keyword.fetch!(opts, :host))
-    port = Keyword.fetch!(opts, :port)
-    socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
-    timeout = opts[:timeout] || @default_timeout
-
-    {host, port, socket_opts, timeout}
-  end
-
   # Setups the `:buffer` option of the given socket.
   defp setup_socket_buffers(socket) do
-    {:ok, [sndbuf: sndbuf, recbuf: recbuf, buffer: buffer]} =
-      :inet.getopts(socket, [:sndbuf, :recbuf, :buffer])
-
-    buffer = buffer |> max(sndbuf) |> max(recbuf)
-    :ok = :inet.setopts(socket, [buffer: buffer])
+    with {:ok, opts} <- :inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
+      [sndbuf: sndbuf, recbuf: recbuf, buffer: buffer] = opts
+      :inet.setopts(socket, buffer: buffer |> max(sndbuf) |> max(recbuf))
+    end
   end
 
   defp check_redis_opts(opts) when is_list(opts) do

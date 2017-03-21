@@ -20,11 +20,15 @@ defmodule Redix.Auth do
   @spec auth_and_select_db(:gen_tcp.socket, Keyword.t) :: {:ok, binary} | {:error, term}
   def auth_and_select_db(socket, opts) when is_list(opts) do
     with {:ok, tail} <- auth(socket, opts[:password]),
-         do: select_db(socket, opts[:database], tail)
+         {:ok, tail} <- select_db(socket, opts[:database], tail) do
+      case tail do
+        "" ->
+          :ok
+        other when byte_size(other) > 0 ->
+          {:error, :unexpected_tail_after_auth}
+      end
+    end
   end
-
-  @spec auth(:gen_tcp.socket, nil | binary) :: {:ok | binary} | {:error, term}
-  defp auth(socket, password)
 
   defp auth(_socket, nil) do
     {:ok, ""}
@@ -43,9 +47,6 @@ defmodule Redix.Auth do
     end
   end
 
-  @spec select_db(:gen_tcp.socket, nil | non_neg_integer | binary, binary) :: {:ok, binary} | {:error, term}
-  defp select_db(socket, db, tail)
-
   defp select_db(_socket, nil, tail) do
     {:ok, tail}
   end
@@ -55,7 +56,7 @@ defmodule Redix.Auth do
       case blocking_recv(socket, tail) do
         {:ok, "OK", tail} ->
           {:ok, tail}
-        {:ok, error, _state} ->
+        {:ok, error, _tail} ->
           {:error, error}
         {:error, _reason} = error ->
           error

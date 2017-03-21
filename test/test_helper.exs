@@ -1,9 +1,9 @@
 ExUnit.start()
 
-host = String.to_char_list(System.get_env("REDIX_TEST_HOST") || "localhost")
+host = System.get_env("REDIX_TEST_HOST") || "localhost"
 port = String.to_integer(System.get_env("REDIX_TEST_PORT") || "6379")
 
-case :gen_tcp.connect(host, port, []) do
+case :gen_tcp.connect(String.to_charlist(host), port, []) do
   {:ok, socket} ->
     :gen_tcp.close(socket)
   {:error, reason} ->
