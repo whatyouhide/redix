@@ -131,7 +131,7 @@ defmodule Redix.ProtocolTest do
   end
 
   test "parse/1: raising when the binary value has no type specifier" do
-    msg = ~s[invalid type specifier (byte "f")]
+    msg = ~s[invalid type specifier ("f")]
     assert_raise ParseError, msg, fn -> parse("foo\r\n") end
     assert_raise ParseError, msg, fn -> parse("foo bar baz") end
   end

@@ -14,7 +14,7 @@ defmodule Redix.Protocol do
   end
 
   @type redis_value :: binary | integer | nil | Redix.Error.t | [redis_value]
-  @type parse_return_value :: {:ok, redis_value, binary} | {:continuation, (binary -> parse_return_value)}
+  @type on_parse(value) :: {:ok, value, binary} | {:continuation, (binary -> on_parse(value))}
 
   @crlf "\r\n"
 
@@ -26,25 +26,22 @@ defmodule Redix.Protocol do
   be converted to a binary with `IO.iodata_to_binary/1`.
 
   All elements of `elems` are converted to strings with `to_string/1`, hence
-  this function supports integers, atoms, string, char lists and whatnot. Since
-  `to_string/1` uses the `String.Chars` protocol, running this with consolidated
-  protocols makes it quite faster (even if this is probably not the bottleneck
-  of your application).
+  this function supports encoding everything that implements `String.Chars`.
 
   ## Examples
 
-      iex> iodata = Redix.Protocol.pack ["SET", "mykey", 1]
+      iex> iodata = Redix.Protocol.pack(["SET", "mykey", 1])
       iex> IO.iodata_to_binary(iodata)
       "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$1\r\n1\r\n"
 
   """
   @spec pack([binary]) :: iodata
-  def pack(elems) when is_list(elems) do
-    packed = for el <- elems, str = to_string(el) do
-      [?$, Integer.to_string(byte_size(str)), @crlf, str, @crlf]
+  def pack(items) when is_list(items) do
+    packed = for item <- items, string = to_string(item) do
+      [?$, Integer.to_string(byte_size(string)), @crlf, string, @crlf]
     end
 
-    [?*, Integer.to_string(length(elems)), @crlf, packed]
+    [?*, Integer.to_string(length(items)), @crlf, packed]
   end
 
   @doc ~S"""
@@ -55,18 +52,18 @@ defmodule Redix.Protocol do
 
   ## Examples
 
-      iex> Redix.Protocol.parse "+OK\r\ncruft"
+      iex> Redix.Protocol.parse("+OK\r\ncruft")
       {:ok, "OK", "cruft"}
 
-      iex> Redix.Protocol.parse "-ERR wrong type\r\n"
+      iex> Redix.Protocol.parse("-ERR wrong type\r\n")
       {:ok, %Redix.Error{message: "ERR wrong type"}, ""}
 
-      iex> {:continuation, fun} = Redix.Protocol.parse "+OK"
+      iex> {:continuation, fun} = Redix.Protocol.parse("+OK")
       iex> fun.("\r\n")
       {:ok, "OK", ""}
 
   """
-  @spec parse(binary) :: parse_return_value
+  @spec parse(binary) :: on_parse(redis_value)
   def parse(data)
 
   def parse("+" <> rest), do: parse_simple_string(rest)
@@ -74,28 +71,29 @@ defmodule Redix.Protocol do
   def parse(":" <> rest), do: parse_integer(rest)
   def parse("$" <> rest), do: parse_bulk_string(rest)
   def parse("*" <> rest), do: parse_array(rest)
-  def parse(""), do: mkcont(&parse/1)
-  def parse(<<b>> <> _), do: raise(ParseError, message: "invalid type specifier (byte #{inspect <<b>>})")
+  def parse(""), do: {:continuation, &parse/1}
+  def parse(<<byte>> <> _), do: raise(ParseError, message: "invalid type specifier (#{inspect(<<byte>>)})")
 
   @doc ~S"""
   Parses `n` RESP-encoded values from the given `data`.
 
-  Each element is parsed as described in `parse/1`. If there's an error in
-  parsing any of the elements or there are less than `n` elements, a
+  Each element is parsed as described in `parse/1`. If an element can't be fully
+  parsed or there are less than `n` elements encoded in `data`, then a
   continuation in the form of `{:continuation, fun}` is returned. Otherwise,
-  `{:ok, values, rest}` is returned.
+  `{:ok, values, rest}` is returned. If there's an error in decoding, a
+  `Redix.Protocol.ParseError` exception is raised.
 
   ## Examples
 
-      iex> parse_multi("+OK\r\n+COOL\r\n", 2)
+      iex> Redix.Protocol.parse_multi("+OK\r\n+COOL\r\n", 2)
       {:ok, ["OK", "COOL"], ""}
 
-      iex> {:continuation, fun} = parse_multi("+OK\r\n", 2)
+      iex> {:continuation, fun} = Redix.Protocol.parse_multi("+OK\r\n", 2)
       iex> fun.("+OK\r\n")
       {:ok, ["OK", "OK"], ""}
 
   """
-  @spec parse_multi(binary, non_neg_integer) :: {:ok, [redis_value], binary} | {:error, term}
+  @spec parse_multi(binary, non_neg_integer) :: on_parse([redis_value])
   def parse_multi(data, nelems)
 
   # We treat the case when we have just one element to parse differently as it's
@@ -122,90 +120,84 @@ defmodule Redix.Protocol do
   end
 
   defp parse_integer(""),
-    do: mkcont(&parse_integer/1)
+    do: {:continuation, &parse_integer/1}
   defp parse_integer("-" <> rest),
     do: resolve_cont(parse_integer_without_sign(rest), &{:ok, -&1, &2})
   defp parse_integer(bin),
     do: parse_integer_without_sign(bin)
 
   defp parse_integer_without_sign("") do
-    mkcont(&parse_integer_without_sign/1)
+    {:continuation, &parse_integer_without_sign/1}
   end
 
-  defp parse_integer_without_sign(<<digit, _ :: binary>> = bin)
-  when digit in ?0..?9 do
-    resolve_cont parse_integer_digits(bin, 0), fn(i, rest) ->
-      resolve_cont until_crlf(rest), fn
+  defp parse_integer_without_sign(<<digit, _::binary>> = bin) when digit in ?0..?9 do
+    resolve_cont(parse_integer_digits(bin, 0), fn(i, rest) ->
+      resolve_cont(until_crlf(rest), fn
         "", rest ->
           {:ok, i, rest}
-        <<char, _ :: binary>>, _rest ->
-          raise ParseError, message: "expected CRLF, found: #{inspect <<char>>}"
-      end
-    end
+        <<char, _::binary>>, _rest ->
+          raise ParseError, message: "expected CRLF, found: #{inspect(<<char>>)}"
+      end)
+    end)
   end
 
-  defp parse_integer_without_sign(<<non_digit, _ :: binary>>) do
-    raise ParseError, message: "expected integer, found: #{inspect <<non_digit>>}"
+  defp parse_integer_without_sign(<<non_digit, _::binary>>) do
+    raise ParseError, message: "expected integer, found: #{inspect(<<non_digit>>)}"
   end
 
-  defp parse_integer_digits(<<digit, rest :: binary>>, acc) when digit in ?0..?9,
+  defp parse_integer_digits(<<digit, rest::binary>>, acc) when digit in ?0..?9,
     do: parse_integer_digits(rest, acc * 10 + (digit - ?0))
-  defp parse_integer_digits(<<_non_digit, _ :: binary>> = rest, acc),
+  defp parse_integer_digits(<<_non_digit, _::binary>> = rest, acc),
     do: {:ok, acc, rest}
   defp parse_integer_digits(<<>>, acc),
-    do: mkcont(&parse_integer_digits(&1, acc))
+    do: {:continuation, &parse_integer_digits(&1, acc)}
 
   defp parse_bulk_string(rest) do
-    resolve_cont parse_integer(rest), fn
-      -1, rest  -> {:ok, nil, rest}
-      len, rest -> parse_string_of_known_size(rest, len)
-    end
+    resolve_cont(parse_integer(rest), fn
+      -1, rest -> {:ok, nil, rest}
+      size, rest -> parse_string_of_known_size(rest, size)
+    end)
   end
 
-  defp parse_string_of_known_size(data, len) do
+  defp parse_string_of_known_size(data, size) do
     case data do
-      <<str :: bytes-size(len), @crlf, rest :: binary>> ->
+      <<str::bytes-size(size), @crlf, rest::binary>> ->
         {:ok, str, rest}
       _ ->
-        mkcont fn(new_data) -> parse_string_of_known_size(data <> new_data, len) end
+        {:continuation, fn(new_data) -> parse_string_of_known_size(data <> new_data, size) end}
     end
   end
 
   defp parse_array(rest) do
-    resolve_cont parse_integer(rest), fn
-      -1, rest     -> {:ok, nil, rest}
-      nelems, rest -> take_elems(rest, nelems, [])
-    end
+    resolve_cont(parse_integer(rest), fn
+      -1, rest -> {:ok, nil, rest}
+      size, rest -> take_elems(rest, size, [])
+    end)
   end
 
   defp until_crlf(data, acc \\ "")
 
-  defp until_crlf(@crlf <> rest, acc),         do: {:ok, acc, rest}
-  defp until_crlf("", acc),                    do: mkcont(&until_crlf(&1, acc))
-  defp until_crlf("\r", acc),                  do: mkcont(&until_crlf(<<?\r, &1 :: binary>>, acc))
-  defp until_crlf(<<h, rest :: binary>>, acc), do: until_crlf(rest, <<acc :: binary, h>>)
+  defp until_crlf(<<@crlf, rest::binary>>, acc), do: {:ok, acc, rest}
+  defp until_crlf(<<>>, acc), do: {:continuation, &until_crlf(&1, acc)}
+  defp until_crlf(<<?\r>>, acc), do: {:continuation, &until_crlf(<<?\r, &1::binary>>, acc)}
+  defp until_crlf(<<byte, rest::binary>>, acc), do: until_crlf(rest, <<acc::binary, byte>>)
 
   defp take_elems(data, 0, acc) do
     {:ok, Enum.reverse(acc), data}
   end
 
-  defp take_elems(<<_, _ :: binary>> = data, n, acc) when n > 0 do
-    resolve_cont parse(data), fn(elem, rest) ->
+  defp take_elems(<<_, _::binary>> = data, n, acc) when n > 0 do
+    resolve_cont(parse(data), fn(elem, rest) ->
       take_elems(rest, n - 1, [elem | acc])
-    end
+    end)
   end
 
   defp take_elems(<<>>, n, acc) do
-    mkcont(&take_elems(&1, n, acc))
+    {:continuation, &take_elems(&1, n, acc)}
   end
 
   defp resolve_cont({:ok, val, rest}, ok) when is_function(ok, 2),
     do: ok.(val, rest)
   defp resolve_cont({:continuation, cont}, ok),
-    do: mkcont(fn(new_data) -> resolve_cont(cont.(new_data), ok) end)
-
-  @compile {:inline, mkcont: 1}
-  defp mkcont(fun) do
-    {:continuation, fun}
-  end
+    do: {:continuation, fn(new_data) -> resolve_cont(cont.(new_data), ok) end}
 end
