@@ -1,8 +1,6 @@
 defmodule Redix.Utils do
   @moduledoc false
 
-  require Logger
-
   @socket_opts [:binary, active: false]
 
   @redis_opts [:host, :port, :password, :database]
