@@ -3,7 +3,14 @@ ExUnit.start()
 host = System.get_env("REDIX_TEST_HOST") || "localhost"
 port = String.to_integer(System.get_env("REDIX_TEST_PORT") || "6379")
 
-case :gen_tcp.connect(String.to_charlist(host), port, []) do
+charlist_host =
+  if function_exported?(String, :to_charlist, 1) do
+    apply(String, :to_charlist, [host])
+  else
+    apply(String, :to_char_list, [host])
+  end
+
+case :gen_tcp.connect(charlist_host, port, []) do
   {:ok, socket} ->
     :gen_tcp.close(socket)
   {:error, reason} ->

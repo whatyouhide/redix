@@ -3,8 +3,6 @@ defmodule Redix.Utils do
 
   require Logger
 
-  alias Redix.Auth
-
   @socket_opts [:binary, active: false]
 
   @redis_opts [:host, :port, :password, :database]
@@ -65,9 +63,14 @@ defmodule Redix.Utils do
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
     timeout = opts[:timeout] || @default_timeout
 
-    with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
+    with {:ok, socket} <-:gen_tcp.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(socket) do
-      case Auth.auth_and_select_db(socket, opts) do
+      result =
+        with :ok <- if(opts[:password], do: auth(socket, opts[:password]), else: :ok),
+             :ok <- if(opts[:database], do: select(socket, opts[:database]), else: :ok),
+             do: :ok
+
+      case result do
         :ok -> {:ok, socket}
         {:error, reason} -> {:stop, reason}
       end
@@ -103,6 +106,36 @@ defmodule Redix.Utils do
         :ok
       other ->
         raise ArgumentError, "expected an integer as the value of the :port option, got: #{inspect(other)}"
+    end
+  end
+
+  defp auth(socket, password) do
+    with :ok <- :gen_tcp.send(socket, Redix.Protocol.pack(["AUTH", password])),
+         do: recv_ok_response(socket)
+  end
+
+  defp select(socket, database) do
+    with :ok <- :gen_tcp.send(socket, Redix.Protocol.pack(["SELECT", database])),
+         do: recv_ok_response(socket)
+  end
+
+  defp recv_ok_response(socket) do
+    recv_ok_response(socket, _continuation = nil)
+  end
+
+  defp recv_ok_response(socket, continuation) do
+    with {:ok, data} <- :gen_tcp.recv(socket, 0) do
+      parser = continuation || &Redix.Protocol.parse/1
+      case parser.(data) do
+        {:ok, "OK", ""} ->
+          :ok
+        {:ok, %Redix.Error{} = error, ""} ->
+          {:error, error}
+        {:ok, _response, tail} when byte_size(tail) > 0 ->
+          {:error, :extra_bytes_after_reply}
+        {:continuation, continuation} ->
+          recv_ok_response(socket, continuation)
+      end
     end
   end
 end
