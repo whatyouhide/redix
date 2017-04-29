@@ -70,7 +70,7 @@ defmodule Redix.Connection.SharedState do
     {:reply, {timed_out_request?, client}, state}
   end
 
-  def handle_call(:disconnect_clients_and_stop, from, state) do
+  def handle_call(:disconnect_clients_and_stop, _from, state) do
     # First, we notify all the clients.
     Enum.each(:queue.to_list(state.clients_queue), fn({:commands, request_id, from, _ncommands}) ->
       # We don't care about "popping" the element out of the MapSet (returning
@@ -81,8 +81,7 @@ defmodule Redix.Connection.SharedState do
       end
     end)
 
-    GenServer.reply(from, :ok)
-    {:stop, :normal, state}
+    {:stop, :normal, _reply = :ok, state}
   end
 
   def handle_cast({:enqueue, client}, %{clients_queue: queue} = state) do
