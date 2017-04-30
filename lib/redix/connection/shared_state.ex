@@ -72,7 +72,7 @@ defmodule Redix.Connection.SharedState do
 
   def handle_call(:disconnect_clients_and_stop, _from, state) do
     # First, we notify all the clients.
-    Enum.each(:queue.to_list(state.clients_queue), fn({:commands, request_id, from, _ncommands}) ->
+    Enum.each(:queue.to_list(state.clients_queue), fn {:commands, request_id, from, _ncommands} ->
       # We don't care about "popping" the element out of the MapSet (returning
       # the new set) because this process is going to die at the end of this
       # function anyways.

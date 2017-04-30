@@ -226,11 +226,8 @@ defmodule Redix do
 
   """
   @spec pipeline(GenServer.server, [command], Keyword.t) ::
-    {:ok, [Redix.Protocol.redis_value]} |
-    {:error, atom}
-  def pipeline(conn, commands, opts \\ [])
-
-  def pipeline(conn, commands, opts) do
+        {:ok, [Redix.Protocol.redis_value]} | {:error, atom}
+  def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
   end
@@ -272,8 +269,7 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec pipeline!(GenServer.server, [command], Keyword.t) ::
-    [Redix.Protocol.redis_value] | no_return
+  @spec pipeline!(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value] | no_return
   def pipeline!(conn, commands,  opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, resp} -> resp
@@ -326,8 +322,7 @@ defmodule Redix do
 
   """
   @spec command(GenServer.server, command, Keyword.t) ::
-    {:ok, Redix.Protocol.redis_value} |
-    {:error, atom | Redix.Error.t}
+        {:ok, Redix.Protocol.redis_value} | {:error, atom | Redix.Error.t}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
@@ -374,8 +369,7 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec command!(GenServer.server, command, Keyword.t) ::
-    Redix.Protocol.redis_value | no_return
+  @spec command!(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value | no_return
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
       {:ok, resp} ->
@@ -385,6 +379,7 @@ defmodule Redix do
     end
   end
 
+  @doc false
   def format_error(%Redix.ConnectionError{reason: reason}) do
     format_error(reason)
   end
@@ -396,7 +391,6 @@ defmodule Redix do
     Redix.ConnectionError.format_reason(reason)
   end
 
-
   defp assert_valid_pipeline_commands([] = _commands) do
     raise ArgumentError, "no commands passed to the pipeline"
   end
@@ -406,10 +400,9 @@ defmodule Redix do
       [] ->
         raise ArgumentError, "got an empty command ([]), which is not a valid Redis command"
       [first | _] = command when first in ~w(SUBSCRIBE PSUBSCRIBE UNSUBSCRIBE PUNSUBSCRIBE) ->
-        raise ArgumentError,
-          "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
-          "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
-          "functionality support. Offending command: #{inspect(command)}"
+        raise ArgumentError, "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
+                             "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
+                             "functionality support. Offending command: #{inspect(command)}"
       command when is_list(command) ->
         :ok
       other ->

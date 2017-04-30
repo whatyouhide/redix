@@ -131,7 +131,7 @@ defmodule Redix.Protocol do
   end
 
   defp parse_integer_without_sign(<<digit, _::binary>> = bin) when digit in ?0..?9 do
-    resolve_cont(parse_integer_digits(bin, 0), fn(i, rest) ->
+    resolve_cont(parse_integer_digits(bin, 0), fn i, rest ->
       resolve_cont(until_crlf(rest), fn
         "", rest ->
           {:ok, i, rest}
@@ -164,7 +164,7 @@ defmodule Redix.Protocol do
       <<str::bytes-size(size), @crlf, rest::binary>> ->
         {:ok, str, rest}
       _ ->
-        {:continuation, fn(new_data) -> parse_string_of_known_size(data <> new_data, size) end}
+        {:continuation, &parse_string_of_known_size(data <> &1, size)}
     end
   end
 
@@ -187,7 +187,7 @@ defmodule Redix.Protocol do
   end
 
   defp take_elems(<<_, _::binary>> = data, n, acc) when n > 0 do
-    resolve_cont(parse(data), fn(elem, rest) ->
+    resolve_cont(parse(data), fn elem, rest ->
       take_elems(rest, n - 1, [elem | acc])
     end)
   end
@@ -199,5 +199,5 @@ defmodule Redix.Protocol do
   defp resolve_cont({:ok, val, rest}, ok) when is_function(ok, 2),
     do: ok.(val, rest)
   defp resolve_cont({:continuation, cont}, ok),
-    do: {:continuation, fn(new_data) -> resolve_cont(cont.(new_data), ok) end}
+    do: {:continuation, fn new_data -> resolve_cont(cont.(new_data), ok) end}
 end

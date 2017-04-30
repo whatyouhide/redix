@@ -169,7 +169,7 @@ defmodule Redix.ProtocolTest do
 
     assert {:continuation, c} = parser_fun.(first)
 
-    last_cont = Enum.reduce rest, c, fn(data, acc) ->
+    last_cont = Enum.reduce rest, c, fn data, acc ->
       assert {:continuation, new_acc} = acc.(data)
       new_acc
     end

@@ -20,7 +20,7 @@ When pooling with something like `:poolboy`, the pattern is to have a pool of
 Redixes that can be checked out and back in from the pool when needed:
 
 ```elixir
-:poolboy.checkout(:my_redix_pool, fn(redix_pid) ->
+:poolboy.checkout(:my_redix_pool, fn redix_pid ->
   Redix.command(redix_pid, ~w(PING))
 end)
 ```
