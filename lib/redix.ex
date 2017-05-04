@@ -212,15 +212,15 @@ defmodule Redix do
 
   ## Examples
 
-      iex> Redix.pipeline(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
+      iex> Redix.pipeline(conn, [["INCR", "mykey"], ["INCR", "mykey"], ["DECR", "mykey"]])
       {:ok, [1, 2, 1]}
 
-      iex> Redix.pipeline(conn, [~w(SET k foo), ~w(INCR k), ~(GET k)])
+      iex> Redix.pipeline(conn, [["SET", "k", "foo"], ["INCR", "k"], ["GET", "k"]])
       {:ok, ["OK", %Redix.Error{message: "ERR value is not an integer or out of range"}, "foo"]}
 
   If Redis goes down (before a reconnection happens):
 
-      iex> {:error, error} = Redix.pipeline(conn, [~w(SET mykey foo), ~w(GET mykey)])
+      iex> {:error, error} = Redix.pipeline(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
       iex> error.reason
       :closed
 
@@ -257,15 +257,15 @@ defmodule Redix do
 
   ## Examples
 
-      iex> Redix.pipeline!(conn, [~w(INCR mykey), ~w(INCR mykey), ~w(DECR mykey)])
+      iex> Redix.pipeline!(conn, [["INCR", "mykey"], ["INCR", "mykey"], ["DECR", "mykey"]])
       [1, 2, 1]
 
-      iex> Redix.pipeline!(conn, [~w(SET k foo), ~w(INCR k), ~(GET k)])
+      iex> Redix.pipeline!(conn, [["SET", "k", "foo"], ["INCR", "k"], ["GET", "k"]])
       ["OK", %Redix.Error{message: "ERR value is not an integer or out of range"}, "foo"]
 
   If Redis goes down (before a reconnection happens):
 
-      iex> Redix.pipeline!(conn, [~w(SET mykey foo), ~w(GET mykey)])
+      iex> Redix.pipeline!(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
       ** (Redix.ConnectionError) :closed
 
   """

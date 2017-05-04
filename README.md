@@ -56,9 +56,9 @@ connection process under a name).
 Commands can be sent using `Redix.command/2-3`:
 
 ```elixir
-Redix.command(conn, ~w(SET mykey foo))
+Redix.command(conn, ["SET", "mykey", "foo"])
 #=> {:ok, "OK"}
-Redix.command(conn, ~w(GET mykey))
+Redix.command(conn, ["GET", "mykey"])
 #=> {:ok, "foo"}
 ```
 
@@ -67,7 +67,7 @@ replies with a list of responses. They can be used in Redix via
 `Redix.pipeline/2,3`:
 
 ```elixir
-Redix.pipeline(conn, [~w(INCR foo), ~w(INCR foo), ~w(INCRBY foo 2)])
+Redix.pipeline(conn, [["INCR", "foo"], ["INCR", "foo"], ["INCRBY", "foo", "2"]])
 #=> {:ok, [1, 2, 4]}
 ```
 
@@ -76,42 +76,20 @@ Redix.pipeline(conn, [~w(INCR foo), ~w(INCR foo), ~w(INCRBY foo 2)])
 there's an error, bang! variants are provided:
 
 ```elixir
-Redix.command!(conn, ~w(PING))
+Redix.command!(conn, ["PING"])
 #=> "PONG"
 
-Redix.pipeline!(conn, [~w(SET mykey foo), ~w(GET mykey)])
+Redix.pipeline!(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
 #=> ["OK", "foo"]
 ```
 
-A note about Redis errors: in the non-bang functions, they're returned as
-`Redix.Error` structs with a `:message` field which contains the original error
-message.
-
-```elixir
-Redix.command(conn, ~w(FOO))
-#=> {:error, %Redix.Error{message: "ERR unknown command 'FOO'"}}
-
-# pipeline/2 returns {:ok, _} instead of {:error, _} even if there are errors in
-# the list of responses so that it doesn't have to walk the entire list of
-# responses.
-Redix.pipeline(conn, [~w(PING), ~w(FOO)])
-#=> {:ok, ["PONG", %Redix.Error{message: "ERR unknown command 'FOO'"}]}
-```
-
-In `Redix.command!/2,3`, Redis errors are raised as exceptions:
-
-```elixir
-Redix.command!(conn, ~w(FOO))
-#=> ** (Redix.Error) ERR unknown command 'FOO'
-```
-
-`Redix.command!/2,3` and `Redix.pipeline!/2,3` raise `Redix.ConnectionError` in
-case there's an error related to the Redis connection (e.g., the connection is
+`Redix.command/2,3` and `Redix.pipeline/2,3` return a `Redix.ConnectionError` struct in
+case there's an error related to the Redis connection (for example, the connection is
 closed while Redix is waiting to reconnect).
 
 #### Resiliency
 
-Redix takes full advantage of the [connection][connection] library by James
+Redix takes full advantage of the [Connection][connection] library by James
 Fish to provide a resilient behaviour when dealing with the network connection
 to Redis. For example, if the connection to Redis drops, Redix will
 automatically try to reconnect to it periodically at a given "backoff" interval
@@ -123,7 +101,7 @@ reconnections.
 #### Pub/Sub
 
 Redix doesn't support the Pub/Sub features of Redis. For that, there's
-[`redix_pubsub`][redix-pubsub] :).
+[`redix_pubsub`][redix-pubsub].
 
 ## Using Redix in the Real World™
 

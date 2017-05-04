@@ -21,7 +21,7 @@ Redixes that can be checked out and back in from the pool when needed:
 
 ```elixir
 :poolboy.checkout(:my_redix_pool, fn redix_pid ->
-  Redix.command(redix_pid, ~w(PING))
+  Redix.command(redix_pid, ["PING"])
 end)
 ```
 
@@ -42,7 +42,7 @@ children = [
 ]
 ```
 
-and then called globally (e.g., `Redix.command(:redix, ~w(PING))`).
+and then called globally (for example, `Redix.command(:redix, ["PING"])`).
 
 Note that this pattern extends to more than one global (named) Redix: for
 example, you could have a Redix process for handling big and infrequent requests
@@ -87,7 +87,7 @@ end
 And then to use the new wrapper in your appplication:
 
 ```elixir
-MyApp.Redix.command(~w(PING))
+MyApp.Redix.command(["PING"])
 ```
 
 [poolboy]: https://github.com/devinus/poolboy
