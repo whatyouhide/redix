@@ -25,7 +25,8 @@ defp deps() do
 end
 ```
 
-and add `:redix` to your list of applications:
+If using Elixir < 1.4 or not using `:extra_applications`, add `:redix` to your
+list of applications:
 
 ```elixir
 defp application() do
