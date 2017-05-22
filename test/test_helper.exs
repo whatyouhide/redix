@@ -3,6 +3,8 @@ ExUnit.start()
 host = System.get_env("REDIX_TEST_HOST") || "localhost"
 port = String.to_integer(System.get_env("REDIX_TEST_PORT") || "6379")
 
+# TODO: remove when we depend on Elixir ~> 1.3.
+Code.ensure_loaded(String)
 charlist_host =
   if function_exported?(String, :to_charlist, 1) do
     apply(String, :to_charlist, [host])
