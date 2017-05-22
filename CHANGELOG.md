@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.6.1
+
+* Fix some deprecation warnings around `String.to_char_list/1`.
+
 ## v0.6.0
 
 * Start using `Redix.ConnectionError` when returning errors instead of just an
