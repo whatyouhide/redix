@@ -142,6 +142,6 @@ defmodule Redix.Utils do
   if function_exported?(String, :to_charlist, 1) do
     defp string_to_charlist(string), do: apply(String, :to_charlist, [string])
   else
-    defp string_to_char_list(string), do: apply(String, :to_char_list, [string])
+    defp string_to_charlist(string), do: apply(String, :to_char_list, [string])
   end
 end
