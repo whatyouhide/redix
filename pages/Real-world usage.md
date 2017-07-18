@@ -37,7 +37,8 @@ is to have a named Redix process started under the supervision tree:
 
 ```elixir
 children = [
-  worker(Redix, [[], [name: :redix]]),
+  {Redix, name: redix}, #elixir >= 1.5.0
+  worker(Redix, [[], [name: :redix]]), #elixir <= 1.4.5
   # ...
 ]
 ```
@@ -64,7 +65,8 @@ name them `:redix_0` to `:redix_4`:
 # Create the redix children list of workers:
 pool_size = 5
 redix_workers = for i <- 0..(pool_size - 1) do
-  worker(Redix, [[], [name: :"redix_#{i}"]], id: {Redix, i})
+  {Redix, [[], [name: :"redix_#{i}"]]} |> Supervisor.child_spec(id: {Redix, i})   #elixir >= 1.5.0
+  worker(Redix, [[], [name: :"redix_#{i}"]], id: {Redix, i})   #elixir <= 1.4.5
 end
 ```
 
