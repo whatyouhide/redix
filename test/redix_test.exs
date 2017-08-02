@@ -42,8 +42,8 @@ defmodule RedixTest do
       Process.flag :trap_exit, true
       {:ok, pid} = Redix.start_link(host: @host, port: @port, database: 1_000)
 
-      error = %Error{message: "ERR invalid DB index"}
-      assert_receive {:EXIT, ^pid, ^error}, 500
+      assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
+      assert message in ["ERR invalid DB index", "ERR DB index is out of range"]
     end
   end
 
