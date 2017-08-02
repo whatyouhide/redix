@@ -163,6 +163,26 @@ defmodule Redix do
     Redix.Connection.start_link(redis_opts, other_opts)
   end
 
+  @doc false
+  def child_spec([name: _] = arg), do: child_spec([[], arg])
+  @doc false
+  def child_spec([[name: _] = connection_opts]), do: child_spec([[], connection_opts])
+  @doc false 
+  def child_spec(uri) when is_binary(uri), do: child_spec([uri])
+  @doc false 
+  def child_spec(nil), do: child_spec([])    
+  @doc false
+  def child_spec(arg) when is_list(arg) do
+    %{
+      id:  __MODULE__,
+      start: {__MODULE__, :start_link, arg},
+      type: :worker
+    }
+  end
+
+
+
+
   @doc """
   Closes the connection to the Redis server.
 
