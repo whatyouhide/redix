@@ -52,7 +52,7 @@ defmodule Redix.ConnectionError do
   @spec format_reason(term) :: binary
   def format_reason(reason)
 
-  # :inet.format_error/1 doesn't format :tcp_closed or :closed.
+  # :inet.format_error/1 doesn't format :tcp_closed.
   def format_reason(:tcp_closed) do
     "TCP connection closed"
   end

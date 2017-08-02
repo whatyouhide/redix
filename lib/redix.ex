@@ -272,8 +272,10 @@ defmodule Redix do
   @spec pipeline!(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value] | no_return
   def pipeline!(conn, commands,  opts \\ []) do
     case pipeline(conn, commands, opts) do
-      {:ok, resp} -> resp
-      {:error, error} -> raise error
+      {:ok, resp} ->
+        resp
+      {:error, error} ->
+        raise error
     end
   end
 

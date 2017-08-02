@@ -98,10 +98,10 @@ defmodule Redix.Connection.Receiver do
 
   # We notify the sender of the error and stop normally.
   defp disconnect(msg, state) do
-    send state.sender, {:receiver, self(), msg}
+    send(state.sender, {:receiver, self(), msg})
     {:stop, :normal, state}
   end
 
-  defp format_resp(%Redix.Error{} = err), do: {:error, err}
+  defp format_resp(%Redix.Error{} = error), do: {:error, error}
   defp format_resp(resp), do: {:ok, resp}
 end

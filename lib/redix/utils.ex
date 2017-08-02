@@ -42,8 +42,7 @@ defmodule Redix.Utils do
 
     redix_behaviour_opts = Keyword.update!(redix_behaviour_opts, :log, fn log_opts ->
       unless Keyword.keyword?(log_opts) do
-        raise ArgumentError,
-          "the :log option must be a keyword list of {action, level}, got: #{inspect log_opts}"
+        raise ArgumentError, "the :log option must be a keyword list of {action, level}, got: #{inspect(log_opts)}"
       end
 
       Keyword.merge(@log_default_opts, log_opts)
@@ -89,15 +88,14 @@ defmodule Redix.Utils do
   end
 
   defp check_redis_opts(opts) when is_list(opts) do
-    Enum.each opts, fn {opt, _value} ->
-      unless opt in @redis_opts do
-        raise ArgumentError,
-          "unknown Redis connection option: #{inspect opt}." <>
-          " The first argument to start_link/1 should only" <>
-          " contain Redis-specific options (host, port," <>
-          " password, database)"
+    Enum.each(opts, fn {option, _value} ->
+      unless option in @redis_opts do
+        raise ArgumentError, "unknown Redis connection option: #{inspect(option)}. " <>
+                             "The first argument to start_link/1 should only " <>
+                             "contain Redis-specific options (host, port, " <>
+                             "password, database)"
       end
-    end
+    end)
 
     case Keyword.get(opts, :port) do
       port when is_nil(port) or is_integer(port) ->

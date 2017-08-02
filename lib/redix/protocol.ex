@@ -72,7 +72,7 @@ defmodule Redix.Protocol do
   def parse("$" <> rest), do: parse_bulk_string(rest)
   def parse("*" <> rest), do: parse_array(rest)
   def parse(""), do: {:continuation, &parse/1}
-  def parse(<<byte>> <> _), do: raise(ParseError, message: "invalid type specifier (#{inspect(<<byte>>)})")
+  def parse(<<byte>> <> _), do: raise ParseError, message: "invalid type specifier (#{inspect(<<byte>>)})"
 
   @doc ~S"""
   Parses `n` RESP-encoded values from the given `data`.
@@ -154,8 +154,10 @@ defmodule Redix.Protocol do
 
   defp parse_bulk_string(rest) do
     resolve_cont(parse_integer(rest), fn
-      -1, rest -> {:ok, nil, rest}
-      size, rest -> parse_string_of_known_size(rest, size)
+      -1, rest ->
+        {:ok, nil, rest}
+      size, rest ->
+        parse_string_of_known_size(rest, size)
     end)
   end
 
@@ -170,8 +172,10 @@ defmodule Redix.Protocol do
 
   defp parse_array(rest) do
     resolve_cont(parse_integer(rest), fn
-      -1, rest -> {:ok, nil, rest}
-      size, rest -> take_elems(rest, size, [])
+      -1, rest ->
+        {:ok, nil, rest}
+      size, rest ->
+        take_elems(rest, size, [])
     end)
   end
 
