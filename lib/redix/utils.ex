@@ -55,7 +55,7 @@ defmodule Redix.Utils do
 
   @spec connect(Keyword.t) :: {:ok, :gen_tcp.socket} | {:error, term} | {:stop, term, %{}}
   def connect(opts) do
-    host = opts |> Keyword.fetch!(:host) |> string_to_charlist()
+    host = opts |> Keyword.fetch!(:host) |> String.to_charlist()
     port = Keyword.fetch!(opts, :port)
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
     timeout = opts[:timeout] || @default_timeout
@@ -133,13 +133,5 @@ defmodule Redix.Utils do
           recv_ok_response(socket, continuation)
       end
     end
-  end
-
-  # TODO: remove when we depend on Elixir ~> 1.3.
-  Code.ensure_loaded(String)
-  if function_exported?(String, :to_charlist, 1) do
-    defp string_to_charlist(string), do: apply(String, :to_charlist, [string])
-  else
-    defp string_to_charlist(string), do: apply(String, :to_char_list, [string])
   end
 end
