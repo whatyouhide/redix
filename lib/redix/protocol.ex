@@ -37,11 +37,14 @@ defmodule Redix.Protocol do
   """
   @spec pack([binary]) :: iodata
   def pack(items) when is_list(items) do
-    packed = for item <- items, string = to_string(item) do
-      [?$, Integer.to_string(byte_size(string)), @crlf, string, @crlf]
-    end
+    {packed, size} =
+      Enum.map_reduce(items, 0, fn item, acc ->
+        string = to_string(item)
+        packed_item = [?$, Integer.to_string(byte_size(string)), @crlf, string, @crlf]
+        {packed_item, acc + 1}
+      end)
 
-    [?*, Integer.to_string(length(items)), @crlf, packed]
+    [?*, Integer.to_string(size), @crlf, packed]
   end
 
   @doc ~S"""
