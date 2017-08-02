@@ -381,18 +381,6 @@ defmodule Redix do
     end
   end
 
-  @doc false
-  def format_error(%Redix.ConnectionError{reason: reason}) do
-    format_error(reason)
-  end
-
-  # TODO: remove by 0.7 or 1.0, whatever comes first.
-  def format_error(reason) do
-    IO.puts :stderr, "Redix.format_error/1 is deprecated, use Exception.message/1 " <>
-                     "on the returned Redix.ConnectionError instead"
-    Redix.ConnectionError.format_reason(reason)
-  end
-
   defp assert_valid_pipeline_commands([] = _commands) do
     raise ArgumentError, "no commands passed to the pipeline"
   end
