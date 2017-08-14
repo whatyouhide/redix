@@ -17,4 +17,25 @@ end
 defmodule Redix.TestHelpers do
   def test_host(), do: unquote(host)
   def test_port(), do: unquote(port)
+
+  def parse_with_continuations(data, parser_fun \\ &Redix.Protocol.parse/1)
+
+  def parse_with_continuations([data], parser_fun) do
+    parser_fun.(data)
+  end
+
+  def parse_with_continuations([first | rest], parser_fun) do
+    import ExUnit.Assertions
+
+    {rest, [last]} = Enum.split(rest, -1)
+
+    assert {:continuation, c} = parser_fun.(first)
+
+    last_cont = Enum.reduce rest, c, fn data, acc ->
+      assert {:continuation, new_acc} = acc.(data)
+      new_acc
+    end
+
+    last_cont.(last)
+  end
 end
