@@ -41,6 +41,26 @@ defmodule Redix do
 
   @default_timeout 5000
 
+  @doc false
+  def child_spec(args)
+
+  def child_spec([]) do
+    child_spec([[], []])
+  end
+
+  def child_spec([uri_or_redis_opts]) do
+    child_spec([uri_or_redis_opts, []])
+  end
+
+  def child_spec([uri_or_redis_opts, connection_opts] = args)
+      when (is_binary(uri_or_redis_opts) or is_list(uri_or_redis_opts)) and is_list(connection_opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, args},
+      type: :worker,
+    }
+  end
+
   @doc """
   Starts a connection to Redis.
 

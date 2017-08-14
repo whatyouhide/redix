@@ -37,8 +37,11 @@ is to have a named Redix process started under the supervision tree:
 
 ```elixir
 children = [
+  # On Elixir 1.5 and above:
+  {Redix, [[], [name: :redix]]},
+
+  # Before Elixir 1.5:
   worker(Redix, [[], [name: :redix]]),
-  # ...
 ]
 ```
 
@@ -64,7 +67,13 @@ name them `:redix_0` to `:redix_4`:
 # Create the redix children list of workers:
 pool_size = 5
 redix_workers = for i <- 0..(pool_size - 1) do
-  worker(Redix, [[], [name: :"redix_#{i}"]], id: {Redix, i})
+  args = [[], [name: :"redix_#{i}"]]
+
+  # On Elixir 1.5 and above:
+  Supervisor.child_spec({Redix, args}, id: {Redix, i})
+
+  # Before Elixir 1.5:
+  worker(Redix, args, id: {Redix, i})
 end
 ```
 
@@ -87,7 +96,8 @@ end
 And then to use the new wrapper in your appplication:
 
 ```elixir
-MyApp.Redix.command(["PING"])
+MyApp.Redix.command!(["PING"])
+#=> "PONG"
 ```
 
 [poolboy]: https://github.com/devinus/poolboy

@@ -377,4 +377,24 @@ defmodule RedixTest do
       assert_receive {:EXIT, ^c, %ConnectionError{reason: :tcp_closed}}
     end
   end
+
+  @tag :no_setup
+  test "child_spec/1" do
+    default_spec = %{
+      id: Redix,
+      start: {Redix, :start_link, [[], []]},
+      type: :worker,
+    }
+    assert Redix.child_spec([]) == default_spec
+    assert Redix.child_spec([[]]) == default_spec
+    assert Redix.child_spec([[], []]) == default_spec
+
+    assert Redix.child_spec(["redis://localhost"]) ==
+           Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+    assert Redix.child_spec(["redis://localhost", []]) ==
+           Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+
+    assert Redix.child_spec(["redis://localhost", [name: :redix]]) ==
+           Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", [name: :redix]]})
+  end
 end
