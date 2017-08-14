@@ -9,50 +9,52 @@ if Code.ensure_compiled?(PropertyTest) do
       Error,
     }
 
-    property "simple strings" do
-      check all string <- alphanumeric_string(),
-                split_command <- random_splits("+#{string}\r\n"),
-                split_command_with_rest = append_to_last(split_command, "rest") do
-        assert parse_with_continuations(split_command) == {:ok, string, ""}
-        assert parse_with_continuations(split_command_with_rest) == {:ok, string, "rest"}
-      end
-    end
-
-    property "errors" do
-      check all error_message <- alphanumeric_string(),
-                split_command <- random_splits("-#{error_message}\r\n"),
-                split_command_with_rest = append_to_last(split_command, "rest") do
-        assert parse_with_continuations(split_command) == {:ok, %Error{message: error_message}, ""}
-        assert parse_with_continuations(split_command_with_rest) == {:ok, %Error{message: error_message}, "rest"}
-      end
-    end
-
-    property "integers" do
-      check all int <- int(),
-                string_int = Integer.to_string(int),
-                split_command <- random_splits(":#{string_int}\r\n"),
-                split_command_with_rest = append_to_last(split_command, "rest") do
-        assert parse_with_continuations(split_command) == {:ok, int, ""}
-        assert parse_with_continuations(split_command_with_rest) == {:ok, int, "rest"}
-      end
-    end
-
-    property "bulk strings" do
-      check all bin <- binary(),
-                bin_size = byte_size(bin),
-                command = "$#{bin_size}\r\n#{bin}\r\n",
-                split_command <- random_splits(command),
-                split_command_with_rest = append_to_last(split_command, "rest") do
-        assert parse_with_continuations(split_command) == {:ok, bin, ""}
-        assert parse_with_continuations(split_command_with_rest) == {:ok, bin, "rest"}
+    describe "parse/1 (with split input)" do
+      property "simple strings" do
+        check all string <- alphanumeric_string(),
+                  split_command <- random_splits("+#{string}\r\n"),
+                  split_command_with_rest = append_to_last(split_command, "rest") do
+          assert parse_with_continuations(split_command) == {:ok, string, ""}
+          assert parse_with_continuations(split_command_with_rest) == {:ok, string, "rest"}
+        end
       end
 
-      # nil
-      check all split_command <- random_splits("$-1\r\n"),
-                split_command_with_rest = append_to_last(split_command, "rest"),
-                max_runs: 10 do
-        assert parse_with_continuations(split_command) == {:ok, nil, ""}
-        assert parse_with_continuations(split_command_with_rest) == {:ok, nil, "rest"}
+      property "errors" do
+        check all error_message <- alphanumeric_string(),
+                  split_command <- random_splits("-#{error_message}\r\n"),
+                  split_command_with_rest = append_to_last(split_command, "rest") do
+          assert parse_with_continuations(split_command) == {:ok, %Error{message: error_message}, ""}
+          assert parse_with_continuations(split_command_with_rest) == {:ok, %Error{message: error_message}, "rest"}
+        end
+      end
+
+      property "integers" do
+        check all int <- int(),
+                  string_int = Integer.to_string(int),
+                  split_command <- random_splits(":#{string_int}\r\n"),
+                  split_command_with_rest = append_to_last(split_command, "rest") do
+          assert parse_with_continuations(split_command) == {:ok, int, ""}
+          assert parse_with_continuations(split_command_with_rest) == {:ok, int, "rest"}
+        end
+      end
+
+      property "bulk strings" do
+        check all bin <- binary(),
+                  bin_size = byte_size(bin),
+                  command = "$#{bin_size}\r\n#{bin}\r\n",
+                  split_command <- random_splits(command),
+                  split_command_with_rest = append_to_last(split_command, "rest") do
+          assert parse_with_continuations(split_command) == {:ok, bin, ""}
+          assert parse_with_continuations(split_command_with_rest) == {:ok, bin, "rest"}
+        end
+
+        # nil
+        check all split_command <- random_splits("$-1\r\n"),
+                  split_command_with_rest = append_to_last(split_command, "rest"),
+                  max_runs: 10 do
+          assert parse_with_continuations(split_command) == {:ok, nil, ""}
+          assert parse_with_continuations(split_command_with_rest) == {:ok, nil, "rest"}
+        end
       end
     end
 

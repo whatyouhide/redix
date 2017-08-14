@@ -29,12 +29,13 @@ defmodule Redix.TestHelpers do
 
     {rest, [last]} = Enum.split(rest, -1)
 
-    assert {:continuation, c} = parser_fun.(first)
+    assert {:continuation, cont} = parser_fun.(first)
 
-    last_cont = Enum.reduce rest, c, fn data, acc ->
-      assert {:continuation, new_acc} = acc.(data)
-      new_acc
-    end
+    last_cont =
+      Enum.reduce(rest, cont, fn data, cont_acc ->
+        assert {:continuation, cont_acc} = cont_acc.(data)
+        cont_acc
+      end)
 
     last_cont.(last)
   end
