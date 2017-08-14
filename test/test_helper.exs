@@ -1,5 +1,9 @@
 ExUnit.start()
 
+if Code.ensure_loaded?(PropertyTest) do
+  Application.ensure_all_started(:stream_data)
+end
+
 host = System.get_env("REDIX_TEST_HOST") || "localhost"
 port = String.to_integer(System.get_env("REDIX_TEST_PORT") || "6379")
 
