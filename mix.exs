@@ -50,7 +50,7 @@ defmodule Redix.Mixfile do
     ]
 
     if stream_data?() do
-      [{:stream_data, "~> 0.1.1", only: :test}] ++ deps
+      [{:stream_data, "~> 0.2", only: :test}] ++ deps
     else
       deps
     end

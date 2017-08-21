@@ -11,7 +11,7 @@ if Code.ensure_compiled?(PropertyTest) do
 
     describe "parse/1 (with split input)" do
       property "simple strings" do
-        check all string <- alphanumeric_string(),
+        check all string <- string(:alphanumeric),
                   split_command <- random_splits("+#{string}\r\n"),
                   split_command_with_rest = append_to_last(split_command, "rest") do
           assert parse_with_continuations(split_command) == {:ok, string, ""}
@@ -20,7 +20,7 @@ if Code.ensure_compiled?(PropertyTest) do
       end
 
       property "errors" do
-        check all error_message <- alphanumeric_string(),
+        check all error_message <- string(:alphanumeric),
                   split_command <- random_splits("-#{error_message}\r\n"),
                   split_command_with_rest = append_to_last(split_command, "rest") do
           assert parse_with_continuations(split_command) == {:ok, %Error{message: error_message}, ""}
@@ -29,7 +29,7 @@ if Code.ensure_compiled?(PropertyTest) do
       end
 
       property "integers" do
-        check all int <- int(),
+        check all int <- integer(),
                   string_int = Integer.to_string(int),
                   split_command <- random_splits(":#{string_int}\r\n"),
                   split_command_with_rest = append_to_last(split_command, "rest") do
