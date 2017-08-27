@@ -8,10 +8,18 @@ defmodule Redix.URI do
     defexception [:message]
   end
 
-  @spec opts_from_uri(binary) :: Keyword.t
-  def opts_from_uri(uri) when is_binary(uri) do
-    %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
+  @spec opts_from_uri(binary | URI.t | nil) :: Keyword.t
+  def opts_from_uri(uri)
 
+  def opts_from_uri(nil) do
+    []
+  end
+
+  def opts_from_uri(uri) when is_binary(uri) do
+    uri |> URI.parse() |> opts_from_uri()
+  end
+
+  def opts_from_uri(%URI{host: host, port: port, scheme: scheme} = uri) do
     unless scheme == "redis" do
       raise URIError, message: "expected scheme to be redis://, got: #{scheme}://"
     end
