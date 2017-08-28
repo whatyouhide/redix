@@ -172,15 +172,26 @@ defmodule Redix do
       {:ok, #PID<...>}
 
   """
-  @spec start_link(binary | Keyword.t, Keyword.t) :: GenServer.on_start
+  @spec start_link(binary | URI.t | Keyword.t, Keyword.t) :: GenServer.on_start
   def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
   def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
-    uri |> Redix.URI.opts_from_uri() |> start_link(other_opts)
+    uri
+    |> Redix.URI.opts_from_uri()
+    |> start_link(other_opts)
+  end
+
+  def start_link(%URI{} = uri, other_opts) when is_list(other_opts) do
+    uri
+    |> Redix.URI.opts_from_uri()
+    |> start_link(other_opts)
   end
 
   def start_link(redis_opts, other_opts) do
-    Redix.Connection.start_link(redis_opts, other_opts)
+    Application.get_env(:redix, :url)
+    |> Redix.URI.opts_from_uri()
+    |> Keyword.merge(redis_opts)
+    |> Redix.Connection.start_link(other_opts)
   end
 
   @doc """

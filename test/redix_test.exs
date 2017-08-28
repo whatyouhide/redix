@@ -18,6 +18,7 @@ defmodule RedixTest do
   end
 
   setup context do
+    Application.delete_env(:redix, :url)
     if context[:no_setup] do
       {:ok, %{}}
     else
@@ -81,6 +82,28 @@ defmodule RedixTest do
   @tag :no_setup
   test "start_link/2: using a redis:// url" do
     {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
+    assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+  end
+
+  @tag :no_setup
+  test "start_link/2: using a mix config url" do
+    Application.put_env(:redix, :url, "redis://#{@host}:#{@port}/3")
+    {:ok, pid} = Redix.start_link()
+    assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+  end
+
+  @tag :no_setup
+  test "start_link/2: using a redis:// uri" do
+    uri = %URI{scheme: "redis", host: @host, port: @port, path: "/3"}
+    {:ok, pid} = Redix.start_link(uri)
+    assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+  end
+
+  @tag :no_setup
+  test "start_link/2: using a mix config uri" do
+    uri = %URI{scheme: "redis", host: @host, port: @port, path: "/3"}
+    Application.put_env(:redix, :url, uri)
+    {:ok, pid} = Redix.start_link()
     assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
   end
 
