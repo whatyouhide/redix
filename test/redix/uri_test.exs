@@ -4,6 +4,11 @@ defmodule Redix.URITest do
   import Redix.URI
   alias Redix.URI.URIError
 
+  test "opts_from_uri/1: nil" do
+    opts = opts_from_uri(nil)
+    assert [] == opts
+  end
+
   test "opts_from_uri/1: invalid scheme" do
     message = "expected scheme to be redis://, got: foo://"
     assert_raise URIError, message, fn ->
@@ -21,6 +26,14 @@ defmodule Redix.URITest do
 
   test "opts_from_uri/1: host and port" do
     opts = opts_from_uri("redis://localhost:6379")
+    assert opts[:host] == "localhost"
+    assert opts[:port] == 6379
+    assert is_nil(opts[:database])
+    assert is_nil(opts[:password])
+  end
+
+  test "opts_from_uri/1: URI host and port" do
+    opts = opts_from_uri(%URI{scheme: "redis", host: "localhost", port: 6379})
     assert opts[:host] == "localhost"
     assert opts[:port] == 6379
     assert is_nil(opts[:database])
