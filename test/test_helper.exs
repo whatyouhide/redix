@@ -1,6 +1,6 @@
 ExUnit.start()
 
-if Code.ensure_loaded?(PropertyTest) do
+if Code.ensure_loaded?(ExUnitProperties) do
   Application.ensure_all_started(:stream_data)
 end
 

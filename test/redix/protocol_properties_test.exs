@@ -1,8 +1,8 @@
-if Code.ensure_compiled?(PropertyTest) do
+if Code.ensure_compiled?(ExUnitProperties) do
   defmodule Redix.Protocol.PropertiesTest do
     use ExUnit.Case, async: true
+    use ExUnitProperties
 
-    import PropertyTest
     import Redix.TestHelpers, only: [parse_with_continuations: 1]
 
     alias Redix.{
@@ -59,7 +59,6 @@ if Code.ensure_compiled?(PropertyTest) do
     end
 
     defp random_splits(splittable_part) do
-      import StreamData
       bytes = for <<byte <- splittable_part>>, do: byte
 
       bytes
