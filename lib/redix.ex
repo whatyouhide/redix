@@ -53,11 +53,12 @@ defmodule Redix do
   end
 
   def child_spec([uri_or_redis_opts, connection_opts] = args)
-      when (is_binary(uri_or_redis_opts) or is_list(uri_or_redis_opts)) and is_list(connection_opts) do
+      when (is_binary(uri_or_redis_opts) or is_list(uri_or_redis_opts)) and
+             is_list(connection_opts) do
     %{
       id: __MODULE__,
       start: {__MODULE__, :start_link, args},
-      type: :worker,
+      type: :worker
     }
   end
 
@@ -172,7 +173,7 @@ defmodule Redix do
       {:ok, #PID<...>}
 
   """
-  @spec start_link(binary | Keyword.t, Keyword.t) :: GenServer.on_start
+  @spec start_link(binary | Keyword.t(), Keyword.t()) :: GenServer.on_start()
   def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
   def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
@@ -197,7 +198,7 @@ defmodule Redix do
       :ok
 
   """
-  @spec stop(GenServer.server, timeout) :: :ok
+  @spec stop(GenServer.server(), timeout) :: :ok
   def stop(conn, timeout \\ :infinity) do
     Redix.Connection.stop(conn, timeout)
   end
@@ -245,8 +246,8 @@ defmodule Redix do
       :closed
 
   """
-  @spec pipeline(GenServer.server, [command], Keyword.t) ::
-        {:ok, [Redix.Protocol.redis_value]} | {:error, atom}
+  @spec pipeline(GenServer.server(), [command], Keyword.t()) ::
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
@@ -289,11 +290,13 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec pipeline!(GenServer.server, [command], Keyword.t) :: [Redix.Protocol.redis_value] | no_return
-  def pipeline!(conn, commands,  opts \\ []) do
+  @spec pipeline!(GenServer.server(), [command], Keyword.t()) ::
+          [Redix.Protocol.redis_value()] | no_return
+  def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, resp} ->
         resp
+
       {:error, error} ->
         raise error
     end
@@ -343,14 +346,16 @@ defmodule Redix do
       :closed
 
   """
-  @spec command(GenServer.server, command, Keyword.t) ::
-        {:ok, Redix.Protocol.redis_value} | {:error, atom | Redix.Error.t}
+  @spec command(GenServer.server(), command, Keyword.t()) ::
+          {:ok, Redix.Protocol.redis_value()} | {:error, atom | Redix.Error.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
         raise error
+
       {:ok, [resp]} ->
         {:ok, resp}
+
       {:error, _reason} = error ->
         error
     end
@@ -391,11 +396,13 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec command!(GenServer.server, command, Keyword.t) :: Redix.Protocol.redis_value | no_return
+  @spec command!(GenServer.server(), command, Keyword.t()) ::
+          Redix.Protocol.redis_value() | no_return
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
       {:ok, resp} ->
         resp
+
       {:error, error} ->
         raise error
     end
@@ -409,14 +416,19 @@ defmodule Redix do
     Enum.each(commands, fn
       [] ->
         raise ArgumentError, "got an empty command ([]), which is not a valid Redis command"
+
       [first | _] = command when first in ~w(SUBSCRIBE PSUBSCRIBE UNSUBSCRIBE PUNSUBSCRIBE) ->
-        raise ArgumentError, "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
-                             "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
-                             "functionality support. Offending command: #{inspect(command)}"
+        raise ArgumentError,
+              "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
+                "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
+                "functionality support. Offending command: #{inspect(command)}"
+
       command when is_list(command) ->
         :ok
+
       other ->
-        raise ArgumentError, "expected a list of binaries as each Redis command, got: #{inspect(other)}"
+        raise ArgumentError,
+              "expected a list of binaries as each Redis command, got: #{inspect(other)}"
     end)
   end
 

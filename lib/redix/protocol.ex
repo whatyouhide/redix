@@ -13,7 +13,7 @@ defmodule Redix.Protocol do
     defexception [:message]
   end
 
-  @type redis_value :: binary | integer | nil | Redix.Error.t | [redis_value]
+  @type redis_value :: binary | integer | nil | Redix.Error.t() | [redis_value]
   @type on_parse(value) :: {:ok, value, binary} | {:continuation, (binary -> on_parse(value))}
 
   @crlf "\r\n"
@@ -75,7 +75,9 @@ defmodule Redix.Protocol do
   def parse("$" <> rest), do: parse_bulk_string(rest)
   def parse("*" <> rest), do: parse_array(rest)
   def parse(""), do: {:continuation, &parse/1}
-  def parse(<<byte>> <> _), do: raise ParseError, message: "invalid type specifier (#{inspect(<<byte>>)})"
+
+  def parse(<<byte>> <> _),
+    do: raise(ParseError, message: "invalid type specifier (#{inspect(<<byte>>)})")
 
   @doc ~S"""
   Parses `n` RESP-encoded values from the given `data`.
@@ -122,12 +124,12 @@ defmodule Redix.Protocol do
     |> resolve_cont(&{:ok, %Redix.Error{message: &1}, &2})
   end
 
-  defp parse_integer(""),
-    do: {:continuation, &parse_integer/1}
+  defp parse_integer(""), do: {:continuation, &parse_integer/1}
+
   defp parse_integer("-" <> rest),
     do: resolve_cont(parse_integer_without_sign(rest), &{:ok, -&1, &2})
-  defp parse_integer(bin),
-    do: parse_integer_without_sign(bin)
+
+  defp parse_integer(bin), do: parse_integer_without_sign(bin)
 
   defp parse_integer_without_sign("") do
     {:continuation, &parse_integer_without_sign/1}
@@ -138,6 +140,7 @@ defmodule Redix.Protocol do
       resolve_cont(until_crlf(rest), fn
         "", rest ->
           {:ok, i, rest}
+
         <<char, _::binary>>, _rest ->
           raise ParseError, message: "expected CRLF, found: #{inspect(<<char>>)}"
       end)
@@ -150,15 +153,15 @@ defmodule Redix.Protocol do
 
   defp parse_integer_digits(<<digit, rest::binary>>, acc) when digit in ?0..?9,
     do: parse_integer_digits(rest, acc * 10 + (digit - ?0))
-  defp parse_integer_digits(<<_non_digit, _::binary>> = rest, acc),
-    do: {:ok, acc, rest}
-  defp parse_integer_digits(<<>>, acc),
-    do: {:continuation, &parse_integer_digits(&1, acc)}
+
+  defp parse_integer_digits(<<_non_digit, _::binary>> = rest, acc), do: {:ok, acc, rest}
+  defp parse_integer_digits(<<>>, acc), do: {:continuation, &parse_integer_digits(&1, acc)}
 
   defp parse_bulk_string(rest) do
     resolve_cont(parse_integer(rest), fn
       -1, rest ->
         {:ok, nil, rest}
+
       size, rest ->
         parse_string_of_known_size(rest, size)
     end)
@@ -168,6 +171,7 @@ defmodule Redix.Protocol do
     case data do
       <<str::bytes-size(size), @crlf, rest::binary>> ->
         {:ok, str, rest}
+
       _ ->
         {:continuation, &parse_string_of_known_size(data <> &1, size)}
     end
@@ -177,6 +181,7 @@ defmodule Redix.Protocol do
     resolve_cont(parse_integer(rest), fn
       -1, rest ->
         {:ok, nil, rest}
+
       size, rest ->
         take_elems(rest, size, [])
     end)
@@ -203,8 +208,8 @@ defmodule Redix.Protocol do
     {:continuation, &take_elems(&1, n, acc)}
   end
 
-  defp resolve_cont({:ok, val, rest}, ok) when is_function(ok, 2),
-    do: ok.(val, rest)
+  defp resolve_cont({:ok, val, rest}, ok) when is_function(ok, 2), do: ok.(val, rest)
+
   defp resolve_cont({:continuation, cont}, ok),
     do: {:continuation, fn new_data -> resolve_cont(cont.(new_data), ok) end}
 end

@@ -38,44 +38,43 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: specifying a non existing database" do
-    capture_log fn ->
-      Process.flag :trap_exit, true
-      {:ok, pid} = Redix.start_link(host: @host, port: @port, database: 1_000)
+    capture_log(fn ->
+      Process.flag(:trap_exit, true)
+      {:ok, pid} = Redix.start_link(host: @host, port: @port, database: 1000)
 
       assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
       assert message in ["ERR invalid DB index", "ERR DB index is out of range"]
-    end
+    end)
   end
 
   @tag :no_setup
   test "start_link/2: specifying a password when no password is set" do
-    capture_log fn ->
-      Process.flag :trap_exit, true
+    capture_log(fn ->
+      Process.flag(:trap_exit, true)
       {:ok, pid} = Redix.start_link(host: @host, port: @port, password: "foo")
 
       error = %Error{message: "ERR Client sent AUTH, but no password is set"}
       assert_receive {:EXIT, ^pid, ^error}, 500
-    end
+    end)
   end
 
   @tag :no_setup
   test "start_link/2: when unable to connect to Redis with sync_connect: true" do
-    capture_log fn ->
-      Process.flag :trap_exit, true
+    capture_log(fn ->
+      Process.flag(:trap_exit, true)
       error = %Redix.ConnectionError{reason: :nxdomain}
-      assert Redix.start_link([host: "nonexistent"], sync_connect: true) ==
-             {:error, error}
+      assert Redix.start_link([host: "nonexistent"], sync_connect: true) == {:error, error}
       assert_receive {:EXIT, _pid, ^error}, 1000
-    end
+    end)
   end
 
   @tag :no_setup
   test "start_link/2: when unable to connect to Redis with sync_connect: false" do
-    capture_log fn ->
-      Process.flag :trap_exit, true
-      {:ok, pid} = Redix.start_link([host: "nonexistent"], [sync_connect: false])
+    capture_log(fn ->
+      Process.flag(:trap_exit, true)
+      {:ok, pid} = Redix.start_link([host: "nonexistent"], sync_connect: false)
       refute_receive {:EXIT, ^pid, :nxdomain}, 200
-    end
+    end)
   end
 
   @tag :no_setup
@@ -162,6 +161,7 @@ defmodule RedixTest do
 
   test "command/2: Redis errors", %{conn: c} do
     {:ok, _} = Redix.command(c, ~w(SET errs foo))
+
     assert_raise Redix.Error, "ERR value is not an integer or out of range", fn ->
       Redix.command(c, ~w(INCR errs))
     end
@@ -178,6 +178,7 @@ defmodule RedixTest do
 
   test "command/2: passing a non-list as the command", %{conn: c} do
     message = "expected a list of binaries as each Redis command, got: \"PING\""
+
     assert_raise ArgumentError, message, fn ->
       Redix.command(c, "PING")
     end
@@ -187,15 +188,16 @@ defmodule RedixTest do
     commands = [
       ["SET", "pipe", "10"],
       ["INCR", "pipe"],
-      ["GET", "pipe"],
+      ["GET", "pipe"]
     ]
+
     assert Redix.pipeline(c, commands) == {:ok, ["OK", 11, "11"]}
   end
 
   test "pipeline/2: a lot of commands so that TCP gets stressed", %{conn: c} do
     assert {:ok, "OK"} = Redix.command(c, ~w(SET stress_pipeline foo))
 
-    ncommands = 10_000
+    ncommands = 10000
     commands = List.duplicate(~w(GET stress_pipeline), ncommands)
 
     # Let's do it twice to be sure the server can handle the data.
@@ -222,9 +224,11 @@ defmodule RedixTest do
 
   test "pipeline/2: passing one or more empty commands returns an error", %{conn: c} do
     message = "got an empty command ([]), which is not a valid Redis command"
+
     assert_raise ArgumentError, message, fn ->
       Redix.pipeline(c, [[]])
     end
+
     assert_raise ArgumentError, message, fn ->
       Redix.pipeline(c, [["PING"], [], ["PING"]])
     end
@@ -237,16 +241,19 @@ defmodule RedixTest do
   end
 
   test "pipeline/2: timeout", %{conn: c} do
-    assert {:error, %ConnectionError{reason: :timeout}} = Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
+    assert {:error, %ConnectionError{reason: :timeout}} =
+             Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
   end
 
   test "pipeline/2: commands must be lists of binaries", %{conn: c} do
     message = "expected a list of Redis commands, got: \"PING\""
+
     assert_raise ArgumentError, message, fn ->
       Redix.pipeline(c, "PING")
     end
 
     message = "expected a list of binaries as each Redis command, got: \"PING\""
+
     assert_raise ArgumentError, message, fn ->
       Redix.pipeline(c, ["PING"])
     end
@@ -264,6 +271,7 @@ defmodule RedixTest do
     end
 
     "OK" = Redix.command!(c, ["SET", "bang_errors", "foo"])
+
     assert_raise Redix.Error, "ERR value is not an integer or out of range", fn ->
       Redix.command!(c, ["INCR", "bang_errors"])
     end
@@ -296,7 +304,7 @@ defmodule RedixTest do
   test "client suicide and reconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
 
-    capture_log fn ->
+    capture_log(fn ->
       assert {:ok, _} = Redix.command(c, ~w(QUIT))
 
       # When the socket is closed, we reply with {:error, closed}. We sleep so
@@ -309,7 +317,7 @@ defmodule RedixTest do
       # Redix retries the first reconnection after 500ms, and we waited 100 already.
       :timer.sleep(500)
       assert {:ok, "PONG"} = Redix.command(c, ~w(PING))
-    end
+    end)
   end
 
   @tag :no_setup
@@ -327,44 +335,56 @@ defmodule RedixTest do
   test "mid-command disconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
 
-    capture_log fn ->
-      {_pid, ref} = Process.spawn(fn ->
-        # BLPOP with a timeout of 0 blocks indefinitely
-        assert Redix.command(c, ~w(BLPOP mid_command_disconnection 0)) ==
-               {:error, %ConnectionError{reason: :disconnected}}
-      end, [:monitor, :link])
+    capture_log(fn ->
+      {_pid, ref} =
+        Process.spawn(
+          fn ->
+            # BLPOP with a timeout of 0 blocks indefinitely
+            assert Redix.command(c, ~w(BLPOP mid_command_disconnection 0)) ==
+                     {:error, %ConnectionError{reason: :disconnected}}
+          end,
+          [:monitor, :link]
+        )
 
       Redix.command!(c, ~w(QUIT))
       assert_receive {:DOWN, ^ref, _, _, _}, 200
-    end
+    end)
   end
 
   @tag :no_setup
   test "timing out right after the connection drops" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
-    capture_log fn ->
+
+    capture_log(fn ->
       Redix.command!(c, ~w(QUIT))
-      assert Redix.command(c, ~w(PING), timeout: 0) == {:error, %ConnectionError{reason: :timeout}}
+      error = %ConnectionError{reason: :timeout}
+      assert Redix.command(c, ~w(PING), timeout: 0) == {:error, error}
       refute_receive {_ref, _message}
-    end
+    end)
   end
 
   @tag :no_setup
   test "no leaking messages when timeout happen at the same time as disconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
 
-    capture_log fn ->
-      {_pid, ref} = Process.spawn(fn ->
-        assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, %ConnectionError{reason: :timeout}}
-        # The fact that we timed out should be respected here, even if the
-        # connection is killed (no {:error, :disconnected} message should
-        # arrive).
-        refute_receive {_ref, _message}
-      end, [:link, :monitor])
+    capture_log(fn ->
+      {_pid, ref} =
+        Process.spawn(
+          fn ->
+            error = %ConnectionError{reason: :timeout}
+            assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, error}
+
+            # The fact that we timed out should be respected here, even if the
+            # connection is killed (no {:error, :disconnected} message should
+            # arrive).
+            refute_receive {_ref, _message}
+          end,
+          [:link, :monitor]
+        )
 
       Redix.command!(c, ~w(QUIT))
       assert_receive {:DOWN, ^ref, _, _, _}, 200
-    end
+    end)
   end
 
   @tag :no_setup
@@ -372,10 +392,10 @@ defmodule RedixTest do
     {:ok, c} = Redix.start_link([host: @host, port: @port], exit_on_disconnection: true)
     Process.flag(:trap_exit, true)
 
-    capture_log fn ->
+    capture_log(fn ->
       Redix.command!(c, ~w(QUIT))
       assert_receive {:EXIT, ^c, %ConnectionError{reason: :tcp_closed}}
-    end
+    end)
   end
 
   @tag :no_setup
@@ -383,18 +403,24 @@ defmodule RedixTest do
     default_spec = %{
       id: Redix,
       start: {Redix, :start_link, [[], []]},
-      type: :worker,
+      type: :worker
     }
+
     assert Redix.child_spec([]) == default_spec
     assert Redix.child_spec([[]]) == default_spec
     assert Redix.child_spec([[], []]) == default_spec
 
     assert Redix.child_spec(["redis://localhost"]) ==
-           Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+             Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+
     assert Redix.child_spec(["redis://localhost", []]) ==
-           Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+             Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
 
     assert Redix.child_spec(["redis://localhost", [name: :redix]]) ==
-           Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", [name: :redix]]})
+             Map.put(default_spec, :start, {
+               Redix,
+               :start_link,
+               ["redis://localhost", [name: :redix]]
+             })
   end
 end

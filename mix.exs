@@ -26,8 +26,8 @@ defmodule Redix.Mixfile do
         main: "Redix",
         source_ref: "v#{@version}",
         source_url: @repo_url,
-        extras: ["README.md", "pages/Reconnections.md", "pages/Real-world usage.md"],
-      ],
+        extras: ["README.md", "pages/Reconnections.md", "pages/Real-world usage.md"]
+      ]
     ]
   end
 
@@ -39,14 +39,14 @@ defmodule Redix.Mixfile do
     [
       maintainers: ["Andrea Leopardi", "Aleksei Magusev"],
       licenses: ["MIT"],
-      links: %{"GitHub" => @repo_url},
+      links: %{"GitHub" => @repo_url}
     ]
   end
 
   defp deps() do
     deps = [
       {:connection, "~> 1.0"},
-      {:ex_doc, "~> 0.15", only: :dev},
+      {:ex_doc, "~> 0.15", only: :dev}
     ]
 
     if stream_data?() do

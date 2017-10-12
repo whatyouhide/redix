@@ -3,10 +3,7 @@ defmodule Redix.ProtocolTest do
 
   import Redix.TestHelpers, only: [parse_with_continuations: 1, parse_with_continuations: 2]
 
-  alias Redix.{
-    Error,
-    Protocol.ParseError,
-  }
+  alias Redix.{Error, Protocol.ParseError}
 
   doctest Redix.Protocol
 
@@ -62,13 +59,16 @@ defmodule Redix.ProtocolTest do
       assert parse("- Error message \r\n") == {:ok, %Error{message: " Error message "}, ""}
       assert parse("-üniçø∂e\r\n") == {:ok, %Error{message: "üniçø∂e"}, ""}
 
-      assert parse_with_continuations(["-", "Err", "or", "\r\nrest"]) == {:ok, %Error{message: "Error"}, "rest"}
-      assert parse_with_continuations(["-Error\r", "\nrest"]) == {:ok, %Error{message: "Error"}, "rest"}
+      error = %Error{message: "Error"}
+      assert parse_with_continuations(["-", "Err", "or", "\r\nrest"]) == {:ok, error, "rest"}
+
+      error = %Error{message: "Error"}
+      assert parse_with_continuations(["-Error\r", "\nrest"]) == {:ok, error, "rest"}
     end
 
     test "integers" do
       assert parse(":42\r\n") == {:ok, 42, ""}
-      assert parse(":1234567890\r\n") == {:ok, 1234567890, ""}
+      assert parse(":1234567890\r\n") == {:ok, 1_234_567_890, ""}
       assert parse(":-100\r\n") == {:ok, -100, ""}
       assert parse(":0\r\nrest") == {:ok, 0, "rest"}
 
@@ -131,9 +131,14 @@ defmodule Redix.ProtocolTest do
       arr = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-ERR Bar\r\n"
       assert parse(arr) == {:ok, [[1, 2, 3], ["Foo", %Error{message: "ERR Bar"}]], ""}
 
-      assert parse_with_continuations(["*", "1\r", "\n", "+OK", "\r\nrest"]) == {:ok, ["OK"], "rest"}
-      assert parse_with_continuations(["*2", "\r\n*1", "\r\n", "+", "OK\r\n", ":1", "\r\n"]) == {:ok, [["OK"], 1], ""}
-      assert parse_with_continuations(["*2\r\n+OK\r\n", "+OK\r\nrest"]) == {:ok, ~w(OK OK), "rest"}
+      payload = ["*", "1\r", "\n", "+OK", "\r\nrest"]
+      assert parse_with_continuations(payload) == {:ok, ["OK"], "rest"}
+
+      payload = ["*2", "\r\n*1", "\r\n", "+", "OK\r\n", ":1", "\r\n"]
+      assert parse_with_continuations(payload) == {:ok, [["OK"], 1], ""}
+
+      payload = ["*2\r\n+OK\r\n", "+OK\r\nrest"]
+      assert parse_with_continuations(payload) == {:ok, ~w(OK OK), "rest"}
     end
 
     test "parse/1: raising when the binary value has no type specifier" do

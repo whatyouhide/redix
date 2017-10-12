@@ -6,28 +6,35 @@ defmodule Redix.Utils do
   @redis_opts [:host, :port, :password, :database]
   @redis_default_opts [
     host: "localhost",
-    port: 6379,
+    port: 6379
   ]
 
-  @redix_behaviour_opts [:socket_opts, :sync_connect, :backoff_initial, :backoff_max, :log, :exit_on_disconnection]
+  @redix_behaviour_opts [
+    :socket_opts,
+    :sync_connect,
+    :backoff_initial,
+    :backoff_max,
+    :log,
+    :exit_on_disconnection
+  ]
   @redix_default_behaviour_opts [
     socket_opts: [],
     sync_connect: false,
     backoff_initial: 500,
-    backoff_max: 30_000,
+    backoff_max: 30000,
     log: [],
-    exit_on_disconnection: false,
+    exit_on_disconnection: false
   ]
 
   @log_default_opts [
     disconnection: :error,
     failed_connection: :error,
-    reconnection: :info,
+    reconnection: :info
   ]
 
   @default_timeout 5000
 
-  @spec sanitize_starting_opts(Keyword.t, Keyword.t) :: {Keyword.t, Keyword.t}
+  @spec sanitize_starting_opts(Keyword.t(), Keyword.t()) :: {Keyword.t(), Keyword.t()}
   def sanitize_starting_opts(redis_opts, other_opts)
       when is_list(redis_opts) and is_list(other_opts) do
     check_redis_opts(redis_opts)
@@ -40,27 +47,30 @@ defmodule Redix.Utils do
     redis_opts = Keyword.merge(@redis_default_opts, redis_opts)
     redix_behaviour_opts = Keyword.merge(@redix_default_behaviour_opts, redix_behaviour_opts)
 
-    redix_behaviour_opts = Keyword.update!(redix_behaviour_opts, :log, fn log_opts ->
-      unless Keyword.keyword?(log_opts) do
-        raise ArgumentError, "the :log option must be a keyword list of {action, level}, got: #{inspect(log_opts)}"
-      end
+    redix_behaviour_opts =
+      Keyword.update!(redix_behaviour_opts, :log, fn log_opts ->
+        unless Keyword.keyword?(log_opts) do
+          raise ArgumentError,
+                "the :log option must be a keyword list of {action, level}, " <>
+                  "got: #{inspect(log_opts)}"
+        end
 
-      Keyword.merge(@log_default_opts, log_opts)
-    end)
+        Keyword.merge(@log_default_opts, log_opts)
+      end)
 
     redix_opts = Keyword.merge(redix_behaviour_opts, redis_opts)
 
     {redix_opts, connection_opts}
   end
 
-  @spec connect(Keyword.t) :: {:ok, :gen_tcp.socket} | {:error, term} | {:stop, term, %{}}
+  @spec connect(Keyword.t()) :: {:ok, :gen_tcp.socket()} | {:error, term} | {:stop, term, %{}}
   def connect(opts) do
     host = opts |> Keyword.fetch!(:host) |> String.to_charlist()
     port = Keyword.fetch!(opts, :port)
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
     timeout = opts[:timeout] || @default_timeout
 
-    with {:ok, socket} <-:gen_tcp.connect(host, port, socket_opts, timeout),
+    with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(socket) do
       result =
         with :ok <- if(opts[:password], do: auth(socket, opts[:password]), else: :ok),
@@ -74,7 +84,7 @@ defmodule Redix.Utils do
     end
   end
 
-  @spec format_host(Redix.Connection.state) :: String.t
+  @spec format_host(Redix.Connection.state()) :: String.t()
   def format_host(%{opts: opts} = _state) do
     "#{opts[:host]}:#{opts[:port]}"
   end
@@ -90,18 +100,20 @@ defmodule Redix.Utils do
   defp check_redis_opts(opts) when is_list(opts) do
     Enum.each(opts, fn {option, _value} ->
       unless option in @redis_opts do
-        raise ArgumentError, "unknown Redis connection option: #{inspect(option)}. " <>
-                             "The first argument to start_link/1 should only " <>
-                             "contain Redis-specific options (host, port, " <>
-                             "password, database)"
+        raise ArgumentError,
+              "unknown Redis connection option: #{inspect(option)}. " <>
+                "The first argument to start_link/1 should only " <>
+                "contain Redis-specific options (host, port, " <> "password, database)"
       end
     end)
 
     case Keyword.get(opts, :port) do
       port when is_nil(port) or is_integer(port) ->
         :ok
+
       other ->
-        raise ArgumentError, "expected an integer as the value of the :port option, got: #{inspect(other)}"
+        raise ArgumentError,
+              "expected an integer as the value of the :port option, got: #{inspect(other)}"
     end
   end
 
@@ -121,14 +133,18 @@ defmodule Redix.Utils do
 
   defp recv_ok_response(socket, continuation) do
     with {:ok, data} <- :gen_tcp.recv(socket, 0) do
-      parser = continuation || &Redix.Protocol.parse/1
+      parser = continuation || (&Redix.Protocol.parse/1)
+
       case parser.(data) do
         {:ok, "OK", ""} ->
           :ok
+
         {:ok, %Redix.Error{} = error, ""} ->
           {:error, error}
+
         {:ok, _response, tail} when byte_size(tail) > 0 ->
           {:error, :extra_bytes_after_reply}
+
         {:continuation, continuation} ->
           recv_ok_response(socket, continuation)
       end

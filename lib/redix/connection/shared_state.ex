@@ -3,43 +3,41 @@ defmodule Redix.Connection.SharedState do
 
   use GenServer
 
-  @type client :: {:commands, reference, GenServer.from, pos_integer}
+  @type client :: {:commands, reference, GenServer.from(), pos_integer}
 
   ## GenServer state
 
-  defstruct [
-    clients_queue: :queue.new,
-    timed_out_requests: MapSet.new,
-  ]
+  defstruct clients_queue: :queue.new(),
+            timed_out_requests: MapSet.new()
 
   ## Public API
 
-  @spec start_link() :: GenServer.on_start
+  @spec start_link() :: GenServer.on_start()
   def start_link() do
     GenServer.start_link(__MODULE__, nil)
   end
 
-  @spec enqueue(GenServer.server, client) :: :ok
+  @spec enqueue(GenServer.server(), client) :: :ok
   def enqueue(pid, client) do
     GenServer.cast(pid, {:enqueue, client})
   end
 
-  @spec dequeue(GenServer.server) :: {boolean, client}
+  @spec dequeue(GenServer.server()) :: {boolean, client}
   def dequeue(pid) do
     GenServer.call(pid, :dequeue)
   end
 
-  @spec add_timed_out_request(GenServer.server, reference) :: :ok
+  @spec add_timed_out_request(GenServer.server(), reference) :: :ok
   def add_timed_out_request(pid, request_id) do
     GenServer.call(pid, {:add_timed_out_request, request_id})
   end
 
-  @spec cancel_timed_out_request(GenServer.server, reference) :: :ok
+  @spec cancel_timed_out_request(GenServer.server(), reference) :: :ok
   def cancel_timed_out_request(pid, request_id) do
     GenServer.call(pid, {:cancel_timed_out_request, request_id})
   end
 
-  @spec disconnect_clients_and_stop(GenServer.server) :: :ok
+  @spec disconnect_clients_and_stop(GenServer.server()) :: :ok
   def disconnect_clients_and_stop(pid) do
     GenServer.call(pid, :disconnect_clients_and_stop)
   end
@@ -62,9 +60,11 @@ defmodule Redix.Connection.SharedState do
 
   # Returns {timed_out_request?, client}.
   def handle_call(:dequeue, _from, state) do
-    {{:value, {:commands, request_id, _from, _ncommands} = client}, new_queue} = :queue.out(state.clients_queue)
+    {{:value, {:commands, request_id, _from, _ncommands} = client}, new_queue} =
+      :queue.out(state.clients_queue)
 
-    {timed_out_request?, new_timed_out_requests} = pop_from_set(state.timed_out_requests, request_id)
+    {timed_out_request?, new_timed_out_requests} =
+      pop_from_set(state.timed_out_requests, request_id)
 
     state = %{state | clients_queue: new_queue, timed_out_requests: new_timed_out_requests}
     {:reply, {timed_out_request?, client}, state}
@@ -77,7 +77,8 @@ defmodule Redix.Connection.SharedState do
       # the new set) because this process is going to die at the end of this
       # function anyways.
       unless MapSet.member?(state.timed_out_requests, request_id) do
-        Connection.reply(from, {request_id, {:error, %Redix.ConnectionError{reason: :disconnected}}})
+        reply = {request_id, {:error, %Redix.ConnectionError{reason: :disconnected}}}
+        Connection.reply(from, reply)
       end
     end)
 

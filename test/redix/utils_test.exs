@@ -21,6 +21,7 @@ defmodule Redix.UtilsTest do
     end
 
     message = "expected an integer as the value of the :port option, got: %{}"
+
     assert_raise ArgumentError, message, fn ->
       sanitize_starting_opts([port: %{}], [])
     end

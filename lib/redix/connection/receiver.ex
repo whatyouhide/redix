@@ -8,27 +8,25 @@ defmodule Redix.Connection.Receiver do
 
   ## GenServer state
 
-  defstruct [
-    # The process that sends stuff to the socket and that spawns this process
-    sender: nil,
-    # The TCP socket, which should be passive when given to this process
-    socket: nil,
-    # The parsing continuation returned by Redix.Protocol
-    continuation: nil,
-    # The client that we'll need to reply to once the current continuation is done
-    current_client: nil,
-    # The shared state process
-    shared_state: nil,
-  ]
+  # sender: The process that sends stuff to the socket and that spawns this process
+  # socket: The TCP socket, which should be passive when given to this process
+  # continuation: The parsing continuation returned by Redix.Protocol
+  # current_client: The client that we'll need to reply to once the current continuation is done
+  # shared_state: The shared state process
+  defstruct sender: nil,
+            socket: nil,
+            continuation: nil,
+            current_client: nil,
+            shared_state: nil
 
   ## Public API
 
-  @spec start_link(Keyword.t) :: GenServer.on_start
+  @spec start_link(Keyword.t()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
-  @spec stop(GenServer.server) :: :ok
+  @spec stop(GenServer.server()) :: :ok
   def stop(pid) do
     GenServer.cast(pid, :stop)
   end
@@ -72,25 +70,33 @@ defmodule Redix.Connection.Receiver do
   end
 
   defp new_data(%{continuation: nil} = state, data) do
-    {timed_out_request?, {:commands, request_id, from, ncommands}} = client = SharedState.dequeue(state.shared_state)
+    {timed_out_request?, {:commands, request_id, from, ncommands}} =
+      client = SharedState.dequeue(state.shared_state)
+
     case Protocol.parse_multi(data, ncommands) do
       {:ok, resp, rest} ->
         unless timed_out_request? do
           Connection.reply(from, {request_id, format_resp(resp)})
         end
+
         new_data(%{state | continuation: nil}, rest)
+
       {:continuation, cont} ->
         %{state | current_client: client, continuation: cont}
     end
   end
 
-  defp new_data(%{current_client: {timed_out_request?, {:commands, request_id, from, _ncommands}}} = state, data) do
+  defp new_data(%{current_client: current_client} = state, data) do
+    {timed_out_request?, {:commands, request_id, from, _ncommands}} = current_client
+
     case state.continuation.(data) do
       {:ok, resp, rest} ->
         unless timed_out_request? do
           Connection.reply(from, {request_id, format_resp(resp)})
         end
+
         new_data(%{state | continuation: nil, current_client: nil}, rest)
+
       {:continuation, cont} ->
         %{state | continuation: cont}
     end

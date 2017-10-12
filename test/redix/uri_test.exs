@@ -6,6 +6,7 @@ defmodule Redix.URITest do
 
   test "opts_from_uri/1: invalid scheme" do
     message = "expected scheme to be redis://, got: foo://"
+
     assert_raise URIError, message, fn ->
       opts_from_uri("foo://example.com")
     end

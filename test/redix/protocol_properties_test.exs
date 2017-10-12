@@ -5,9 +5,7 @@ if Code.ensure_compiled?(ExUnitProperties) do
 
     import Redix.TestHelpers, only: [parse_with_continuations: 1]
 
-    alias Redix.{
-      Error,
-    }
+    alias Redix.{Error}
 
     describe "parse/1 (with split input)" do
       property "simple strings" do
@@ -23,8 +21,13 @@ if Code.ensure_compiled?(ExUnitProperties) do
         check all error_message <- string(:alphanumeric),
                   split_command <- random_splits("-#{error_message}\r\n"),
                   split_command_with_rest = append_to_last(split_command, "rest") do
-          assert parse_with_continuations(split_command) == {:ok, %Error{message: error_message}, ""}
-          assert parse_with_continuations(split_command_with_rest) == {:ok, %Error{message: error_message}, "rest"}
+          error = %Error{message: error_message}
+
+          assert parse_with_continuations(split_command) == {:ok, error, ""}
+
+          error = %Error{message: error_message}
+
+          assert parse_with_continuations(split_command_with_rest) == {:ok, error, "rest"}
         end
       end
 

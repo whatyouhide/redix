@@ -8,7 +8,7 @@ defmodule Redix.URI do
     defexception [:message]
   end
 
-  @spec opts_from_uri(binary) :: Keyword.t
+  @spec opts_from_uri(binary) :: Keyword.t()
   def opts_from_uri(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
@@ -16,12 +16,12 @@ defmodule Redix.URI do
       raise URIError, message: "expected scheme to be redis://, got: #{scheme}://"
     end
 
-    reject_nils([
+    reject_nils(
       host: host,
       port: port,
       password: password(uri),
-      database: database(uri),
-    ])
+      database: database(uri)
+    )
   end
 
   defp password(%URI{userinfo: nil}) do
