@@ -127,6 +127,8 @@ defmodule Redix do
       that are passed to `:gen_tcp.connect/4` when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
       overridden by Redix so that it functions properly. Defaults to `[]`.
+    * `:timeout` - (integer) connection timeout (in milliseconds) also directly
+      passed to `:gen_tcp.connect/4`. Defaults to `5000`.
     * `:sync_connect` - (boolean) decides whether Redix should initiate the TCP
       connection to the Redis server *before* or *after* returning from
       `start_link/2`. This option also changes some reconnection semantics; read
