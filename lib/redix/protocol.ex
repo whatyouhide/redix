@@ -36,6 +36,7 @@ defmodule Redix.Protocol do
 
   """
   @spec pack([binary]) :: iodata
+  @callback pack([binary]) :: iodata
   def pack(items) when is_list(items) do
     {packed, size} =
       Enum.map_reduce(items, 0, fn item, acc ->
@@ -67,6 +68,7 @@ defmodule Redix.Protocol do
 
   """
   @spec parse(binary) :: on_parse(redis_value)
+  @callback parse(binary) :: on_parse(redis_value)
   def parse(data)
 
   def parse("+" <> rest), do: parse_simple_string(rest)
@@ -99,6 +101,7 @@ defmodule Redix.Protocol do
 
   """
   @spec parse_multi(binary, non_neg_integer) :: on_parse([redis_value])
+  @callback parse_multi(binary, non_neg_integer) :: on_parse([redis_value])
   def parse_multi(data, nelems)
 
   # We treat the case when we have just one element to parse differently as it's

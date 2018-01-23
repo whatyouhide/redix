@@ -30,17 +30,21 @@ defmodule Redix.Connection do
   ## Public API
 
   @spec start_link(Keyword.t(), Keyword.t()) :: GenServer.on_start()
+  @callback start_link(Keyword.t(), Keyword.t()) :: GenServer.on_start()
   def start_link(redis_opts, other_opts) do
     {redix_opts, connection_opts} = Utils.sanitize_starting_opts(redis_opts, other_opts)
     Connection.start_link(__MODULE__, redix_opts, connection_opts)
   end
 
   @spec stop(GenServer.server(), timeout) :: :ok
+  @callback stop(GenServer.server(), timeout) :: :ok
   def stop(conn, timeout) do
     GenServer.stop(conn, :normal, timeout)
   end
 
   @spec pipeline(GenServer.server(), [Redix.command()], timeout) ::
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
+  @callback pipeline(GenServer.server(), [Redix.command()], timeout) ::
           {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
   def pipeline(conn, commands, timeout) do
     request_id = make_ref()

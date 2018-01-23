@@ -35,6 +35,7 @@ defmodule Redix.Utils do
   @default_timeout 5000
 
   @spec sanitize_starting_opts(Keyword.t(), Keyword.t()) :: {Keyword.t(), Keyword.t()}
+  @callback sanitize_starting_opts(Keyword.t(), Keyword.t()) :: {Keyword.t(), Keyword.t()}
   def sanitize_starting_opts(redis_opts, other_opts)
       when is_list(redis_opts) and is_list(other_opts) do
     check_redis_opts(redis_opts)
@@ -64,6 +65,7 @@ defmodule Redix.Utils do
   end
 
   @spec connect(Keyword.t()) :: {:ok, :gen_tcp.socket()} | {:error, term} | {:stop, term, %{}}
+  @callback connect(Keyword.t()) :: {:ok, :gen_tcp.socket()} | {:error, term} | {:stop, term, %{}}
   def connect(opts) do
     host = opts |> Keyword.fetch!(:host) |> String.to_charlist()
     port = Keyword.fetch!(opts, :port)
@@ -85,6 +87,7 @@ defmodule Redix.Utils do
   end
 
   @spec format_host(Redix.Connection.state()) :: String.t()
+  @callback format_host(Redix.Connection.state()) :: String.t()
   def format_host(%{opts: opts} = _state) do
     "#{opts[:host]}:#{opts[:port]}"
   end

@@ -50,6 +50,7 @@ defmodule Redix.ConnectionError do
 
   @doc false
   @spec format_reason(term) :: binary
+  @callback format_reason(term) :: binary
   def format_reason(reason)
 
   # :inet.format_error/1 doesn't format :tcp_closed.
