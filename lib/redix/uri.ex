@@ -9,6 +9,7 @@ defmodule Redix.URI do
   end
 
   @spec opts_from_uri(binary) :: Keyword.t()
+  @callback opts_from_uri(binary) :: Keyword.t()
   def opts_from_uri(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 

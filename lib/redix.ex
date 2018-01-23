@@ -174,6 +174,7 @@ defmodule Redix do
 
   """
   @spec start_link(binary | Keyword.t(), Keyword.t()) :: GenServer.on_start()
+  @callback start_link(binary | Keyword.t(), Keyword.t()) :: GenServer.on_start()
   def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
   def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
@@ -199,6 +200,7 @@ defmodule Redix do
 
   """
   @spec stop(GenServer.server(), timeout) :: :ok
+  @callback stop(GenServer.server(), timeout) :: :ok
   def stop(conn, timeout \\ :infinity) do
     Redix.Connection.stop(conn, timeout)
   end
@@ -248,6 +250,8 @@ defmodule Redix do
   """
   @spec pipeline(GenServer.server(), [command], Keyword.t()) ::
           {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
+  @callback pipeline(GenServer.server(), [command], Keyword.t()) ::
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
@@ -291,6 +295,8 @@ defmodule Redix do
 
   """
   @spec pipeline!(GenServer.server(), [command], Keyword.t()) ::
+          [Redix.Protocol.redis_value()] | no_return
+  @callback pipeline!(GenServer.server(), [command], Keyword.t()) ::
           [Redix.Protocol.redis_value()] | no_return
   def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
@@ -348,6 +354,8 @@ defmodule Redix do
   """
   @spec command(GenServer.server(), command, Keyword.t()) ::
           {:ok, Redix.Protocol.redis_value()} | {:error, atom | Redix.Error.t()}
+  @callback command(GenServer.server(), command, Keyword.t()) ::
+          {:ok, Redix.Protocol.redis_value()} | {:error, atom | Redix.Error.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
@@ -397,6 +405,8 @@ defmodule Redix do
 
   """
   @spec command!(GenServer.server(), command, Keyword.t()) ::
+          Redix.Protocol.redis_value() | no_return
+  @callback command!(GenServer.server(), command, Keyword.t()) ::
           Redix.Protocol.redis_value() | no_return
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
