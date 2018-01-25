@@ -26,6 +26,7 @@ defmodule Redix.Connection do
             backoff_current: nil
 
   @backoff_exponent 1.5
+  @skip_reply ["CLIENT", "REPLY", "SKIP"]
 
   ## Public API
 
@@ -40,16 +41,18 @@ defmodule Redix.Connection do
     GenServer.stop(conn, :normal, timeout)
   end
 
-  @spec pipeline(GenServer.server(), [Redix.command()], timeout) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
-  def pipeline(conn, commands, timeout) do
+  @spec pipeline(GenServer.server(), [Redix.command()], boolean(), timeout) ::
+          {:ok, [Redix.Protocol.redis_value()]} | :ok | {:error, atom}
+  def pipeline(conn, commands, no_wait_for_reply, timeout) do
     request_id = make_ref()
 
     # All this try-catch dance is required in order to cleanly return {:error,
     # :timeout} on timeouts instead of exiting (which is what `GenServer.call/3`
     # does).
     try do
-      {^request_id, resp} = Connection.call(conn, {:commands, commands, request_id}, timeout)
+      {^request_id, resp} =
+        Connection.call(conn, {:commands, commands, no_wait_for_reply, request_id}, timeout)
+
       resp
     catch
       :exit, {:timeout, {:gen_server, :call, [^conn | _]}} ->
@@ -203,11 +206,11 @@ defmodule Redix.Connection do
   # When the socket is `nil`, that's a good way to tell we're disconnected.
   # We only handle {:commands, ...} because we need to reply with the
   # request_id and with the error.
-  def handle_call({:commands, _commands, request_id}, _from, %{socket: nil} = state) do
+  def handle_call({:commands, _commands, _, request_id}, _from, %{socket: nil} = state) do
     {:reply, {request_id, {:error, %ConnectionError{reason: :closed}}}, state}
   end
 
-  def handle_call({:commands, commands, request_id}, from, state) do
+  def handle_call({:commands, commands, false, request_id}, from, state) do
     :ok = SharedState.enqueue(state.shared_state, {:commands, request_id, from, length(commands)})
 
     data = Enum.map(commands, &Protocol.pack/1)
@@ -215,6 +218,20 @@ defmodule Redix.Connection do
     case :gen_tcp.send(state.socket, data) do
       :ok ->
         {:noreply, state}
+
+      {:error, reason} ->
+        {:disconnect, {:error, %ConnectionError{reason: reason}}, state}
+    end
+  end
+
+  # for no_wait_for_reply: true, report success immediately the send succeeds
+  def handle_call({:commands, commands, true, request_id}, _, state) do
+    commands_skipped_reply = [@skip_reply | Enum.intersperse(commands, @skip_reply)]
+    data = Enum.map(commands_skipped_reply, &Protocol.pack/1)
+
+    case :gen_tcp.send(state.socket, data) do
+      :ok ->
+        {:reply, {request_id, :ok}, state}
 
       {:error, reason} ->
         {:disconnect, {:error, %ConnectionError{reason: reason}}, state}

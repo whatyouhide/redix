@@ -104,6 +104,19 @@ reconnections.
 Redix doesn't support the Pub/Sub features of Redis. For that, there's
 [`redix_pubsub`][redix-pubsub].
 
+#### `no_wait_for_reply`
+
+If you don't want to wait for a reply from Redis, use the `no_wait_for_reply: true` option to `command/3`/`pipeline/3`. This uses the [`CLIENT REPLY SKIP`](https://redis.io/commands/client-reply) feature to instruct Redis to not send a reply at all. With this option, `command/3` and `pipeline/3` return `:ok`; the bang variants return `nil`.
+
+```elixir
+Redix.command(conn, ["SET", "mykey", "foo"], no_wait_for_reply: true)
+#=> :ok
+
+Redix.command!(conn, ["SET", "mykey", "foo"], no_wait_for_reply: true)
+#=> nil
+```
+In the case of a connection error, they behave as normal (returning `{:error, error}` with a `Redix.ConnectionError`), but you won't get any feedback for other errors (that is, errors returned by Redis in response to the command) — they'll just fail silently.
+
 ## Using Redix in the Real World™
 
 Redix is low-level, but it's still built to handle most things thrown at

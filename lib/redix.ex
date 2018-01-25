@@ -247,10 +247,16 @@ defmodule Redix do
 
   """
   @spec pipeline(GenServer.server(), [command], Keyword.t()) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
+          {:ok, [Redix.Protocol.redis_value()]} | :ok | {:error, atom}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
-    Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
+
+    Redix.Connection.pipeline(
+      conn,
+      commands,
+      opts[:no_wait_for_reply] || false,
+      opts[:timeout] || @default_timeout
+    )
   end
 
   @doc """
@@ -291,11 +297,14 @@ defmodule Redix do
 
   """
   @spec pipeline!(GenServer.server(), [command], Keyword.t()) ::
-          [Redix.Protocol.redis_value()] | no_return
+          [Redix.Protocol.redis_value()] | nil | no_return
   def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, resp} ->
         resp
+
+      :ok ->
+        nil
 
       {:error, error} ->
         raise error
@@ -347,7 +356,7 @@ defmodule Redix do
 
   """
   @spec command(GenServer.server(), command, Keyword.t()) ::
-          {:ok, Redix.Protocol.redis_value()} | {:error, atom | Redix.Error.t()}
+          {:ok, Redix.Protocol.redis_value()} | :ok | {:error, atom | Redix.Error.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
@@ -355,6 +364,9 @@ defmodule Redix do
 
       {:ok, [resp]} ->
         {:ok, resp}
+
+      :ok ->
+        :ok
 
       {:error, _reason} = error ->
         error
@@ -397,11 +409,14 @@ defmodule Redix do
 
   """
   @spec command!(GenServer.server(), command, Keyword.t()) ::
-          Redix.Protocol.redis_value() | no_return
+          Redix.Protocol.redis_value() | nil | no_return
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
       {:ok, resp} ->
         resp
+
+      :ok ->
+        nil
 
       {:error, error} ->
         raise error

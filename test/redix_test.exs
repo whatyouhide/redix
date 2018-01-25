@@ -184,6 +184,11 @@ defmodule RedixTest do
     end
   end
 
+  test "command/2: no_wait_for_reply", %{conn: c} do
+    assert Redix.command(c, ~w(SET nowait_test_key foo), no_wait_for_reply: true) == :ok
+    assert Redix.command(c, ~w(GET nowait_test_key)) == {:ok, "foo"}
+  end
+
   test "pipeline/2", %{conn: c} do
     commands = [
       ["SET", "pipe", "10"],
@@ -259,6 +264,27 @@ defmodule RedixTest do
     end
   end
 
+  test "pipeline/2: no_wait_for_reply with multiple subcommands", %{conn: c} do
+    assert Redix.pipeline(
+             c,
+             [~w(PING), ~w(SET nowait_test_key_pipeline foo), ~w(PING)],
+             no_wait_for_reply: true
+           ) == :ok
+
+    assert Redix.pipeline(c, [~w(GET nowait_test_key_pipeline)]) == {:ok, ["foo"]}
+  end
+
+  test "pipeline/2: no_wait_for_reply with redis errors", %{conn: c} do
+    # The INCR command will fail; expect it to do so silently and without messing up the queue
+    assert Redix.pipeline(
+             c,
+             [~w(SET pipeline_errs_nowait foo), ~w(INCR pipeline_errs_nowait)],
+             no_wait_for_reply: true
+           ) == :ok
+
+    assert Redix.pipeline(c, [~w(GET pipeline_errs_nowait)]) == {:ok, ["foo"]}
+  end
+
   test "command!/2: simple commands", %{conn: c} do
     assert Redix.command!(c, ["PING"]) == "PONG"
     assert Redix.command!(c, ["SET", "bang", "foo"]) == "OK"
@@ -283,6 +309,11 @@ defmodule RedixTest do
     end
   end
 
+  test "command!/2: no_wait_for_reply", %{conn: c} do
+    assert Redix.command!(c, ~w(SET nowait_test_key_bang foo), no_wait_for_reply: true) == nil
+    assert Redix.command!(c, ~w(GET nowait_test_key_bang)) == "foo"
+  end
+
   test "pipeline!/2: simple commands", %{conn: c} do
     assert Redix.pipeline!(c, [~w(SET ppbang foo), ~w(GET ppbang)]) == ~w(OK foo)
   end
@@ -298,6 +329,16 @@ defmodule RedixTest do
     assert_raise Redix.ConnectionError, ":timeout", fn ->
       Redix.pipeline!(c, [["PING"]], timeout: 0)
     end
+  end
+
+  test "pipeline!/2: no_wait_for_reply with multiple subcommands", %{conn: c} do
+    assert Redix.pipeline!(
+             c,
+             [~w(PING), ~w(SET nowait_test_key_bang foo), ~w(PING)],
+             no_wait_for_reply: true
+           ) == nil
+
+    assert Redix.pipeline!(c, [~w(GET nowait_test_key_bang)]) == ["foo"]
   end
 
   @tag :no_setup
