@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.7.0
+
+* Add `Redix.child_spec/1` for use with the child spec changes in Elixir 1.5.
+* Remove `Redix.format_error/1`.
+* Drop support for Elixir < 1.3.
+
 ## v0.6.1
 
 * Fix some deprecation warnings around `String.to_char_list/1`.
