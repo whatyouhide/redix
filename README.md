@@ -2,6 +2,7 @@
 
 [![Build Status](https://travis-ci.org/whatyouhide/redix.svg?branch=master)](https://travis-ci.org/whatyouhide/redix)
 [![Hex.pm](https://img.shields.io/hexpm/v/redix.svg)](https://hex.pm/packages/redix)
+[![Open Source Helpers](https://www.codetriage.com/whatyouhide/redix/badges/users.svg)](https://www.codetriage.com/whatyouhide/redix)
 
 > Superfast, pipelined, resilient Redis client for Elixir.
 
