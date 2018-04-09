@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.7.1
+
+* Add support for Unix domain sockets by passing `host: {:local, path}`.
+
 ## v0.7.0
 
 * Add `Redix.child_spec/1` for use with the child spec changes in Elixir 1.5.
