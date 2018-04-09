@@ -11,7 +11,7 @@ defmodule Redix.UtilsTest do
     redis_opts = [host: "foo.com"]
     other_opts = [backoff_max: 0, sync_connect: true, name: :redix]
     assert {redix_opts, connection_opts} = sanitize_starting_opts(redis_opts, other_opts)
-    assert redix_opts[:host] == "foo.com"
+    assert redix_opts[:host] == 'foo.com'
     assert redix_opts[:backoff_max] == 0
     assert redix_opts[:sync_connect] == true
     assert connection_opts[:name] == :redix

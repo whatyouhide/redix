@@ -4,10 +4,6 @@ defmodule Redix.Utils do
   @socket_opts [:binary, active: false]
 
   @redis_opts [:host, :port, :password, :database]
-  @redis_default_opts [
-    host: "localhost",
-    port: 6379
-  ]
 
   @redix_behaviour_opts [
     :socket_opts,
@@ -17,6 +13,7 @@ defmodule Redix.Utils do
     :log,
     :exit_on_disconnection
   ]
+
   @redix_default_behaviour_opts [
     socket_opts: [],
     sync_connect: false,
@@ -44,7 +41,7 @@ defmodule Redix.Utils do
     # Redix (e.g., the backoff time).
     {redix_behaviour_opts, connection_opts} = Keyword.split(other_opts, @redix_behaviour_opts)
 
-    redis_opts = Keyword.merge(@redis_default_opts, redis_opts)
+    redis_opts = sanitize_redis_opts(redis_opts)
     redix_behaviour_opts = Keyword.merge(@redix_default_behaviour_opts, redix_behaviour_opts)
 
     redix_behaviour_opts =
@@ -63,9 +60,29 @@ defmodule Redix.Utils do
     {redix_opts, connection_opts}
   end
 
+  defp sanitize_redis_opts(opts) do
+    {host, port} =
+      case {Keyword.get(opts, :host, "localhost"), Keyword.fetch(opts, :port)} do
+        {{:local, _unix_socket_path}, {:ok, port}} when port != 0 ->
+          raise ArgumentError,
+                "when using Unix domain sockets, the port must be 0, got: #{inspect(port)}"
+
+        {{:local, _unix_socket_path} = host, :error} ->
+          {host, 0}
+
+        {host, {:ok, port}} when is_binary(host) ->
+          {String.to_charlist(host), port}
+
+        {host, :error} when is_binary(host) ->
+          {String.to_charlist(host), 6379}
+      end
+
+    Keyword.merge(opts, host: host, port: port)
+  end
+
   @spec connect(Keyword.t()) :: {:ok, :gen_tcp.socket()} | {:error, term} | {:stop, term, %{}}
   def connect(opts) do
-    host = opts |> Keyword.fetch!(:host) |> String.to_charlist()
+    host = Keyword.fetch!(opts, :host)
     port = Keyword.fetch!(opts, :port)
     socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
     timeout = opts[:timeout] || @default_timeout
@@ -133,7 +150,7 @@ defmodule Redix.Utils do
 
   defp recv_ok_response(socket, continuation) do
     with {:ok, data} <- :gen_tcp.recv(socket, 0) do
-      parser = continuation || &Redix.Protocol.parse/1
+      parser = continuation || (&Redix.Protocol.parse/1)
 
       case parser.(data) do
         {:ok, "OK", ""} ->
