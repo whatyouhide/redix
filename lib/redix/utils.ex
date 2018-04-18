@@ -150,7 +150,7 @@ defmodule Redix.Utils do
 
   defp recv_ok_response(socket, continuation) do
     with {:ok, data} <- :gen_tcp.recv(socket, 0) do
-      parser = continuation || &Redix.Protocol.parse/1
+      parser = continuation || (&Redix.Protocol.parse/1)
 
       case parser.(data) do
         {:ok, "OK", ""} ->
