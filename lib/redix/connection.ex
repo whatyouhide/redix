@@ -41,7 +41,7 @@ defmodule Redix.Connection do
   end
 
   @spec pipeline(GenServer.server(), [Redix.command()], timeout) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
   def pipeline(conn, commands, timeout) do
     request_id = make_ref()
 

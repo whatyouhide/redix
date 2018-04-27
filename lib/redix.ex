@@ -247,7 +247,7 @@ defmodule Redix do
 
   """
   @spec pipeline(GenServer.server(), [command], Keyword.t()) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom}
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
