@@ -2,12 +2,11 @@ defmodule Redix.URITest do
   use ExUnit.Case, async: true
 
   import Redix.URI
-  alias Redix.URI.URIError
 
   test "opts_from_uri/1: invalid scheme" do
     message = "expected scheme to be redis://, got: foo://"
 
-    assert_raise URIError, message, fn ->
+    assert_raise ArgumentError, message, fn ->
       opts_from_uri("foo://example.com")
     end
   end
