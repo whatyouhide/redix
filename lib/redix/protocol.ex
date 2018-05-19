@@ -17,6 +17,7 @@ defmodule Redix.Protocol do
   @type on_parse(value) :: {:ok, value, binary} | {:continuation, (binary -> on_parse(value))}
 
   @crlf "\r\n"
+  @crlf_iodata [?\r, ?\n]
 
   @doc ~S"""
   Packs a list of Elixir terms to a Redis (RESP) array.
@@ -37,14 +38,17 @@ defmodule Redix.Protocol do
   """
   @spec pack([binary]) :: iodata
   def pack(items) when is_list(items) do
-    {packed, size} =
-      Enum.map_reduce(items, 0, fn item, acc ->
-        string = to_string(item)
-        packed_item = [?$, Integer.to_string(byte_size(string)), @crlf, string, @crlf]
-        {packed_item, acc + 1}
-      end)
+    pack(items, [], 0)
+  end
 
-    [?*, Integer.to_string(size), @crlf, packed]
+  defp pack([item | rest], acc, count) do
+    item = to_string(item)
+    new_acc = [acc, [?$, Integer.to_string(byte_size(item)), @crlf_iodata, item, @crlf_iodata]]
+    pack(rest, new_acc, count + 1)
+  end
+
+  defp pack([], acc, count) do
+    [?*, Integer.to_string(count), @crlf_iodata, acc]
   end
 
   @doc ~S"""
