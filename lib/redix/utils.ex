@@ -3,64 +3,52 @@ defmodule Redix.Utils do
 
   @socket_opts [:binary, active: false]
 
-  @redis_opts [:host, :port, :password, :database]
-
-  @redix_behaviour_opts [
-    :socket_opts,
-    :sync_connect,
-    :backoff_initial,
-    :backoff_max,
-    :log,
-    :exit_on_disconnection
-  ]
-
-  @redix_default_behaviour_opts [
-    socket_opts: [],
-    sync_connect: false,
-    backoff_initial: 500,
-    backoff_max: 30000,
-    log: [],
-    exit_on_disconnection: false
-  ]
-
   @log_default_opts [
     disconnection: :error,
     failed_connection: :error,
     reconnection: :info
   ]
 
+  @default_opts [
+    socket_opts: [],
+    sync_connect: false,
+    backoff_initial: 500,
+    backoff_max: 30000,
+    log: @log_default_opts,
+    exit_on_disconnection: false
+  ]
+
+  @allowed_redis_opts [:host, :port, :database, :password]
+
   @default_timeout 5000
 
-  @spec sanitize_starting_opts(Keyword.t(), Keyword.t()) :: {Keyword.t(), Keyword.t()}
-  def sanitize_starting_opts(redis_opts, other_opts)
-      when is_list(redis_opts) and is_list(other_opts) do
-    check_redis_opts(redis_opts)
+  @spec sanitize_starting_opts(keyword()) :: keyword()
+  def sanitize_starting_opts(opts) when is_list(opts) do
+    opts =
+      Enum.map(opts, fn
+        {:log, log_opts} ->
+          unless Keyword.keyword?(log_opts) do
+            raise ArgumentError,
+                  "the :log option must be a keyword list of {action, level}, " <>
+                    "got: #{inspect(log_opts)}"
+          end
 
-    # `connection_opts` are the opts to be passed to `Connection.start_link/3`.
-    # `redix_behaviour_opts` are the other options to tweak the behaviour of
-    # Redix (e.g., the backoff time).
-    {redix_behaviour_opts, connection_opts} = Keyword.split(other_opts, @redix_behaviour_opts)
+          Keyword.merge(@log_default_opts, log_opts)
 
-    redis_opts = sanitize_redis_opts(redis_opts)
-    redix_behaviour_opts = Keyword.merge(@redix_default_behaviour_opts, redix_behaviour_opts)
+        {opt, _value}
+        when not (opt in unquote(Keyword.keys(@default_opts) ++ @allowed_redis_opts)) ->
+          raise ArgumentError, "unknown option: #{inspect(opt)}"
 
-    redix_behaviour_opts =
-      Keyword.update!(redix_behaviour_opts, :log, fn log_opts ->
-        unless Keyword.keyword?(log_opts) do
-          raise ArgumentError,
-                "the :log option must be a keyword list of {action, level}, " <>
-                  "got: #{inspect(log_opts)}"
-        end
-
-        Keyword.merge(@log_default_opts, log_opts)
+        other ->
+          other
       end)
 
-    redix_opts = Keyword.merge(redix_behaviour_opts, redis_opts)
+    opts = sanitize_host_and_port(opts)
 
-    {redix_opts, connection_opts}
+    Keyword.merge(@default_opts, opts)
   end
 
-  defp sanitize_redis_opts(opts) do
+  defp sanitize_host_and_port(opts) do
     {host, port} =
       case {Keyword.get(opts, :host, "localhost"), Keyword.fetch(opts, :port)} do
         {{:local, _unix_socket_path}, {:ok, port}} when port != 0 ->
@@ -69,6 +57,10 @@ defmodule Redix.Utils do
 
         {{:local, _unix_socket_path} = host, :error} ->
           {host, 0}
+
+        {_host, {:ok, port}} when not is_integer(port) ->
+          raise ArgumentError,
+                "expected an integer as the value of the :port option, got: #{inspect(port)}"
 
         {host, {:ok, port}} when is_binary(host) ->
           {String.to_charlist(host), port}
@@ -111,30 +103,6 @@ defmodule Redix.Utils do
     with {:ok, opts} <- :inet.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
       [sndbuf: sndbuf, recbuf: recbuf, buffer: buffer] = opts
       :inet.setopts(socket, buffer: buffer |> max(sndbuf) |> max(recbuf))
-    end
-  end
-
-  defp check_redis_opts(opts) when is_list(opts) do
-    unless Keyword.keyword?(opts) do
-      raise ArgumentError, "expected a keyword list as options, got: #{inspect(opts)}"
-    end
-
-    Enum.each(opts, fn {option, _value} ->
-      unless option in @redis_opts do
-        raise ArgumentError,
-              "unknown Redis connection option: #{inspect(option)}. " <>
-                "The first argument to start_link/1 should only " <>
-                "contain Redis-specific options (host, port, " <> "password, database)"
-      end
-    end)
-
-    case Keyword.get(opts, :port) do
-      port when is_nil(port) or is_integer(port) ->
-        :ok
-
-      other ->
-        raise ArgumentError,
-              "expected an integer as the value of the :port option, got: #{inspect(other)}"
     end
   end
 

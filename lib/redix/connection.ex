@@ -31,8 +31,9 @@ defmodule Redix.Connection do
 
   @spec start_link(Keyword.t(), Keyword.t()) :: GenServer.on_start()
   def start_link(redis_opts, other_opts) do
-    {redix_opts, connection_opts} = Utils.sanitize_starting_opts(redis_opts, other_opts)
-    Connection.start_link(__MODULE__, redix_opts, connection_opts)
+    opts = Keyword.merge(redis_opts, other_opts)
+    {connection_opts, opts} = Keyword.split(opts, [:name, :timeout, :debug, :spawn_opt])
+    Connection.start_link(__MODULE__, Utils.sanitize_starting_opts(opts), connection_opts)
   end
 
   @spec stop(GenServer.server(), timeout) :: :ok
