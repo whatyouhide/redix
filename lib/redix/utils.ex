@@ -115,6 +115,10 @@ defmodule Redix.Utils do
   end
 
   defp check_redis_opts(opts) when is_list(opts) do
+    unless Keyword.keyword?(opts) do
+        raise ArgumentError, "expected a keyword list as options, got: #{inspect(opts)}"
+    end
+
     Enum.each(opts, fn {option, _value} ->
       unless option in @redis_opts do
         raise ArgumentError,
