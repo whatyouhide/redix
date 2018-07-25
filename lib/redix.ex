@@ -349,7 +349,8 @@ defmodule Redix do
 
   """
   @spec command(GenServer.server(), command, Keyword.t()) ::
-          {:ok, Redix.Protocol.redis_value()} | {:error, atom | Redix.Error.t()}
+          {:ok, Redix.Protocol.redis_value()}
+          | {:error, atom | Redix.Error.t() | Redix.ConnectionError.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} ->
