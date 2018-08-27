@@ -261,6 +261,10 @@ defmodule Redix.Connection do
     {:disconnect, {:error, %ConnectionError{reason: reason}}, state}
   end
 
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
   def terminate(reason, %{receiver: receiver, shared_state: shared_state} = _state) do
     if reason == :normal do
       :ok = GenServer.stop(receiver, :normal)
