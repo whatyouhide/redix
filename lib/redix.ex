@@ -183,7 +183,7 @@ defmodule Redix do
   end
 
   def start_link(redis_opts, other_opts) do
-    Redix.Connection.start_link(redis_opts, other_opts)
+    Redix.Connection.start_link(redis_opts ++ other_opts)
   end
 
   @doc """

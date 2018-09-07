@@ -18,7 +18,7 @@ defmodule Redix.Utils do
     exit_on_disconnection: false
   ]
 
-  @allowed_redis_opts [:host, :port, :database, :password]
+  @allowed_opts [:host, :port, :database, :password, :name] ++ Keyword.keys(@default_opts)
 
   @default_timeout 5000
 
@@ -35,8 +35,7 @@ defmodule Redix.Utils do
 
           Keyword.merge(@log_default_opts, log_opts)
 
-        {opt, _value}
-        when not (opt in unquote(Keyword.keys(@default_opts) ++ @allowed_redis_opts)) ->
+        {opt, _value} when not (opt in @allowed_opts) ->
           raise ArgumentError, "unknown option: #{inspect(opt)}"
 
         other ->

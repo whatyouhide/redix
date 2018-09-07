@@ -1,331 +1,271 @@
 defmodule Redix.Connection do
   @moduledoc false
 
-  use Connection
-
-  alias Redix.ConnectionError
-  alias Redix.Protocol
-  alias Redix.Utils
-  alias Redix.Connection.Receiver
-  alias Redix.Connection.SharedState
+  alias Redix.{ConnectionError, Protocol, SocketOwner, Utils}
 
   require Logger
 
-  @type state :: %__MODULE__{}
+  @behaviour :gen_statem
 
-  # socket: The TCP socket that holds the connection to Redis
-  # opts: Options passed when the connection is started
-  # receiver: The receiver process
-  # shared_state: The shared state store process
-  # backoff_current: The current backoff (used to compute the next backoff when reconnecting
-  #   with exponential backoff)
-  defstruct socket: nil,
-            opts: nil,
-            receiver: nil,
-            shared_state: nil,
-            backoff_current: nil
+  defstruct [
+    :opts,
+    :socket_owner,
+    :table,
+    :socket,
+    :backoff_current,
+    counter: 0
+  ]
 
   @backoff_exponent 1.5
 
   ## Public API
 
-  @spec start_link(Keyword.t(), Keyword.t()) :: GenServer.on_start()
-  def start_link(redis_opts, other_opts) do
-    opts = Keyword.merge(redis_opts, other_opts)
-    {connection_opts, opts} = Keyword.split(opts, [:name, :timeout, :debug, :spawn_opt])
-    Connection.start_link(__MODULE__, Utils.sanitize_starting_opts(opts), connection_opts)
+  def start_link(opts) when is_list(opts) do
+    opts = Utils.sanitize_starting_opts(opts)
+
+    case Keyword.pop(opts, :name) do
+      {nil, opts} ->
+        :gen_statem.start_link(__MODULE__, opts, [])
+
+      {atom, opts} when is_atom(atom) ->
+        :gen_statem.start_link({:local, atom}, __MODULE__, opts, [])
+
+      {{:global, _term} = tuple, opts} ->
+        :gen_statem.start_link(tuple, __MODULE__, opts, [])
+
+      {{:via, via_module, _term} = tuple, opts} when is_atom(via_module) ->
+        :gen_statem.start_link(tuple, __MODULE__, opts, [])
+
+      {other, _opts} ->
+        raise ArgumentError, """
+        expected :name option to be one of the following:
+
+          * nil
+          * atom
+          * {:global, term}
+          * {:via, module, term}
+
+        Got: #{inspect(other)}
+        """
+    end
   end
 
-  @spec stop(GenServer.server(), timeout) :: :ok
   def stop(conn, timeout) do
-    GenServer.stop(conn, :normal, timeout)
+    :gen_statem.stop(conn, :normal, timeout)
   end
 
-  @spec pipeline(GenServer.server(), [Redix.command()], timeout) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
   def pipeline(conn, commands, timeout) do
-    request_id = make_ref()
+    request_id = Process.monitor(conn)
 
-    # All this try-catch dance is required in order to cleanly return {:error,
-    # :timeout} on timeouts instead of exiting (which is what `GenServer.call/3`
-    # does).
-    try do
-      {^request_id, resp} = Connection.call(conn, {:commands, commands, request_id}, timeout)
-      resp
-    catch
-      :exit, {:timeout, {:gen_server, :call, [^conn | _]}} ->
-        Connection.call(conn, {:timed_out, request_id})
+    # We cast to the connection process knowing that it will reply at some point,
+    # either after roughly timeout or when a response is ready.
+    cast = {:pipeline, commands, _from = {self(), request_id}, timeout}
+    :ok = :gen_statem.cast(GenServer.whereis(conn), cast)
 
-        # We try to flush the response because it may have arrived before the
-        # connection processed the :timed_out message. In case it arrived, we
-        # notify the connection that it arrived (canceling the :timed_out
-        # message).
-        receive do
-          {ref, {^request_id, _resp}} when is_reference(ref) ->
-            Connection.call(conn, {:cancel_timed_out, request_id})
-        after
-          0 -> :ok
-        end
+    receive do
+      {^request_id, resp} ->
+        _ = Process.demonitor(request_id, [:flush])
+        resp
 
-        {:error, %ConnectionError{reason: :timeout}}
+      # TODO: is this right or should we crash?
+      {:DOWN, ^request_id, _, _, _} ->
+        {:error, %ConnectionError{reason: :disconnected}}
     end
   end
 
   ## Callbacks
 
-  @doc false
+  ## Init callbacks
+
+  @impl true
+  def callback_mode(), do: :state_functions
+
+  @impl true
   def init(opts) do
-    state = %__MODULE__{opts: opts}
+    queue_table = :ets.new(:queue, [:ordered_set, :public])
+    {:ok, socket_owner} = SocketOwner.start_link(self(), opts, queue_table)
+
+    data = %__MODULE__{opts: opts, table: queue_table, socket_owner: socket_owner}
 
     if opts[:sync_connect] do
-      sync_connect(state)
+      receive do
+        {:connected, ^socket_owner, socket} ->
+          {:ok, :connected, %__MODULE__{data | socket: socket}}
+
+        {:stopped, ^socket_owner, reason} ->
+          {:stop, %Redix.ConnectionError{reason: reason}}
+      end
     else
-      {:connect, :init, state}
+      {:ok, :connecting, data}
     end
   end
 
-  @doc false
-  def connect(info, state)
+  ## State functions
 
-  def connect(info, state) do
-    case Utils.connect(state.opts) do
-      {:ok, socket} ->
-        state = %{state | socket: socket}
-        {:ok, shared_state} = SharedState.start_link()
+  # "Disconnected" state: the connection is down and the socket owner is not alive.
 
-        case start_receiver_and_hand_socket(state.socket, shared_state) do
-          {:ok, receiver} ->
-            # If this is a reconnection attempt, log that we successfully
-            # reconnected.
-            if info == :backoff do
-              log(state, :reconnection, ["Reconnected to Redis (", Utils.format_host(state), ")"])
-            end
+  # We want to connect/reconnect. We start the socket owner process and then go in the :connecting
+  # state.
+  def disconnected({:timeout, :reconnect}, _timer_info, %__MODULE__{} = data) do
+    {:ok, socket_owner} = SocketOwner.start_link(self(), data.opts, data.table)
+    new_data = %{data | socket_owner: socket_owner}
+    {:next_state, :connecting, new_data}
+  end
 
-            {:ok, %{state | shared_state: shared_state, receiver: receiver}}
+  def disconnected({:timeout, {:client_timed_out, _counter}}, _from, _data) do
+    :keep_state_and_data
+  end
 
-          {:error, reason} ->
-            log(state, :failed_connection, [
-              "Failed to connect to Redis (",
-              Utils.format_host(state),
-              "): ",
-              Exception.message(%ConnectionError{reason: reason})
-            ])
+  def disconnected(:internal, {:notify_of_disconnection, _reason}, %__MODULE__{table: table}) do
+    fun = fn {_counter, from, _ncommands, timed_out?}, _acc ->
+      if not timed_out?, do: reply(from, {:error, %ConnectionError{reason: :disconnected}})
+    end
 
-            next_backoff =
-              calc_next_backoff(
-                state.backoff_current || state.opts[:backoff_initial],
-                state.opts[:backoff_max]
-              )
+    :ets.foldl(fun, nil, table)
+    :ets.delete_all_objects(table)
 
-            if state.opts[:exit_on_disconnection] do
-              {:stop, reason, state}
-            else
-              {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
-            end
-        end
+    :keep_state_and_data
+  end
 
-      {:error, reason} ->
-        log(state, :failed_connection, [
-          "Failed to connect to Redis (",
-          Utils.format_host(state),
-          "): ",
-          Exception.message(%ConnectionError{reason: reason})
-        ])
+  def disconnected(:cast, {:pipeline, _commands, from, _timeout}, _data) do
+    reply(from, {:error, %ConnectionError{reason: :closed}})
+    :keep_state_and_data
+  end
 
-        next_backoff =
-          calc_next_backoff(
-            state.backoff_current || state.opts[:backoff_initial],
-            state.opts[:backoff_max]
-          )
+  # This happens when there's a TCP send error. We close the socket right away, but we wait for
+  # the socket owner to die so that it can finish processing the data it's processing. When it's
+  # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
+  def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
+    log(data, :failed_connection, fn ->
+      [
+        "Disconnected from Redis (#{Utils.format_host(data)}): ",
+        Exception.message(%ConnectionError{reason: reason})
+      ]
+    end)
 
-        if state.opts[:exit_on_disconnection] do
-          {:stop, reason, state}
-        else
-          {:backoff, next_backoff, %{state | backoff_current: next_backoff}}
-        end
+    disconnect(data, reason)
+  end
 
-      {:stop, reason} ->
-        # {:stop, error} may be returned by Redix.Utils.connect/1 in case
-        # AUTH or SELECT fail (in that case, we don't want to try to reconnect
-        # anyways).
-        {:stop, reason, state}
+  def connecting(:info, {:connected, owner, socket}, %__MODULE__{socket_owner: owner} = data) do
+    if data.backoff_current do
+      log(data, :reconnection, fn -> "Reconnected to Redis (#{Utils.format_host(data)})" end)
+    end
+
+    data = %{data | socket: socket, backoff_current: nil}
+    {:next_state, :connected, %{data | socket: socket}}
+  end
+
+  def connecting(:cast, {:pipeline, _commands, _from, _timeout}, _data) do
+    {:keep_state_and_data, :postpone}
+  end
+
+  def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
+    # We log this when the socket owner stopped while connecting.
+    log(data, :failed_connection, fn ->
+      [
+        "Failed to connect to Redis (#{Utils.format_host(data)}): ",
+        Exception.message(%ConnectionError{reason: reason})
+      ]
+    end)
+
+    disconnect(data, reason)
+  end
+
+  def connecting({:timeout, {:client_timed_out, _counter}}, _from, _data) do
+    :keep_state_and_data
+  end
+
+  def connected(:cast, {:pipeline, commands, from, timeout}, data) do
+    {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
+
+    row = {counter, from, length(commands), _timed_out? = false}
+    :ets.insert(data.table, row)
+
+    case :gen_tcp.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
+      :ok ->
+        actions =
+          case timeout do
+            :infinity -> []
+            _other -> [{{:timeout, {:client_timed_out, counter}}, timeout, from}]
+          end
+
+        {:keep_state, data, actions}
+
+      {:error, _reason} ->
+        # The socket owner will get a TCP closed message at some point, so we just move to the
+        # disconnected state.
+        :ok = :gen_tcp.close(data.socket)
+        {:next_state, :disconnected}
     end
   end
 
-  @doc false
-  def disconnect(reason, state)
+  def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
+    log(data, :failed_connection, fn ->
+      [
+        "Disconnected from Redis (#{Utils.format_host(data)}): ",
+        Exception.message(%ConnectionError{reason: reason})
+      ]
+    end)
 
-  def disconnect({:error, %ConnectionError{} = error} = _error, state) do
-    log(state, :disconnection, [
-      "Disconnected from Redis (",
-      Utils.format_host(state),
-      "): ",
-      Exception.message(error)
-    ])
+    disconnect(data, reason)
+  end
 
-    :ok = :gen_tcp.close(state.socket)
+  def connected({:timeout, {:client_timed_out, counter}}, from, %__MODULE__{} = data) do
+    if _found? = :ets.update_element(data.table, counter, {4, _timed_out? = true}) do
+      reply(from, {:error, %ConnectionError{reason: :timeout}})
+    end
 
-    # state.receiver may be nil if we already processed the message where it
-    # notifies us it stopped. If it's not nil, it means we noticed the TCP error
-    # when sending data through the socket; in that case, we stop it manually
-    # (with cast, so that if the receiver already died we don't error out),
-    # flush all messages coming from it (because it may still have noticed the
-    # TCP failure and notified us), and remove it from the state.
-    state =
-      if state.receiver do
-        :ok = Receiver.stop(state.receiver)
-        :ok = flush_messages_from_receiver(state)
-        %{state | receiver: nil}
+    :keep_state_and_data
+  end
+
+  ## Helpers
+
+  defp reply({pid, request_id} = _from, reply) do
+    send(pid, {request_id, reply})
+  end
+
+  defp disconnect(_data, %Redix.Error{} = error) do
+    {:stop, error}
+  end
+
+  defp disconnect(data, reason) do
+    if data.opts[:exit_on_disconnection] do
+      {:stop, %ConnectionError{reason: reason}}
+    else
+      {backoff, data} = next_backoff(data)
+
+      actions = [
+        {:next_event, :internal, {:notify_of_disconnection, reason}},
+        {{:timeout, :reconnect}, backoff, nil}
+      ]
+
+      {:next_state, :disconnected, data, actions}
+    end
+  end
+
+  defp next_backoff(%__MODULE__{backoff_current: nil} = data) do
+    backoff_initial = data.opts[:backoff_initial]
+    {backoff_initial, %{data | backoff_current: backoff_initial}}
+  end
+
+  defp next_backoff(data) do
+    next_exponential_backoff = round(data.backoff_current * @backoff_exponent)
+
+    backoff_current =
+      if data.opts[:backoff_max] == :infinity do
+        next_exponential_backoff
       else
-        state
+        min(next_exponential_backoff, Keyword.fetch!(data.opts, :backoff_max))
       end
 
-    # We reply to clients in the queue, telling them we disconnected, and we sto
-    # the shared_state process.
-    :ok = SharedState.disconnect_clients_and_stop(state.shared_state)
-
-    state = %{
-      state
-      | socket: nil,
-        shared_state: nil,
-        backoff_current: state.opts[:backoff_initial]
-    }
-
-    if state.opts[:exit_on_disconnection] do
-      {:stop, error, state}
-    else
-      {:backoff, state.opts[:backoff_initial], state}
-    end
+    {backoff_current, %{data | backoff_current: backoff_current}}
   end
 
-  @doc false
-  def handle_call(operation, from, state)
-
-  # When the socket is `nil`, that's a good way to tell we're disconnected.
-  # We only handle {:commands, ...} because we need to reply with the
-  # request_id and with the error.
-  def handle_call({:commands, _commands, request_id}, _from, %{socket: nil} = state) do
-    {:reply, {request_id, {:error, %ConnectionError{reason: :closed}}}, state}
-  end
-
-  def handle_call({:commands, commands, request_id}, from, state) do
-    :ok = SharedState.enqueue(state.shared_state, {:commands, request_id, from, length(commands)})
-
-    data = Enum.map(commands, &Protocol.pack/1)
-
-    case :gen_tcp.send(state.socket, data) do
-      :ok ->
-        {:noreply, state}
-
-      {:error, reason} ->
-        {:disconnect, {:error, %ConnectionError{reason: reason}}, state}
-    end
-  end
-
-  # If the socket is nil, it means we're disconnected. We don't want to
-  # communicate with the shared_state because it's not alive anymore.
-  def handle_call({operation, _request_id}, _from, %{socket: nil} = state)
-      when operation in [:timed_out, :cancel_timed_out] do
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:timed_out, request_id}, _from, state) do
-    :ok = SharedState.add_timed_out_request(state.shared_state, request_id)
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:cancel_timed_out, request_id}, _from, state) do
-    :ok = SharedState.cancel_timed_out_request(state.shared_state, request_id)
-    {:reply, :ok, state}
-  end
-
-  @doc false
-  def handle_info(msg, state)
-
-  # Here and in the next handle_info/2 clause, we set the receiver to `nil`
-  # because if we're receiving this message, it means the receiver died
-  # peacefully by itself (so we don't want to communicate with it anymore, in
-  # any way, before reconnecting and restarting it).
-  def handle_info(
-        {:receiver, pid, {:tcp_closed, socket}},
-        %{receiver: pid, socket: socket} = state
-      ) do
-    state = %{state | receiver: nil}
-    {:disconnect, {:error, %ConnectionError{reason: :tcp_closed}}, state}
-  end
-
-  def handle_info(
-        {:receiver, pid, {:tcp_error, socket, reason}},
-        %{receiver: pid, socket: socket} = state
-      ) do
-    state = %{state | receiver: nil}
-    {:disconnect, {:error, %ConnectionError{reason: reason}}, state}
-  end
-
-  def terminate(reason, %{receiver: receiver, shared_state: shared_state} = _state) do
-    if reason == :normal do
-      :ok = GenServer.stop(receiver, :normal)
-      :ok = GenServer.stop(shared_state, :normal)
-    end
-  end
-
-  ## Helper functions
-
-  defp sync_connect(state) do
-    case Utils.connect(state.opts) do
-      {:ok, socket} ->
-        state = %{state | socket: socket}
-        {:ok, shared_state} = SharedState.start_link()
-
-        case start_receiver_and_hand_socket(state.socket, shared_state) do
-          {:ok, receiver} ->
-            state = %{state | shared_state: shared_state, receiver: receiver}
-            {:ok, state}
-
-          {:error, reason} ->
-            {:stop, %ConnectionError{reason: reason}}
-        end
-
-      {error_or_stop, reason} when error_or_stop in [:error, :stop] ->
-        {:stop, %ConnectionError{reason: reason}}
-    end
-  end
-
-  defp start_receiver_and_hand_socket(socket, shared_state) do
-    {:ok, receiver} =
-      Receiver.start_link(sender: self(), socket: socket, shared_state: shared_state)
-
-    # We activate the socket after transferring control to the receiver
-    # process, so that we don't get any :tcp_closed messages before
-    # transferring control.
-    with :ok <- :gen_tcp.controlling_process(socket, receiver),
-         :ok <- :inet.setopts(socket, active: :once),
-         do: {:ok, receiver}
-  end
-
-  defp flush_messages_from_receiver(%{receiver: receiver} = state) do
-    receive do
-      {:receiver, ^receiver, _msg} -> flush_messages_from_receiver(state)
-    after
-      0 -> :ok
-    end
-  end
-
-  defp calc_next_backoff(backoff_current, backoff_max) do
-    next_exponential_backoff = round(backoff_current * @backoff_exponent)
-
-    if backoff_max == :infinity do
-      next_exponential_backoff
-    else
-      min(next_exponential_backoff, backoff_max)
-    end
-  end
-
-  defp log(state, action, message) do
+  defp log(data, kind, message) do
     level =
-      state.opts
+      data.opts
       |> Keyword.fetch!(:log)
-      |> Keyword.fetch!(action)
+      |> Keyword.fetch!(kind)
 
     Logger.log(level, message)
   end

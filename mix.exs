@@ -46,6 +46,7 @@ defmodule Redix.Mixfile do
   defp deps() do
     deps = [
       {:connection, "~> 1.0"},
+      {:benchee, "~> 0.13.1"},
       {:ex_doc, "~> 0.15", only: :dev}
     ]
 

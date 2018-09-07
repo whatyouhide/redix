@@ -352,18 +352,6 @@ defmodule RedixTest do
   end
 
   @tag :no_setup
-  test "timing out right after the connection drops" do
-    {:ok, c} = Redix.start_link(host: @host, port: @port)
-
-    capture_log(fn ->
-      Redix.command!(c, ~w(QUIT))
-      error = %ConnectionError{reason: :timeout}
-      assert Redix.command(c, ~w(PING), timeout: 0) == {:error, error}
-      refute_receive {_ref, _message}
-    end)
-  end
-
-  @tag :no_setup
   test "no leaking messages when timeout happen at the same time as disconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
 
