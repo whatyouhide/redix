@@ -1,5 +1,6 @@
 defmodule Redix.ProtocolTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   import Redix.TestHelpers, only: [parse_with_continuations: 1, parse_with_continuations: 2]
 
@@ -33,79 +34,58 @@ defmodule Redix.ProtocolTest do
   describe "parse/1" do
     import Redix.Protocol, only: [parse: 1]
 
-    test "simple strings" do
-      assert parse("+OK\r\n") == {:ok, "OK", ""}
-      assert parse("+the foo is the bar\r\n") == {:ok, "the foo is the bar", ""}
-      assert parse("+\r\n") == {:ok, "", ""}
-      assert parse("+• º •\r\n") == {:ok, "• º •", ""}
-
-      # Whitespace
-      assert parse("+  \r\n") == {:ok, "  ", ""}
-      assert parse("+\r\r\n") == {:ok, "\r", ""}
-      assert parse("+\n\r\r\n") == {:ok, "\n\r", ""}
-      assert parse("+  stripme!  \r\n") == {:ok, "  stripme!  ", ""}
-
-      # Trailing stuff
-      assert parse("+foo\r\nbar") == {:ok, "foo", "bar"}
-
-      # Incomplete
-      assert parse_with_continuations(["+", "OK", "\r", "\nrest"]) == {:ok, "OK", "rest"}
-      assert parse_with_continuations(["+OK\r", "\nrest"]) == {:ok, "OK", "rest"}
+    property "simple strings" do
+      check all string <- string(:alphanumeric),
+                split_command <- random_splits("+#{string}\r\n"),
+                split_command_with_rest = append_to_last(split_command, "rest") do
+        assert parse_with_continuations(split_command) == {:ok, string, ""}
+        assert parse_with_continuations(split_command_with_rest) == {:ok, string, "rest"}
+      end
     end
 
-    test "errors" do
-      assert parse("-ERR Error!\r\n") == {:ok, %Error{message: "ERR Error!"}, ""}
-      assert parse("-\r\n") == {:ok, %Error{message: ""}, ""}
-      assert parse("- Error message \r\n") == {:ok, %Error{message: " Error message "}, ""}
-      assert parse("-üniçø∂e\r\n") == {:ok, %Error{message: "üniçø∂e"}, ""}
+    property "errors" do
+      check all error_message <- string(:alphanumeric),
+                split_command <- random_splits("-#{error_message}\r\n"),
+                split_command_with_rest = append_to_last(split_command, "rest") do
+        error = %Error{message: error_message}
 
-      error = %Error{message: "Error"}
-      assert parse_with_continuations(["-", "Err", "or", "\r\nrest"]) == {:ok, error, "rest"}
+        assert parse_with_continuations(split_command) == {:ok, error, ""}
 
-      error = %Error{message: "Error"}
-      assert parse_with_continuations(["-Error\r", "\nrest"]) == {:ok, error, "rest"}
+        error = %Error{message: error_message}
+
+        assert parse_with_continuations(split_command_with_rest) == {:ok, error, "rest"}
+      end
     end
 
-    test "integers" do
-      assert parse(":42\r\n") == {:ok, 42, ""}
-      assert parse(":1234567890\r\n") == {:ok, 1_234_567_890, ""}
-      assert parse(":-100\r\n") == {:ok, -100, ""}
-      assert parse(":0\r\nrest") == {:ok, 0, "rest"}
-
-      assert parse_with_continuations([":", "-", "1", "\r\n"]) == {:ok, -1, ""}
-      assert parse_with_continuations([":1\r", "\nrest"]) == {:ok, 1, "rest"}
-      assert parse_with_continuations([":1", "3", "\r\nrest"]) == {:ok, 13, "rest"}
-      assert parse_with_continuations([":-", "1", "3", "\r\nrest"]) == {:ok, -13, "rest"}
+    property "integers" do
+      check all int <- integer(),
+                split_command <- random_splits(":#{int}\r\n"),
+                split_command_with_rest = append_to_last(split_command, "rest") do
+        assert parse_with_continuations(split_command) == {:ok, int, ""}
+        assert parse_with_continuations(split_command_with_rest) == {:ok, int, "rest"}
+      end
     end
 
-    test "bulk strings" do
-      assert parse("$0\r\n\r\n") == {:ok, "", ""}
-      assert parse("$6\r\nfoobar\r\n") == {:ok, "foobar", ""}
+    property "bulk strings" do
+      check all bin <- binary(),
+                bin_size = byte_size(bin),
+                command = "$#{bin_size}\r\n#{bin}\r\n",
+                split_command <- random_splits(command),
+                split_command_with_rest = append_to_last(split_command, "rest") do
+        assert parse_with_continuations(split_command) == {:ok, bin, ""}
+        assert parse_with_continuations(split_command_with_rest) == {:ok, bin, "rest"}
+      end
 
-      # Unicode.
-      unicode_str = "ªº•¶æ"
-      byte_count = byte_size(unicode_str)
-      assert parse("$#{byte_count}\r\n#{unicode_str}\r\n") == {:ok, unicode_str, ""}
-
-      # Non-printable bytes
-      assert parse("$2\r\n" <> <<1, 2>> <> "\r\n") == {:ok, <<1, 2>>, ""}
-
-      # CRLF in the bulk string.
-      assert parse("$2\r\n\r\n\r\n") == {:ok, "\r\n", ""}
-
-      # Incomplete
-      assert parse_with_continuations(["$0", "\r\n\r", "\nrest"]) == {:ok, "", "rest"}
-      assert parse_with_continuations(["$", "3", "\r\n", "foo\r\n"]) == {:ok, "foo", ""}
-
-      # Null
-      assert parse("$-1\r\n") == {:ok, nil, ""}
-      assert parse("$-1\r\nrest") == {:ok, nil, "rest"}
-      assert parse_with_continuations(["$-1", "\r", "\nrest"]) == {:ok, nil, "rest"}
-      assert parse_with_continuations(["$", "-1", "\r\nrest"]) == {:ok, nil, "rest"}
-      assert parse_with_continuations(["$-", "1", "\r", "\nrest"]) == {:ok, nil, "rest"}
+      # nil
+      check all split_command <- random_splits("$-1\r\n"),
+                split_command_with_rest = append_to_last(split_command, "rest"),
+                max_runs: 10 do
+        assert parse_with_continuations(split_command) == {:ok, nil, ""}
+        assert parse_with_continuations(split_command_with_rest) == {:ok, nil, "rest"}
+      end
     end
 
-    test "arrays" do
+    property "arrays" do
       assert parse("*0\r\n") == {:ok, [], ""}
       assert parse("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n") == {:ok, ["foo", "bar"], ""}
 
@@ -116,12 +96,13 @@ defmodule Redix.ProtocolTest do
       # Says it has only 1 value, has 2
       assert parse("*1\r\n:1\r\n:2\r\n") == {:ok, [1], ":2\r\n"}
 
-      # Null
-      assert parse("*-1\r\n") == {:ok, nil, ""}
-      assert parse("*-1\r\nrest") == {:ok, nil, "rest"}
-      assert parse_with_continuations(["*-1", "\r", "\nrest"]) == {:ok, nil, "rest"}
-      assert parse_with_continuations(["*", "-1", "\r\nrest"]) == {:ok, nil, "rest"}
-      assert parse_with_continuations(["*-", "1", "\r", "\nrest"]) == {:ok, nil, "rest"}
+      command = "*-1\r\n"
+
+      check all split_command <- random_splits(command),
+                split_command_with_rest = append_to_last(split_command, "rest") do
+        assert parse_with_continuations(split_command) == {:ok, nil, ""}
+        assert parse_with_continuations(split_command_with_rest) == {:ok, nil, "rest"}
+      end
 
       # Null values (of different types) in the array
       arr = "*4\r\n$3\r\nfoo\r\n$-1\r\n$3\r\nbar\r\n*-1\r\n"
@@ -141,13 +122,13 @@ defmodule Redix.ProtocolTest do
       assert parse_with_continuations(payload) == {:ok, ~w(OK OK), "rest"}
     end
 
-    test "parse/1: raising when the binary value has no type specifier" do
+    test "raising when the binary value has no type specifier" do
       msg = ~s[invalid type specifier ("f")]
       assert_raise ParseError, msg, fn -> parse("foo\r\n") end
       assert_raise ParseError, msg, fn -> parse("foo bar baz") end
     end
 
-    test "parse/1: when the binary it's an invalid integer" do
+    test "when the binary it's an invalid integer" do
       assert_raise ParseError, ~S(expected integer, found: "\r"), fn -> parse(":\r\n") end
       assert_raise ParseError, ~S(expected integer, found: "\r"), fn -> parse(":-\r\n") end
       assert_raise ParseError, ~S(expected CRLF, found: "a"), fn -> parse(":43a\r\n") end
@@ -168,5 +149,32 @@ defmodule Redix.ProtocolTest do
       data = ["+OK\r\n+OK\r\n", "+", "OK", "\r\nrest"]
       assert parse_with_continuations(data, &parse_multi(&1, 3)) == {:ok, ~w(OK OK OK), "rest"}
     end
+  end
+
+  defp random_splits(splittable_part) do
+    bytes = for <<byte <- splittable_part>>, do: byte
+
+    bytes
+    |> Enum.map(fn _byte -> frequency([{2, false}, {1, true}]) end)
+    |> List.replace_at(length(bytes) - 1, constant(false))
+    |> fixed_list()
+    |> map(fn split_points -> split_command(bytes, split_points, [""]) end)
+  end
+
+  defp split_command([byte | bytes], [true | split_points], [current | acc]) do
+    split_command(bytes, split_points, ["", <<current::binary, byte>> | acc])
+  end
+
+  defp split_command([byte | bytes], [false | split_points], [current | acc]) do
+    split_command(bytes, split_points, [<<current::binary, byte>> | acc])
+  end
+
+  defp split_command([], [], acc) do
+    Enum.reverse(acc)
+  end
+
+  defp append_to_last(parts, unsplittable_part) do
+    {first_parts, [last_part]} = Enum.split(parts, -1)
+    first_parts ++ [last_part <> unsplittable_part]
   end
 end

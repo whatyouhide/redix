@@ -1,17 +1,17 @@
 defmodule Redix.Mixfile do
   use Mix.Project
 
-  @description "Superfast, pipelined, resilient Redis driver for Elixir."
+  @description "Fast, pipelined, resilient Redis driver for Elixir."
 
   @repo_url "https://github.com/whatyouhide/redix"
 
-  @version "0.7.1"
+  @version "0.8.0"
 
   def project() do
     [
       app: :redix,
       version: @version,
-      elixir: "~> 1.3",
+      elixir: "~> 1.5",
       build_embedded: Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -32,7 +32,7 @@ defmodule Redix.Mixfile do
   end
 
   def application() do
-    [applications: [:logger, :connection]]
+    [extra_applications: [:logger]]
   end
 
   defp package() do
@@ -44,20 +44,9 @@ defmodule Redix.Mixfile do
   end
 
   defp deps() do
-    deps = [
-      {:connection, "~> 1.0"},
-      {:benchee, "~> 0.13.1"},
-      {:ex_doc, "~> 0.15", only: :dev}
+    [
+      {:ex_doc, "~> 0.19", only: :dev},
+      {:stream_data, "~> 0.4", only: :test}
     ]
-
-    if stream_data?() do
-      [{:stream_data, "~> 0.4", only: :test}] ++ deps
-    else
-      deps
-    end
-  end
-
-  defp stream_data?() do
-    Version.compare(System.version(), "1.5.0") in [:eq, :gt]
   end
 end
