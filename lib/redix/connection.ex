@@ -67,9 +67,8 @@ defmodule Redix.Connection do
         _ = Process.demonitor(request_id, [:flush])
         resp
 
-      # TODO: is this right or should we crash?
-      {:DOWN, ^request_id, _, _, _} ->
-        {:error, %ConnectionError{reason: :disconnected}}
+      {:DOWN, ^request_id, _, _, reason} ->
+        exit(reason)
     end
   end
 
@@ -88,6 +87,8 @@ defmodule Redix.Connection do
     data = %__MODULE__{opts: opts, table: queue_table, socket_owner: socket_owner}
 
     if opts[:sync_connect] do
+      # We don't need to handle a timeout here because we're using a timeout in
+      # :gen_tcp.connect/3 down the pipe.
       receive do
         {:connected, ^socket_owner, socket} ->
           {:ok, :connected, %__MODULE__{data | socket: socket}}

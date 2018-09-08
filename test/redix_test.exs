@@ -176,6 +176,13 @@ defmodule RedixTest do
     assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~W(PING), timeout: 0)
   end
 
+  test "command/2: Redix process crashes while waiting", %{conn: c} do
+    Process.flag(:trap_exit, true)
+    pid = spawn_link(fn -> Redix.command!(c, ~w(BLPOP mid_command_disconnection 0)) end)
+    Process.exit(c, :kill)
+    assert_receive {:EXIT, ^pid, :killed}
+  end
+
   test "command/2: passing a non-list as the command", %{conn: c} do
     message = "expected a list of binaries as each Redis command, got: \"PING\""
 

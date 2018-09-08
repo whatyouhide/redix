@@ -2,84 +2,50 @@
 
 Redix is a low-level driver, but it's still built to handle most stuff thrown at it.
 
-There's a tendency to use pooling when using Redix (through something like
-[poolboy](https://github.com/devinus/poolboy)). This makes Redix more "scalable" (e.g., the size of the
-pool is configurable), but it doesn't really take advantage of Redix.
+Redix is built to handle multiple Elixir processes sending commands to Redis through it at the same time. It takes advantage of TCP being a **full-duplex** protocol (bytes are sent in both directions, often at the same time) so that the TCP stream has bytes flowing in both directions (to and from Redis). For example, if two Elixir processes send a `PING` command to Redis via `Redix.command/2`, Redix will send both commands to Redis but will concurrently start listening for the reply to these commands; at a given point, both a `PING` command as well as the `PONG` response to a previous `PING` could be flowing in the TCP stream of the socket that Redix is using.
 
-Redix is built to handle multiple Elixir processes sending commands to Redis
-through it at the same time. It takes advantage of TCP being a **full-duplex**
-protocol (bytes are sent in both directions, often at the same time) so that the
-TCP stream has bytes flowing in both directions (to and from Redis). For
-example, if two Elixir processes send a `PING` command to Redis via
-`Redix.command/2`, Redix will send both commands to Redis but will concurrently
-start listening for the reply to these commands; at a given point, both a `PING`
-command as well as the `PONG` response to a previous `PING` could be flowing in
-the TCP stream of the socket that Redix is using.
+There's a few different ways to use Redix and to pool connections for better high-load support.
 
-When pooling with something like `:poolboy`, the pattern is to have a pool of
-Redixes that can be checked out and back in from the pool when needed:
+## Single named Redix instance
 
-```elixir
-:poolboy.checkout(:my_redix_pool, fn redix_pid ->
-  Redix.command(redix_pid, ["PING"])
-end)
-```
-
-In the example above, we only use the `redix_pid` we check out of the pool from
-the process that checks it out of the pool: as stated earlier, this means we're
-not taking advantage of the concurrency that Redix provides.
-
-## Global Redix
-
-For many applications, a single global Redix instance is enough (especially if
-they're not web applications that hit Redis on every request). A common pattern
-is to have a named Redix process started under the supervision tree:
+For many applications, a single global Redix instance is enough. This is true especially for applications where requests to Redis are not mapping one-to-one to things like user requests (that is, a request for each user). A common pattern in these cases is to have a named Redix process started under the supervision tree:
 
 ```elixir
 children = [
-  # On Elixir 1.5 and above:
-  {Redix, [[], [name: :redix]]},
-
-  # Before Elixir 1.5:
-  worker(Redix, [[], [name: :redix]]),
+  {Redix, name: :redix}
 ]
 ```
 
-and then called globally (for example, `Redix.command(:redix, ["PING"])`).
-
-Note that this pattern extends to more than one global (named) Redix: for
-example, you could have a Redix process for handling big and infrequent requests
-and another one to handle short and frequent requests.
-
-## Pooling strategies
-
-A common pattern is to hit Redis on each request in web applications. Instead of
-using something like poolboy to handle pooling in such cases, a strategy I
-personally like is to have a "manual" pool of Redix processes available, much
-smaller than the "usual" poolboy pool. A strategy to do this is to have `n`
-named Redix processes, and to distribute the load between the Redixes using
-their name.
-
-For example, we can start five Redix processes under our supervision tree and
-name them `:redix_0` to `:redix_4`:
+Once Redix is started and registered, you can use it with the given name from anywhere:
 
 ```elixir
-# Create the redix children list of workers:
-pool_size = 5
-redix_workers = for i <- 0..(pool_size - 1) do
-  args = [[], [name: :"redix_#{i}"]]
-
-  # On Elixir 1.5 and above:
-  Supervisor.child_spec({Redix, args}, id: {Redix, i})
-
-  # Before Elixir 1.5:
-  worker(Redix, args, id: {Redix, i})
-end
+Redix.command(:redix, ["PING"])
+#=> {:ok, "PONG"}
 ```
 
-Then, we can build a simple wrapper module around Redix which will dispatch to
-one of the five Redix processes (with whatever strategy makes sense, e.g.,
-randomly):
+Note that this pattern extends to more than one global (named) Redix: for example, you could have a Redix process for handling big and infrequent requests and another one to handle short and frequent requests.
+
+## Name-based pool
+
+When you want to have a pool of connections, you can start many connections and register them by name. Say you want to have a pool of five Redis connections. You can start these connections in a supervisor under your supervision tree:
+
+```elixir
+pool_size = 5
+
+children =
+  for i <- 0..(pool_size - 1) do
+    Supervisor.child_spec({Redix, name: :"redix_#{i}"}, id: {Redix, i})
+  end
+
+# This child spec would go under the app's supervisor:
+%{
+  id: RedixSupervisor,
+  type: :supervisor,
+  start: {Supervisor, :start_link, children}
+}
+```
+
+Then, you can build a simple wrapper module around Redix which will dispatch to one of the five Redix processes (with whatever strategy makes sense, for example randomly):
 
 ```elixir
 defmodule MyApp.Redix do
@@ -93,11 +59,9 @@ defmodule MyApp.Redix do
 end
 ```
 
-And then to use the new wrapper in your appplication:
+And then use the new wrapper in your application:
 
 ```elixir
-MyApp.Redix.command!(["PING"])
-#=> "PONG"
+MyApp.Redix.command(["PING"])
+#=> {:ok, "PONG"}
 ```
-
-[poolboy]: https://github.com/devinus/poolboy

@@ -26,10 +26,6 @@ defmodule Redix do
   attempted until successful, and the time interval between reconnections is
   increased exponentially. Some aspects of this behaviour can be configured; see
   `start_link/2` and the "Reconnections" page in the docs for more information.
-
-  All this behaviour is implemented using the
-  [connection](https://github.com/fishcakez/connection) library (a dependency of
-  Redix).
   """
 
   # This module is only a "wrapper" module that exposes the public API alongside
@@ -175,6 +171,7 @@ defmodule Redix do
       {:ok, #PID<...>}
 
   """
+  # TODO: single options.
   @spec start_link(binary | Keyword.t(), Keyword.t()) :: GenServer.on_start()
   def start_link(uri_or_redis_opts \\ [], connection_opts \\ [])
 
