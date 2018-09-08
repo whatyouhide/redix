@@ -63,7 +63,7 @@ defmodule RedixTest do
     capture_log(fn ->
       Process.flag(:trap_exit, true)
       error = %Redix.ConnectionError{reason: :nxdomain}
-      assert Redix.start_link([host: "nonexistent"], sync_connect: true) == {:error, error}
+      assert Redix.start_link(host: "nonexistent", sync_connect: true) == {:error, error}
       assert_receive {:EXIT, _pid, ^error}, 1000
     end)
   end
@@ -72,7 +72,7 @@ defmodule RedixTest do
   test "start_link/2: when unable to connect to Redis with sync_connect: false" do
     capture_log(fn ->
       Process.flag(:trap_exit, true)
-      {:ok, pid} = Redix.start_link([host: "nonexistent"], sync_connect: false)
+      {:ok, pid} = Redix.start_link(host: "nonexistent", sync_connect: false)
       refute_receive {:EXIT, ^pid, :nxdomain}, 200
     end)
   end
@@ -85,7 +85,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test "start_link/2: name registration" do
-    {:ok, pid} = Redix.start_link([host: @host, port: @port], name: :redix_server)
+    {:ok, pid} = Redix.start_link(host: @host, port: @port, name: :redix_server)
     assert Process.whereis(:redix_server) == pid
     assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
   end
@@ -108,7 +108,7 @@ defmodule RedixTest do
   @tag :no_setup
   test "the :log option given to start_link/2 must be a list" do
     assert_raise ArgumentError, ~r/the :log option must be a keyword list/, fn ->
-      Redix.start_link([host: @host, port: @port], log: :not_a_list)
+      Redix.start_link(host: @host, port: @port, log: :not_a_list)
     end
   end
 
@@ -384,7 +384,7 @@ defmodule RedixTest do
 
   @tag :no_setup
   test ":exit_on_disconnection option" do
-    {:ok, c} = Redix.start_link([host: @host, port: @port], exit_on_disconnection: true)
+    {:ok, c} = Redix.start_link(host: @host, port: @port, exit_on_disconnection: true)
     Process.flag(:trap_exit, true)
 
     capture_log(fn ->
