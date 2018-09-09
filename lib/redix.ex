@@ -78,7 +78,8 @@ defmodule Redix do
   # function in this module goes through Redix.Connection.pipeline/3 one way or
   # another.
 
-  @type command :: [binary]
+  @type command() :: [binary()]
+  @type connection() :: GenServer.server()
 
   @default_timeout 5000
 
@@ -298,7 +299,7 @@ defmodule Redix do
       :ok
 
   """
-  @spec stop(GenServer.server(), timeout) :: :ok
+  @spec stop(connection(), timeout()) :: :ok
   def stop(conn, timeout \\ :infinity) do
     Redix.Connection.stop(conn, timeout)
   end
@@ -349,8 +350,8 @@ defmodule Redix do
       :closed
 
   """
-  @spec pipeline(GenServer.server(), [command], Keyword.t()) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
+  @spec pipeline(connection(), [command()], keyword()) ::
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom() | Redix.Error.t()}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
@@ -393,8 +394,8 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec pipeline!(GenServer.server(), [command], Keyword.t()) ::
-          [Redix.Protocol.redis_value()] | no_return
+  @spec pipeline!(connection(), [command()], keyword()) ::
+          [Redix.Protocol.redis_value()] | no_return()
   def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, response} -> response
@@ -450,10 +451,10 @@ defmodule Redix do
       :closed
 
   """
-  @spec command(GenServer.server(), command, Keyword.t()) ::
+  @spec command(connection(), command(), keyword()) ::
           :ok
           | {:ok, Redix.Protocol.redis_value()}
-          | {:error, atom | Redix.Error.t() | Redix.ConnectionError.t()}
+          | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} -> raise(error)
@@ -502,8 +503,7 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec command!(GenServer.server(), command, Keyword.t()) ::
-          Redix.Protocol.redis_value() | no_return
+  @spec command!(connection(), command(), keyword()) :: Redix.Protocol.redis_value() | no_return()
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
       :ok -> :ok
@@ -557,12 +557,10 @@ defmodule Redix do
   """
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
 
-  @spec transaction_pipeline(GenServer.server(), [command], Keyword.t()) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
+  @spec transaction_pipeline(connection(), [command()], keyword()) ::
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom() | Redix.Error.t()}
   def transaction_pipeline(conn, [_ | _] = commands, options \\ []) when is_list(commands) do
-    commands = [["MULTI"]] ++ commands ++ [["EXEC"]]
-
-    with {:ok, responses} <- Redix.pipeline(conn, commands, options),
+    with {:ok, responses} <- Redix.pipeline(conn, [["MULTI"]] ++ commands ++ [["EXEC"]], options),
          do: {:ok, List.last(responses)}
   end
 
@@ -587,7 +585,7 @@ defmodule Redix do
   """
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
 
-  @spec transaction_pipeline!(GenServer.server(), [command()], keyword()) :: [
+  @spec transaction_pipeline!(connection(), [command()], keyword()) :: [
           Redix.Protocol.redis_value()
         ]
   def transaction_pipeline!(conn, commands, options \\ []) do
