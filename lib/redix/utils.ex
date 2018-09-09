@@ -81,8 +81,8 @@ defmodule Redix.Utils do
     with {:ok, socket} <- :gen_tcp.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(socket) do
       result =
-        with :ok <- if(opts[:password], do: auth(socket, opts[:password]), else: :ok),
-             :ok <- if(opts[:database], do: select(socket, opts[:database]), else: :ok),
+        with :ok <- if(opts[:password], do: auth(socket, opts[:password], timeout), else: :ok),
+             :ok <- if(opts[:database], do: select(socket, opts[:database], timeout), else: :ok),
              do: :ok
 
       case result do
@@ -105,22 +105,22 @@ defmodule Redix.Utils do
     end
   end
 
-  defp auth(socket, password) do
+  defp auth(socket, password, timeout) do
     with :ok <- :gen_tcp.send(socket, Redix.Protocol.pack(["AUTH", password])),
-         do: recv_ok_response(socket)
+         do: recv_ok_response(socket, timeout)
   end
 
-  defp select(socket, database) do
+  defp select(socket, database, timeout) do
     with :ok <- :gen_tcp.send(socket, Redix.Protocol.pack(["SELECT", database])),
-         do: recv_ok_response(socket)
+         do: recv_ok_response(socket, timeout)
   end
 
-  defp recv_ok_response(socket) do
-    recv_ok_response(socket, _continuation = nil)
+  defp recv_ok_response(socket, timeout) do
+    recv_ok_response(socket, _continuation = nil, timeout)
   end
 
-  defp recv_ok_response(socket, continuation) do
-    with {:ok, data} <- :gen_tcp.recv(socket, 0) do
+  defp recv_ok_response(socket, continuation, timeout) do
+    with {:ok, data} <- :gen_tcp.recv(socket, 0, timeout) do
       parser = continuation || (&Redix.Protocol.parse/1)
 
       case parser.(data) do
