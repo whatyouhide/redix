@@ -26,6 +26,18 @@ defmodule Redix do
   attempted until successful, and the time interval between reconnections is
   increased exponentially. Some aspects of this behaviour can be configured; see
   `start_link/2` and the "Reconnections" page in the docs for more information.
+
+  ## Transactions or pipelining
+
+  Pipelining and transactions have things in common but they're fundamentally different.
+  With a pipeline, you're sending all commands in the pipeline *at once* on the connection
+  to Redis. This means Redis receives all commands at once, but the Redis server is not
+  guaranteed to process all those commands at once.
+
+  On the other hand, a `MULTI`/`EXEC` transaction guarantees that when `EXEC` is called
+  all the queued commands in the transaction are executed atomically. However, you don't
+  need to send all the commands in the transaction at once. If you want to combine
+  pipelining with `MULTI`/`EXEC` transactions, use `multi_exec/3`.
   """
 
   # This module is only a "wrapper" module that exposes the public API alongside
@@ -232,6 +244,9 @@ defmodule Redix do
   an empty command (`[]`) then an `ArgumentError` exception is raised right
   away.
 
+  Pipelining is not the same as a transaction. For more information, see the
+  module documentation.
+
   ## Options
 
     * `:timeout` - (integer or `:infinity`) request timeout (in
@@ -302,11 +317,8 @@ defmodule Redix do
           [Redix.Protocol.redis_value()] | no_return
   def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
-      {:ok, resp} ->
-        resp
-
-      {:error, error} ->
-        raise error
+      {:ok, response} -> response
+      {:error, error} -> raise error
     end
   end
 
@@ -359,14 +371,9 @@ defmodule Redix do
           | {:error, atom | Redix.Error.t() | Redix.ConnectionError.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
-      {:ok, [%Redix.Error{} = error]} ->
-        raise error
-
-      {:ok, [resp]} ->
-        {:ok, resp}
-
-      {:error, _reason} = error ->
-        error
+      {:ok, [%Redix.Error{} = error]} -> raise(error)
+      {:ok, [response]} -> {:ok, response}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -409,11 +416,90 @@ defmodule Redix do
           Redix.Protocol.redis_value() | no_return
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
-      {:ok, resp} ->
-        resp
+      {:ok, response} -> response
+      {:error, error} -> raise error
+    end
+  end
 
-      {:error, error} ->
-        raise error
+  @doc """
+  Executes a `MULTI`/`EXEC` transaction.
+
+  Redis supports something akin to transactions. It works by sending a `MULTI` command,
+  then some commands, and then an `EXEC` command. All the commands after `MULTI` are
+  queued until `EXEC` is issued. When `EXEC` is issued, all the responses to the queued
+  commands are returned in a list.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
+
+  ## Examples
+
+  To run a `MULTI`/`EXEC` transaction in one go, use this function and pass a list of
+  commands to use in the transaction:
+
+      iex> Redix.multi_exec(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
+      {:ok, ["OK", "foo"]}
+
+  ## Problems with transactions
+
+  There's an inherent problem with Redix's architecture and `MULTI`/`EXEC` transaction.
+  A Redix process is a single connection to Redis that can be used by many clients. If
+  a client A sends `MULTI` and client B sends a command before client A sends `EXEC`,
+  client B's command will be part of the transaction. This is intended behaviour, but
+  it might not be what you expect. This is why `multi_exec/3` exists: this function
+  wraps `commands` in `MULTI`/`EXEC` but *sends all in a pipeline*. Since everything
+  is sent in the pipeline, it's sent at once on the connection and no commands can
+  end up in the middle of the transaction.
+
+  ## Running `MULTI`/`EXEC` transactions manually
+
+  There are still some cases where you might want to start a transaction with `MULTI`,
+  then send commands from different processes that you actively want to be in the
+  transaction, and then send an `EXEC` to run the transaction. It's still fine to do
+  this with `command/3` or `pipeline/3`, but remember what explained in the section
+  above. If you do this, do it in an isolated connection (open a new one if necessary)
+  to avoid mixing things up.
+  """
+  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+
+  @spec multi_exec(GenServer.server(), [command], Keyword.t()) ::
+          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
+  def multi_exec(conn, [_ | _] = commands, options \\ []) when is_list(commands) do
+    commands = [["MULTI"]] ++ commands ++ [["EXEC"]]
+
+    with {:ok, responses} <- Redix.pipeline(conn, commands, options),
+         do: {:ok, List.last(responses)}
+  end
+
+  @doc """
+  Executes a `MULTI`/`EXEC` transaction.
+
+  Same as `multi_exec/3`, but returns the result directly instead of wrapping it
+  in an `{:ok, result}` tuple or raises if there's an error.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
+
+  ## Examples
+
+      iex> Redix.multi_exec!(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
+      ["OK", "foo"]
+
+  """
+  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+  @spec multi_exec!(GenServer.server(), [command()], keyword()) :: [Redix.Protocol.redis_value()]
+  def multi_exec!(conn, commands, options \\ []) do
+    case multi_exec(conn, commands, options) do
+      {:ok, response} -> response
+      {:error, error} -> raise(error)
     end
   end
 

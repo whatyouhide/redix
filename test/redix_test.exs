@@ -307,6 +307,18 @@ defmodule RedixTest do
     end
   end
 
+  describe "multi_exec/3" do
+    test "non-bang version", %{conn: conn} do
+      commands = [~w(SET multi_exec_key 1), ~w(GET multi_exec_key)]
+      assert Redix.multi_exec(conn, commands) == {:ok, ["OK", "1"]}
+    end
+
+    test "bang version", %{conn: conn} do
+      commands = [~w(SET multi_exec_key 1), ~w(GET multi_exec_key)]
+      assert Redix.multi_exec!(conn, commands) == ["OK", "1"]
+    end
+  end
+
   @tag :no_setup
   test "client suicide and reconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)
