@@ -319,6 +319,29 @@ defmodule RedixTest do
     end
   end
 
+  describe "CLIENT REPLY command" do
+    test "SKIP", %{conn: conn} do
+      assert Redix.pipeline!(conn, [~w(CLIENT REPLY SKIP), ~w(PING), ~w(PING)]) == ["PONG"]
+
+      assert Redix.command!(conn, ~w(CLIENT REPLY SKIP)) == :ok
+      assert Redix.command!(conn, ~w(PING)) == :ok
+      assert Redix.command!(conn, ~w(PING)) == "PONG"
+    end
+
+    test "ON/OFF", %{conn: conn} do
+      commands = [
+        ~w(INCR mykey),
+        ~w(CLIENT REPLY OFF),
+        ~w(INCR mykey),
+        ~w(INCR mykey),
+        ~w(CLIENT REPLY ON),
+        ~w(GET mykey)
+      ]
+
+      assert Redix.pipeline!(conn, commands) == [1, "OK", "3"]
+    end
+  end
+
   @tag :no_setup
   test "client suicide and reconnections" do
     {:ok, c} = Redix.start_link(host: @host, port: @port)

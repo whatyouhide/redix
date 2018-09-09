@@ -38,6 +38,34 @@ defmodule Redix do
   all the queued commands in the transaction are executed atomically. However, you don't
   need to send all the commands in the transaction at once. If you want to combine
   pipelining with `MULTI`/`EXEC` transactions, use `multi_exec/3`.
+
+  ## Skipping replies
+
+  Redis provides commands to control whether you want replies to your commands or not.
+  These commands are `CLIENT REPLY ON`, `CLIENT REPLY SKIP`, and `CLIENT REPLY OFF`.
+  When you use `CLIENT REPLY SKIP`, only the command that follows will not get a reply.
+  When you use `CLIENT REPLY OFF`, all the commands that follow will not get replies until
+  `CLIENT REPLY ON` is issued. Redix supports these commands. For example, look at this
+  pipeline:
+
+      Redix.pipeline!(conn, [
+        ["CLIENT", "REPLY", "OFF"],
+        ["INCR mykey"],
+        ["INCR mykey"],
+        ["CLIENT", "REPLY", "ON"],
+        ["GET", "mykey"]
+      ])
+
+  The responses to these commands will be `["OK", "2"]`. The `"OK"` is the reply to
+  `CLIENT REPLY ON` and `"2"` is the reply to `GET mykey`.
+
+  Skipping replies is useful to improve performance when you want to issue many commands
+  but are not interested in the responses to those commands.
+
+  Note that the return value of `pipeline/3` and `pipeline!/3` don't change based
+  on `CLIENT REPLY`. That is, the return value is a list of responses anyways, possibly
+  with less responses than the original commands. However, the return value of
+  `command/3` and `command!/3` will change to `:ok` if the response is skipped.
   """
 
   # This module is only a "wrapper" module that exposes the public API alongside
@@ -382,6 +410,10 @@ defmodule Redix do
   instead, are often temporary errors that will go away when the connection is
   back.
 
+  The return value can also be just `:ok` in case replies are being skipped
+  (through `CLIENT REPLY SKIP` or `CLIENT REPLY OFF`). See the module documentation
+  for more information.
+
   If the given command is an empty command (`[]`), an `ArgumentError`
   exception is raised.
 
@@ -410,12 +442,14 @@ defmodule Redix do
 
   """
   @spec command(GenServer.server(), command, Keyword.t()) ::
-          {:ok, Redix.Protocol.redis_value()}
+          :ok
+          | {:ok, Redix.Protocol.redis_value()}
           | {:error, atom | Redix.Error.t() | Redix.ConnectionError.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} -> raise(error)
       {:ok, [response]} -> {:ok, response}
+      {:ok, []} -> :ok
       {:error, _reason} = error -> error
     end
   end
@@ -431,6 +465,10 @@ defmodule Redix do
       original message).
     * if there's a connection error, a `Redix.ConnectionError`
       error is raised.
+
+  The return value can also be just `:ok` in case replies are being skipped
+  (through `CLIENT REPLY SKIP` or `CLIENT REPLY OFF`). See the module documentation
+  for more information.
 
   This function accepts the same options as `command/3`.
 
@@ -459,6 +497,7 @@ defmodule Redix do
           Redix.Protocol.redis_value() | no_return
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
+      :ok -> :ok
       {:ok, response} -> response
       {:error, error} -> raise error
     end

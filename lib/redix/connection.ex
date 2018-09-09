@@ -13,7 +13,8 @@ defmodule Redix.Connection do
     :table,
     :socket,
     :backoff_current,
-    counter: 0
+    counter: 0,
+    client_reply: :on
   ]
 
   @backoff_exponent 1.5
@@ -177,26 +178,33 @@ defmodule Redix.Connection do
   end
 
   def connected(:cast, {:pipeline, commands, from, timeout}, data) do
-    {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
+    {ncommands, data} = get_client_reply(data, commands)
 
-    row = {counter, from, length(commands), _timed_out? = false}
-    :ets.insert(data.table, row)
+    if ncommands > 0 do
+      {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
 
-    case :gen_tcp.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
-      :ok ->
-        actions =
-          case timeout do
-            :infinity -> []
-            _other -> [{{:timeout, {:client_timed_out, counter}}, timeout, from}]
-          end
+      row = {counter, from, ncommands, _timed_out? = false}
+      :ets.insert(data.table, row)
 
-        {:keep_state, data, actions}
+      case :gen_tcp.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
+        :ok ->
+          actions =
+            case timeout do
+              :infinity -> []
+              _other -> [{{:timeout, {:client_timed_out, counter}}, timeout, from}]
+            end
 
-      {:error, _reason} ->
-        # The socket owner will get a TCP closed message at some point, so we just move to the
-        # disconnected state.
-        :ok = :gen_tcp.close(data.socket)
-        {:next_state, :disconnected}
+          {:keep_state, data, actions}
+
+        {:error, _reason} ->
+          # The socket owner will get a TCP closed message at some point, so we just move to the
+          # disconnected state.
+          :ok = :gen_tcp.close(data.socket)
+          {:next_state, :disconnected}
+      end
+    else
+      reply(from, {:ok, []})
+      {:keep_state, data}
     end
   end
 
@@ -270,4 +278,44 @@ defmodule Redix.Connection do
 
     Logger.log(level, message)
   end
+
+  defp get_client_reply(data, commands) do
+    {ncommands, client_reply} = get_client_reply(commands, _ncommands = 0, data.client_reply)
+    {ncommands, put_in(data.client_reply, client_reply)}
+  end
+
+  defp get_client_reply([], ncommands, client_reply) do
+    {ncommands, client_reply}
+  end
+
+  defp get_client_reply([command | rest], ncommands, client_reply) do
+    case parse_client_reply(command) do
+      :off -> get_client_reply(rest, ncommands, :off)
+      :skip when client_reply == :off -> get_client_reply(rest, ncommands, :off)
+      :skip -> get_client_reply(rest, ncommands, :skip)
+      :on -> get_client_reply(rest, ncommands + 1, :on)
+      nil when client_reply == :on -> get_client_reply(rest, ncommands + 1, client_reply)
+      nil when client_reply == :off -> get_client_reply(rest, ncommands, client_reply)
+      nil when client_reply == :skip -> get_client_reply(rest, ncommands, :on)
+    end
+  end
+
+  defp parse_client_reply(["CLIENT", "REPLY", "ON"]), do: :on
+  defp parse_client_reply(["CLIENT", "REPLY", "OFF"]), do: :off
+  defp parse_client_reply(["CLIENT", "REPLY", "SKIP"]), do: :skip
+  defp parse_client_reply(["client", "reply", "on"]), do: :on
+  defp parse_client_reply(["client", "reply", "off"]), do: :off
+  defp parse_client_reply(["client", "reply", "skip"]), do: :skip
+
+  defp parse_client_reply([part1, part2, part3])
+       when is_binary(part1) and is_binary(part2) and is_binary(part3) do
+    case [String.upcase(part1), String.upcase(part2), String.upcase(part3)] do
+      ["CLIENT", "REPLY", "ON"] -> :on
+      ["CLIENT", "REPLY", "OFF"] -> :off
+      ["CLIENT", "REPLY", "SKIP"] -> :skip
+      _other -> nil
+    end
+  end
+
+  defp parse_client_reply(_other), do: nil
 end
