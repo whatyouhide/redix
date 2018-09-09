@@ -8,6 +8,7 @@ defmodule Redix.SocketOwner do
   defstruct [
     :conn,
     :opts,
+    :transport,
     :socket,
     :queue_table,
     :continuation
@@ -22,7 +23,8 @@ defmodule Redix.SocketOwner do
     state = %__MODULE__{
       conn: conn,
       opts: opts,
-      queue_table: queue_table
+      queue_table: queue_table,
+      transport: if(opts[:ssl], do: :ssl, else: :gen_tcp)
     }
 
     send(self(), :connect)
@@ -35,7 +37,7 @@ defmodule Redix.SocketOwner do
 
   def handle_info(:connect, state) do
     with {:ok, socket} <- Utils.connect(state.opts),
-         :ok <- :inet.setopts(socket, active: :once) do
+         :ok <- setopts(state, socket, active: :once) do
       send(state.conn, {:connected, self(), socket})
       {:noreply, %{state | socket: socket}}
     else
@@ -44,8 +46,9 @@ defmodule Redix.SocketOwner do
     end
   end
 
-  def handle_info({:tcp, socket, data}, %__MODULE__{socket: socket} = state) do
-    :ok = :inet.setopts(socket, active: :once)
+  def handle_info({transport, socket, data}, %__MODULE__{socket: socket} = state)
+      when transport in [:tcp, :ssl] do
+    :ok = setopts(state, socket, active: :once)
     state = new_data(state, data)
     {:noreply, state}
   end
@@ -58,7 +61,22 @@ defmodule Redix.SocketOwner do
     stop({:tcp_error, reason}, state)
   end
 
+  def handle_info({:ssl_closed, socket}, %__MODULE__{socket: socket} = state) do
+    stop(:ssl_closed, state)
+  end
+
+  def handle_info({:ssl_error, socket, reason}, %__MODULE__{socket: socket} = state) do
+    stop({:ssl_error, reason}, state)
+  end
+
   ## Helpers
+
+  defp setopts(%__MODULE__{transport: transport}, socket, opts) do
+    case transport do
+      :ssl -> :ssl.setopts(socket, opts)
+      :gen_tcp -> :inet.setopts(socket, opts)
+    end
+  end
 
   defp new_data(state, _data = "") do
     state

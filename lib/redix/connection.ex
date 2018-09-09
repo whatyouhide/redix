@@ -9,6 +9,7 @@ defmodule Redix.Connection do
 
   defstruct [
     :opts,
+    :transport,
     :socket_owner,
     :table,
     :socket,
@@ -82,14 +83,20 @@ defmodule Redix.Connection do
 
   @impl true
   def init(opts) do
+    transport = if(opts[:ssl], do: :ssl, else: :gen_tcp)
     queue_table = :ets.new(:queue, [:ordered_set, :public])
     {:ok, socket_owner} = SocketOwner.start_link(self(), opts, queue_table)
 
-    data = %__MODULE__{opts: opts, table: queue_table, socket_owner: socket_owner}
+    data = %__MODULE__{
+      opts: opts,
+      table: queue_table,
+      socket_owner: socket_owner,
+      transport: transport
+    }
 
     if opts[:sync_connect] do
       # We don't need to handle a timeout here because we're using a timeout in
-      # :gen_tcp.connect/3 down the pipe.
+      # connect/3 down the pipe.
       receive do
         {:connected, ^socket_owner, socket} ->
           {:ok, :connected, %__MODULE__{data | socket: socket}}
@@ -134,7 +141,7 @@ defmodule Redix.Connection do
     :keep_state_and_data
   end
 
-  # This happens when there's a TCP send error. We close the socket right away, but we wait for
+  # This happens when there's a send error. We close the socket right away, but we wait for
   # the socket owner to die so that it can finish processing the data it's processing. When it's
   # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
@@ -186,7 +193,7 @@ defmodule Redix.Connection do
       row = {counter, from, ncommands, _timed_out? = false}
       :ets.insert(data.table, row)
 
-      case :gen_tcp.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
+      case data.transport.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
         :ok ->
           actions =
             case timeout do
@@ -197,9 +204,9 @@ defmodule Redix.Connection do
           {:keep_state, data, actions}
 
         {:error, _reason} ->
-          # The socket owner will get a TCP closed message at some point, so we just move to the
+          # The socket owner will get a closed message at some point, so we just move to the
           # disconnected state.
-          :ok = :gen_tcp.close(data.socket)
+          :ok = data.transport.close(data.socket)
           {:next_state, :disconnected}
       end
     else

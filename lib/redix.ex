@@ -66,6 +66,11 @@ defmodule Redix do
   on `CLIENT REPLY`. That is, the return value is a list of responses anyways, possibly
   with less responses than the original commands. However, the return value of
   `command/3` and `command!/3` will change to `:ok` if the response is skipped.
+
+  ## SSL
+
+  Redix supports SSL by passing `ssl: true` in `start_link/1`. You can use the `:socket_opts`
+  option to pass options that will be used by the SSL socket, like certificates.
   """
 
   # This module is only a "wrapper" module that exposes the public API alongside
@@ -188,6 +193,10 @@ defmodule Redix do
 
     * `:name` - Redix is bound to the same registration rules as a `GenServer`. See the
       `GenServer` documentation for more information.
+
+    * `:ssl` - (boolean) if `true`, connect through SSL, otherwise through TCP. The
+      `:socket_opts` option applies to both SSL and TCP, so it can be used for things
+      like certificates. See `:ssl.connect/4`. Defaults to `false`.
 
   ## Examples
 
