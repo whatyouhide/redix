@@ -37,7 +37,7 @@ defmodule Redix do
   On the other hand, a `MULTI`/`EXEC` transaction guarantees that when `EXEC` is called
   all the queued commands in the transaction are executed atomically. However, you don't
   need to send all the commands in the transaction at once. If you want to combine
-  pipelining with `MULTI`/`EXEC` transactions, use `multi_exec/3`.
+  pipelining with `MULTI`/`EXEC` transactions, use `transaction_pipeline/3`.
 
   ## Skipping replies
 
@@ -523,7 +523,7 @@ defmodule Redix do
   To run a `MULTI`/`EXEC` transaction in one go, use this function and pass a list of
   commands to use in the transaction:
 
-      iex> Redix.multi_exec(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
+      iex> Redix.transaction_pipeline(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
       {:ok, ["OK", "foo"]}
 
   ## Problems with transactions
@@ -532,7 +532,7 @@ defmodule Redix do
   A Redix process is a single connection to Redis that can be used by many clients. If
   a client A sends `MULTI` and client B sends a command before client A sends `EXEC`,
   client B's command will be part of the transaction. This is intended behaviour, but
-  it might not be what you expect. This is why `multi_exec/3` exists: this function
+  it might not be what you expect. This is why `transaction_pipeline/3` exists: this function
   wraps `commands` in `MULTI`/`EXEC` but *sends all in a pipeline*. Since everything
   is sent in the pipeline, it's sent at once on the connection and no commands can
   end up in the middle of the transaction.
@@ -548,9 +548,9 @@ defmodule Redix do
   """
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
 
-  @spec multi_exec(GenServer.server(), [command], Keyword.t()) ::
+  @spec transaction_pipeline(GenServer.server(), [command], Keyword.t()) ::
           {:ok, [Redix.Protocol.redis_value()]} | {:error, atom | Redix.Error.t()}
-  def multi_exec(conn, [_ | _] = commands, options \\ []) when is_list(commands) do
+  def transaction_pipeline(conn, [_ | _] = commands, options \\ []) when is_list(commands) do
     commands = [["MULTI"]] ++ commands ++ [["EXEC"]]
 
     with {:ok, responses} <- Redix.pipeline(conn, commands, options),
@@ -560,7 +560,7 @@ defmodule Redix do
   @doc """
   Executes a `MULTI`/`EXEC` transaction.
 
-  Same as `multi_exec/3`, but returns the result directly instead of wrapping it
+  Same as `transaction_pipeline/3`, but returns the result directly instead of wrapping it
   in an `{:ok, result}` tuple or raises if there's an error.
 
   ## Options
@@ -572,14 +572,17 @@ defmodule Redix do
 
   ## Examples
 
-      iex> Redix.multi_exec!(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
+      iex> Redix.transaction_pipeline!(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
       ["OK", "foo"]
 
   """
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
-  @spec multi_exec!(GenServer.server(), [command()], keyword()) :: [Redix.Protocol.redis_value()]
-  def multi_exec!(conn, commands, options \\ []) do
-    case multi_exec(conn, commands, options) do
+
+  @spec transaction_pipeline!(GenServer.server(), [command()], keyword()) :: [
+          Redix.Protocol.redis_value()
+        ]
+  def transaction_pipeline!(conn, commands, options \\ []) do
+    case transaction_pipeline(conn, commands, options) do
       {:ok, response} -> response
       {:error, error} -> raise(error)
     end

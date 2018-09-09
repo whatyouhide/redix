@@ -307,15 +307,15 @@ defmodule RedixTest do
     end
   end
 
-  describe "multi_exec/3" do
+  describe "transaction_pipeline/3" do
     test "non-bang version", %{conn: conn} do
-      commands = [~w(SET multi_exec_key 1), ~w(GET multi_exec_key)]
-      assert Redix.multi_exec(conn, commands) == {:ok, ["OK", "1"]}
+      commands = [~w(SET transaction_pipeline_key 1), ~w(GET transaction_pipeline_key)]
+      assert Redix.transaction_pipeline(conn, commands) == {:ok, ["OK", "1"]}
     end
 
     test "bang version", %{conn: conn} do
-      commands = [~w(SET multi_exec_key 1), ~w(GET multi_exec_key)]
-      assert Redix.multi_exec!(conn, commands) == ["OK", "1"]
+      commands = [~w(SET transaction_pipeline_key 1), ~w(GET transaction_pipeline_key)]
+      assert Redix.transaction_pipeline!(conn, commands) == ["OK", "1"]
     end
   end
 
