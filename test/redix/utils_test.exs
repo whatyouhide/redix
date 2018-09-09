@@ -13,16 +13,5 @@ defmodule Redix.UtilsTest do
     assert opts[:host] == 'foo.com'
     assert opts[:backoff_max] == 0
     assert opts[:sync_connect] == true
-
-    assert_raise ArgumentError, "unknown option: :foo", fn ->
-      sanitize_starting_opts(foo: 1)
-    end
-
-    test "raise ArgumentError on non-keyword list" do
-      message = "expected a keyword list as options, got: [\"foo.com\"]"
-
-    assert_raise ArgumentError, message, fn ->
-      sanitize_starting_opts(port: %{})
-    end
   end
 end
