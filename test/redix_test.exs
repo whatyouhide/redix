@@ -409,25 +409,19 @@ defmodule RedixTest do
   test "child_spec/1" do
     default_spec = %{
       id: Redix,
-      start: {Redix, :start_link, [[], []]},
+      start: {Redix, :start_link, []},
       type: :worker
     }
 
-    assert Redix.child_spec([]) == default_spec
-    assert Redix.child_spec([[]]) == default_spec
-    assert Redix.child_spec([[], []]) == default_spec
+    args_path = [:start, Access.elem(2)]
 
-    assert Redix.child_spec(["redis://localhost"]) ==
-             Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+    assert Redix.child_spec("redis://localhost") ==
+             put_in(default_spec, args_path, ["redis://localhost"])
 
-    assert Redix.child_spec(["redis://localhost", []]) ==
-             Map.put(default_spec, :start, {Redix, :start_link, ["redis://localhost", []]})
+    assert Redix.child_spec([]) == put_in(default_spec, args_path, [[]])
+    assert Redix.child_spec(name: :redix) == put_in(default_spec, args_path, [[name: :redix]])
 
-    assert Redix.child_spec(["redis://localhost", [name: :redix]]) ==
-             Map.put(default_spec, :start, {
-               Redix,
-               :start_link,
-               ["redis://localhost", [name: :redix]]
-             })
+    assert Redix.child_spec({"redis://localhost", name: :redix}) ==
+             put_in(default_spec, args_path, ["redis://localhost", [name: :redix]])
   end
 end

@@ -49,32 +49,13 @@ defmodule Redix do
 
   @default_timeout 5000
 
-  @doc false
-  def child_spec(args)
-
-  def child_spec([]) do
-    child_spec([[], []])
-  end
-
-  def child_spec([uri_or_redis_opts]) do
-    child_spec([uri_or_redis_opts, []])
-  end
-
-  def child_spec([uri_or_redis_opts, connection_opts] = args)
-      when (is_binary(uri_or_redis_opts) or is_list(uri_or_redis_opts)) and
-             is_list(connection_opts) do
-    %{
-      id: __MODULE__,
-      start: {__MODULE__, :start_link, args},
-      type: :worker
-    }
-  end
-
   @doc """
   Starts a connection to Redis.
 
   This function returns `{:ok, pid}` if the Redix process is started
   successfully.
+
+      {:ok, pid} = Redix.start_link()
 
   The actual TCP connection to the Redis server may happen either synchronously,
   before `start_link/2` returns, or asynchronously. This behaviour is decided by
@@ -83,7 +64,17 @@ defmodule Redix do
   This function accepts one argument which can either be an string representing
   a URI or a keyword list of options.
 
-  ## Redis URI
+  ## Using in supervision trees
+
+  Redix supports child specs, so you can use it as part of a supervision tree:
+
+      children = [
+        {Redix, host: "redix.myapp.com", name: :redix}
+      ]
+
+  See `child_spec/1` for more information.
+
+  ## Using a Redis URI
 
   In case `uri_or_opts` is a Redis URI, it must be in the form:
 
@@ -202,6 +193,58 @@ defmodule Redix do
   def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
     opts = Redix.URI.opts_from_uri(uri)
     start_link(Keyword.merge(opts, other_opts))
+  end
+
+  @doc """
+  Returns a child spec to use Redix in supervision trees.
+
+  To use Redix with the default options (same as calling `start_link()`):
+
+      children = [
+        Redix,
+        # ...
+      ]
+
+  You can pass options:
+
+      children = [
+        {Redix, host: "redix.example.com", name: :redix},
+        # ...
+      ]
+
+  You can also pass a URI:
+
+      children = [
+        {Redix, "redis://redix.example.com:6380"}
+      ]
+
+  If you want to pass both a URI and options, you can do it by passing a tuple with the URI as the
+  first element and the list of options (make sure it has brackets around if using literals) as
+  the second element:
+
+      children = [
+        {Redix, {"redis://redix.example.com", [name: :redix]}}
+      ]
+
+  """
+  @spec child_spec(uri | keyword() | {uri, keyword()}) :: Supervisor.child_spec()
+        when uri: binary()
+  def child_spec(uri_or_opts)
+
+  def child_spec({uri, opts}) when is_binary(uri) and is_list(opts) do
+    child_spec_with_args([uri, opts])
+  end
+
+  def child_spec(uri_or_opts) when is_binary(uri_or_opts) or is_list(uri_or_opts) do
+    child_spec_with_args([uri_or_opts])
+  end
+
+  def child_spec_with_args(args) do
+    %{
+      id: __MODULE__,
+      type: :worker,
+      start: {__MODULE__, :start_link, args}
+    }
   end
 
   @doc """
