@@ -45,27 +45,12 @@ defmodule Redix do
   These commands are `CLIENT REPLY ON`, `CLIENT REPLY SKIP`, and `CLIENT REPLY OFF`.
   When you use `CLIENT REPLY SKIP`, only the command that follows will not get a reply.
   When you use `CLIENT REPLY OFF`, all the commands that follow will not get replies until
-  `CLIENT REPLY ON` is issued. Redix supports these commands. For example, look at this
-  pipeline:
-
-      Redix.pipeline!(conn, [
-        ["CLIENT", "REPLY", "OFF"],
-        ["INCR mykey"],
-        ["INCR mykey"],
-        ["CLIENT", "REPLY", "ON"],
-        ["GET", "mykey"]
-      ])
-
-  The responses to these commands will be `["OK", "2"]`. The `"OK"` is the reply to
-  `CLIENT REPLY ON` and `"2"` is the reply to `GET mykey`.
+  `CLIENT REPLY ON` is issued. Redix does not support these commands directly because they
+  would change the whole state of the connection. To skip replies, use `noreply_pipeline/3`
+  or `noreply_command/3`.
 
   Skipping replies is useful to improve performance when you want to issue many commands
   but are not interested in the responses to those commands.
-
-  Note that the return value of `pipeline/3` and `pipeline!/3` don't change based
-  on `CLIENT REPLY`. That is, the return value is a list of responses anyways, possibly
-  with less responses than the original commands. However, the return value of
-  `command/3` and `command!/3` will change to `:ok` if the response is skipped.
 
   ## SSL
 
