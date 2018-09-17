@@ -3,9 +3,11 @@ defmodule RedixTest do
 
   import ExUnit.CaptureLog
 
-  alias Redix.Error
-  alias Redix.ConnectionError
-  alias Redix.TestHelpers
+  alias Redix.{
+    ConnectionError,
+    Error,
+    TestHelpers
+  }
 
   @host TestHelpers.test_host()
   @port TestHelpers.test_port()
