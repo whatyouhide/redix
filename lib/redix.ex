@@ -354,7 +354,7 @@ defmodule Redix do
           {:ok, [Redix.Protocol.redis_value()]} | {:error, atom() | Redix.Error.t()}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
-    Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
+    pipeline_without_checks(conn, commands, opts)
   end
 
   @doc """
@@ -399,6 +399,58 @@ defmodule Redix do
   def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, response} -> response
+      {:error, error} -> raise error
+    end
+  end
+
+  @doc """
+  Issues a pipeline of commands to the Redis server, asking the server to not send responses.
+
+  This function is useful when you want to issue commands to the Redis server but you don't
+  care about the responses. For example, you might want to set a bunch of keys but you don't
+  care for a confirmation that they were set. In these cases, you can save bandwith by asking
+  Redis to not send replies to your commands.
+
+  Since no replies are sent back, this function returns `:ok` in case there are no network
+  errors, or `{:error, reason}` otherwise
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
+
+  ## Examples
+
+      iex> commands = [["INCR", "mykey"], ["INCR", "meykey"]]
+      iex> Redix.noreply_pipeline(conn, commands)
+      :ok
+      iex> Redix.command(conn, ["GET", "mykey"])
+      {:ok, "2"}
+
+  """
+  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+
+  @spec noreply_pipeline(connection(), [command()], keyword()) ::
+          :ok | {:error, atom() | Redix.Error.t()}
+  def noreply_pipeline(conn, commands, opts \\ []) do
+    assert_valid_pipeline_commands(commands)
+    commands = [["CLIENT", "REPLY", "OFF"]] ++ commands ++ [["CLIENT", "REPLY", "ON"]]
+
+    # The "OK" response comes from the last "CLIENT REPLY ON".
+    with {:ok, ["OK"]} <- pipeline_without_checks(conn, commands, opts),
+         do: :ok
+  end
+
+  @doc """
+  Same as `noreply_pipeline/3` but raises in case of errors.
+  """
+  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+  @spec noreply_pipeline!(connection(), [command()], keyword()) :: :ok
+  def noreply_pipeline!(conn, commands, opts \\ []) do
+    case noreply_pipeline(conn, commands, opts) do
+      :ok -> :ok
       {:error, error} -> raise error
     end
   end
@@ -513,6 +565,51 @@ defmodule Redix do
   end
 
   @doc """
+  Same as `command/3` but tells the Redis server to not return a response.
+
+  This function is useful when you want to send a command but you don't care about the response.
+  Since the response is not returned, the return value of this function in case the command
+  is successfully sent to Redis is `:ok`.
+
+  Not receiving a response means saving traffic on the network and memory allocation for the
+  response. See also `noreply_pipeline/3`.
+
+  ## Options
+
+    * `:timeout` - (integer or `:infinity`) request timeout (in
+      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
+      doesn't reply within this timeout, `{:error,
+      %Redix.ConnectionError{reason: :timeout}}` is returned.
+
+  ## Examples
+
+      iex> Redix.noreply_command(conn, ["INCR", "mykey"])
+      :ok
+      iex> Redix.command(conn, ["GET", "mykey"])
+      {:ok, "1"}
+
+  """
+  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+
+  @spec noreply_command(connection(), command(), keyword()) ::
+          :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
+  def noreply_command(conn, command, opts \\ []) do
+    noreply_pipeline(conn, [command], opts)
+  end
+
+  @doc """
+  Same as `noreply_command/3` but raises in case of errors.
+  """
+  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+  @spec noreply_command!(connection(), command(), keyword()) :: :ok
+  def noreply_command!(conn, command, opts \\ []) do
+    case noreply_command(conn, command, opts) do
+      :ok -> :ok
+      {:error, error} -> raise error
+    end
+  end
+
+  @doc """
   Executes a `MULTI`/`EXEC` transaction.
 
   Redis supports something akin to transactions. It works by sending a `MULTI` command,
@@ -595,31 +692,52 @@ defmodule Redix do
     end
   end
 
+  defp pipeline_without_checks(conn, commands, opts) do
+    Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
+  end
+
   defp assert_valid_pipeline_commands([] = _commands) do
     raise ArgumentError, "no commands passed to the pipeline"
   end
 
   defp assert_valid_pipeline_commands(commands) when is_list(commands) do
-    Enum.each(commands, fn
-      [] ->
-        raise ArgumentError, "got an empty command ([]), which is not a valid Redis command"
+    Enum.each(commands, &assert_valid_command/1)
+  end
 
-      [first | _] = command when first in ~w(SUBSCRIBE PSUBSCRIBE UNSUBSCRIBE PUNSUBSCRIBE) ->
+  defp assert_valid_pipeline_commands(other) do
+    raise ArgumentError, "expected a list of Redis commands, got: #{inspect(other)}"
+  end
+
+  defp assert_valid_command([]) do
+    raise ArgumentError, "got an empty command ([]), which is not a valid Redis command"
+  end
+
+  defp assert_valid_command([first, second | _] = command) do
+    case String.upcase(first) do
+      first when first in ["SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE"] ->
         raise ArgumentError,
               "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
                 "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
                 "functionality support. Offending command: #{inspect(command)}"
 
-      command when is_list(command) ->
-        :ok
+      "CLIENT" ->
+        if String.upcase(second) == "REPLY" do
+          raise ArgumentError,
+                "CLIENT REPLY commands are forbidden because of how Redix works internally. " <>
+                  "If you want to issue commands without getting a reply, use noreply_pipeline/2 or noreply_command/2"
+        end
 
-      other ->
-        raise ArgumentError,
-              "expected a list of binaries as each Redis command, got: #{inspect(other)}"
-    end)
+      _other ->
+        :ok
+    end
   end
 
-  defp assert_valid_pipeline_commands(other) do
-    raise ArgumentError, "expected a list of Redis commands, got: #{inspect(other)}"
+  defp assert_valid_command(other) when not is_list(other) do
+    raise ArgumentError,
+          "expected a list of binaries as each Redis command, got: #{inspect(other)}"
+  end
+
+  defp assert_valid_command(_command) do
+    :ok
   end
 end

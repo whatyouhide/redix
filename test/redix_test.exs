@@ -319,26 +319,16 @@ defmodule RedixTest do
     end
   end
 
-  describe "CLIENT REPLY command" do
-    test "SKIP", %{conn: conn} do
-      assert Redix.pipeline!(conn, [~w(CLIENT REPLY SKIP), ~w(PING), ~w(PING)]) == ["PONG"]
-
-      assert Redix.command!(conn, ~w(CLIENT REPLY SKIP)) == :ok
-      assert Redix.command!(conn, ~w(PING)) == :ok
-      assert Redix.command!(conn, ~w(PING)) == "PONG"
+  describe "noreply_* functions" do
+    test "noreply_pipeline/3", %{conn: conn} do
+      commands = [~w(INCR noreply_pl_mykey), ~w(INCR noreply_pl_mykey)]
+      assert Redix.noreply_pipeline(conn, commands) == :ok
+      assert Redix.command!(conn, ~w(GET noreply_pl_mykey)) == "2"
     end
 
-    test "ON/OFF", %{conn: conn} do
-      commands = [
-        ~w(INCR mykey),
-        ~w(CLIENT REPLY OFF),
-        ~w(INCR mykey),
-        ~w(INCR mykey),
-        ~w(CLIENT REPLY ON),
-        ~w(GET mykey)
-      ]
-
-      assert Redix.pipeline!(conn, commands) == [1, "OK", "3"]
+    test "noreply_command/3", %{conn: conn} do
+      assert Redix.noreply_command(conn, ["SET", "noreply_cmd_mykey", "myvalue"]) == :ok
+      assert Redix.command!(conn, ["GET", "noreply_cmd_mykey"]) == "myvalue"
     end
   end
 
