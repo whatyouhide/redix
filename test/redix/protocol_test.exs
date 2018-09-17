@@ -2,8 +2,6 @@ defmodule Redix.ProtocolTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
-  import Redix.TestHelpers, only: [parse_with_continuations: 1, parse_with_continuations: 2]
-
   alias Redix.{Error, Protocol.ParseError}
 
   doctest Redix.Protocol
@@ -176,5 +174,29 @@ defmodule Redix.ProtocolTest do
   defp append_to_last(parts, unsplittable_part) do
     {first_parts, [last_part]} = Enum.split(parts, -1)
     first_parts ++ [last_part <> unsplittable_part]
+  end
+
+  defp parse_with_continuations(data) do
+    parse_with_continuations(data, &Redix.Protocol.parse/1)
+  end
+
+  defp parse_with_continuations([data], parser_fun) do
+    parser_fun.(data)
+  end
+
+  defp parse_with_continuations([first | rest], parser_fun) do
+    import ExUnit.Assertions
+
+    {rest, [last]} = Enum.split(rest, -1)
+
+    assert {:continuation, cont} = parser_fun.(first)
+
+    last_cont =
+      Enum.reduce(rest, cont, fn data, cont_acc ->
+        assert {:continuation, cont_acc} = cont_acc.(data)
+        cont_acc
+      end)
+
+    last_cont.(last)
   end
 end
