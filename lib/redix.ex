@@ -27,7 +27,7 @@ defmodule Redix do
   increased exponentially. Some aspects of this behaviour can be configured; see
   `start_link/2` and the "Reconnections" page in the docs for more information.
 
-  ## Transactions or pipelining
+  ## Transactions or pipelining?
 
   Pipelining and transactions have things in common but they're fundamentally different.
   With a pipeline, you're sending all commands in the pipeline *at once* on the connection
@@ -206,7 +206,7 @@ defmodule Redix do
   Starts a connection to Redis.
 
   This is the same as `start_link/1`, but the URI and the options get merged. `other_opts` have
-  precedence over the things specified in `uri`. For example, take this code:
+  precedence over the things specified in `uri`. Take this code:
 
       start_link("redis://localhost:6379", port: 6380)
 
@@ -262,7 +262,7 @@ defmodule Redix do
     child_spec_with_args([uri_or_opts])
   end
 
-  def child_spec_with_args(args) do
+  defp child_spec_with_args(args) do
     %{
       id: __MODULE__,
       type: :worker,
