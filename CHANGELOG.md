@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0
+
+### Breaking changes
+
+* Drop support for Elixir < 1.6.
+* Unify `start_link` options: there's no more separation between "Redis options" and "connection options". Now, all the options are passed in together. You can still pass a Redis URI as the first argument. This is a breaking change because now calling `start_link/2` with two kewyord lists breaks.
+
+### Bug fixes and improvements
+
+* Rewrite the connection using [`gen_statem`](http://erlang.org/doc/man/gen_statem.html) in order to drop the dependency to [Connection](https://github.com/fishcakez/connection).
+* Add `Redix.transaction_pipeline/3` and `Redix.transaction_pipeline!/3`.
+* Use a timeout when connecting to Redis (which sometimes could get stuck).
+* Add support for SSL 🔐
+* Add `Redix.noreply_command/3` and `Redix.noreply_pipeline/3` (plus their bang `!` variants).
+
 ## v0.7.1
 
 * Add support for Unix domain sockets by passing `host: {:local, path}`.
