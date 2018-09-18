@@ -183,10 +183,20 @@ defmodule RedixTest do
       assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~W(PING), timeout: 0)
     end
 
-    test "Redix process crashes while waiting", %{conn: c} do
+    test "Redix process crashes while waiting", %{conn: conn} do
       Process.flag(:trap_exit, true)
-      pid = spawn_link(fn -> Redix.command!(c, ~w(BLPOP mid_command_disconnection 0)) end)
-      Process.exit(c, :kill)
+
+      pid =
+        spawn_link(fn ->
+          Redix.command(conn, ~w(BLPOP mid_command_disconnection 0))
+        end)
+
+      # We sleep to allow the task to issue the command to Redix.
+      Process.sleep(100)
+
+      Process.exit(conn, :kill)
+
+      assert_receive {:EXIT, ^conn, :killed}
       assert_receive {:EXIT, ^pid, :killed}
     end
 
@@ -384,20 +394,17 @@ defmodule RedixTest do
       refute_receive {_ref, _message}
     end
 
-    test "mid-command disconnections", %{conn: c} do
-      capture_log(fn ->
-        {_pid, ref} =
-          Process.spawn(
-            fn ->
-              # BLPOP with a timeout of 0 blocks indefinitely
-              assert Redix.command(c, ~w(BLPOP mid_command_disconnection 0)) ==
-                       {:error, %ConnectionError{reason: :disconnected}}
-            end,
-            [:monitor, :link]
-          )
+    test "mid-command disconnections", %{conn: conn} do
+      {:ok, kill_conn} = Redix.start_link(host: @host, port: @port)
 
-        Redix.command!(c, ~w(QUIT))
-        assert_receive {:DOWN, ^ref, _, _, _}, 200
+      capture_log(fn ->
+        task = Task.async(fn -> Redix.command(conn, ~w(BLPOP mid_command_disconnection 0)) end)
+
+        # Give the task the time to issue the command to Redis, then kill the connection.
+        Process.sleep(50)
+        Redix.command!(kill_conn, ~w(CLIENT KILL TYPE normal SKIPME yes))
+
+        assert Task.await(task, 100) == {:error, %ConnectionError{reason: :disconnected}}
       end)
     end
 
