@@ -26,7 +26,7 @@ defmodule Redix.ConnectionError do
     * `:reason` - (atom) the error reason. It can be one of the Redix-specific
       reasons described in the "Error reasons" section below, or any error
       reason returned by functions in the `:gen_tcp` module (see the
-      [`:inet.posix/0](http://www.erlang.org/doc/man/inet.html#type-posix) type.
+      [`:inet.posix/0`](http://www.erlang.org/doc/man/inet.html#type-posix) type.
 
   ## Error reasons
 
