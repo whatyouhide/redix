@@ -1,11 +1,15 @@
 # Changelog
 
+## v0.8.1
+
+* Re-introduce `start_link/2` with two lists of options, but deprecate it. It will be removed in the next Redix version.
+
 ## v0.8.0
 
 ### Breaking changes
 
 * Drop support for Elixir < 1.6.
-* Unify `start_link` options: there's no more separation between "Redis options" and "connection options". Now, all the options are passed in together. You can still pass a Redis URI as the first argument. This is a breaking change because now calling `start_link/2` with two kewyord lists breaks.
+* Unify `start_link` options: there's no more separation between "Redis options" and "connection options". Now, all the options are passed in together. You can still pass a Redis URI as the first argument. This is a breaking change because now calling `start_link/2` with two kewyord lists breaks. Note that `start_link/2` with two keyword lists still works, but emits a warning and is deprecated.
 
 ### Bug fixes and improvements
 
