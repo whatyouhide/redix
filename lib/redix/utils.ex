@@ -120,7 +120,9 @@ defmodule Redix.Utils do
     inet_mod = if transport == :ssl, do: :ssl, else: :inet
 
     with {:ok, opts} <- inet_mod.getopts(socket, [:sndbuf, :recbuf, :buffer]) do
-      [sndbuf: sndbuf, recbuf: recbuf, buffer: buffer] = opts
+      sndbuf = Keyword.get(opts, :sndbuf)
+      recbuf = Keyword.get(opts, :recbuf)
+      buffer = Keyword.get(opts, :buffer)
       inet_mod.setopts(socket, buffer: buffer |> max(sndbuf) |> max(recbuf))
     end
   end
