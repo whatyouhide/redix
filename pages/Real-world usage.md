@@ -27,28 +27,27 @@ Note that this pattern extends to more than one global (named) Redix: for exampl
 
 ## Name-based pool
 
-When you want to have a pool of connections, you can start many connections and register them by name. Say you want to have a pool of five Redis connections. You can start these connections in a supervisor under your supervision tree:
-
-```elixir
-pool_size = 5
-
-children =
-  for i <- 0..(pool_size - 1) do
-    Supervisor.child_spec({Redix, name: :"redix_#{i}"}, id: {Redix, i})
-  end
-
-# This child spec would go under the app's supervisor:
-%{
-  id: RedixSupervisor,
-  type: :supervisor,
-  start: {Supervisor, :start_link, children}
-}
-```
-
-Then, you can build a simple wrapper module around Redix which will dispatch to one of the five Redix processes (with whatever strategy makes sense, for example randomly):
+When you want to have a pool of connections, you can start many connections and register them by name. Say you want to have a pool of five Redis connections. You can start these connections in a supervisor under your supervision tree and then create a wrapper module that calls connections from the pool. The wrapper can use any strategy to choose which connection to use, for example a random strategy.
 
 ```elixir
 defmodule MyApp.Redix do
+  @pool_size 5
+
+  def child_spec(_args) do
+    # Specs for the Redix connections.
+    children =
+      for i <- 0..(@pool_size - 1) do
+        Supervisor.child_spec({Redix, name: :"redix_#{i}"}, id: {Redix, i})
+      end
+
+    # Spec for the supervisor that will supervise the Redix connections.
+    %{
+      id: RedixSupervisor,
+      type: :supervisor,
+      start: {Supervisor, :start_link, [children, [strategy: :one_for_one]]}
+    }
+  end
+
   def command(command) do
     Redix.command(:"redix_#{random_index()}", command)
   end
@@ -56,6 +55,19 @@ defmodule MyApp.Redix do
   defp random_index() do
     rem(System.unique_integer([:positive]), 5)
   end
+end
+```
+
+You can then start the Redix connections and their supervisor in the application's supervision tree:
+
+```elixir
+def start(_type, _args) do
+  children = [
+    MyApp.Redix,
+    # ...other children
+  ]
+
+  Supervisor.start_link(children, strategy: :one_for_one)
 end
 ```
 
