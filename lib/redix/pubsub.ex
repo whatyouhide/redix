@@ -166,7 +166,7 @@ defmodule Redix.PubSub do
   @type subscriber() :: pid() | port() | atom() | {atom(), node()}
   @type connection() :: :gen_statem.server_ref()
 
-  alias Redix.Utils
+  alias Redix.StartOptions
 
   @doc """
   Starts a pub/sub connection to Redis.
@@ -287,7 +287,7 @@ defmodule Redix.PubSub do
   end
 
   def start_link(opts) when is_list(opts) do
-    opts = Utils.sanitize_starting_opts(opts)
+    opts = StartOptions.sanitize(opts)
 
     case Keyword.pop(opts, :name) do
       {nil, opts} ->

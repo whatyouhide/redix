@@ -1,7 +1,7 @@
 defmodule Redix.Connection do
   @moduledoc false
 
-  alias Redix.{ConnectionError, Protocol, SocketOwner, Utils}
+  alias Redix.{ConnectionError, Protocol, SocketOwner, StartOptions, Utils}
 
   require Logger
 
@@ -23,7 +23,7 @@ defmodule Redix.Connection do
   ## Public API
 
   def start_link(opts) when is_list(opts) do
-    opts = Utils.sanitize_starting_opts(opts)
+    opts = StartOptions.sanitize(opts)
 
     case Keyword.pop(opts, :name) do
       {nil, opts} ->

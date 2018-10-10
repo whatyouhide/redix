@@ -81,12 +81,6 @@ defmodule RedixTest do
       {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}", name: :redix_uri)
       assert Process.whereis(:redix_uri) == pid
     end
-
-    test "the :log option must be a list" do
-      assert_raise ArgumentError, ~r/the :log option must be a keyword list/, fn ->
-        Redix.start_link(host: @host, port: @port, log: :not_a_list)
-      end
-    end
   end
 
   test "child_spec/1" do
