@@ -5,7 +5,7 @@ defmodule Redix.Mixfile do
 
   @repo_url "https://github.com/whatyouhide/redix"
 
-  @version "0.8.1"
+  @version "0.8.2"
 
   def project() do
     [

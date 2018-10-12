@@ -1,10 +1,16 @@
 # Changelog
 
+## v0.8.2
+
+### Bug fixes and improvements
+
+  * Fix an error when setting up SSL buffers (#106).
+
 ## v0.8.1
 
 ### Bug fixes and improvements
 
-* Re-introduce `start_link/2` with two lists of options, but deprecate it. It will be removed in the next Redix version.
+  * Re-introduce `start_link/2` with two lists of options, but deprecate it. It will be removed in the next Redix version.
 
 ## v0.8.0
 
