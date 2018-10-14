@@ -67,7 +67,7 @@ defmodule Redix.PubSub.Connection do
 
   def disconnected(:internal, :handle_disconnection, data) do
     log(data, :disconnection, fn ->
-      "Disconnected from Redis (#{Utils.format_host(data)}): " <>
+      "Disconnected from Redis (#{format_host(data)}): " <>
         Exception.message(data.last_disconnect_reason)
     end)
 
@@ -90,7 +90,7 @@ defmodule Redix.PubSub.Connection do
     with {:ok, socket} <- Utils.connect(data.opts),
          :ok <- setopts(data, socket, active: :once) do
       if data.last_disconnect_reason do
-        log(data, :reconnection, fn -> "Reconnected to Redis (#{Utils.format_host(data)})" end)
+        log(data, :reconnection, fn -> "Reconnected to Redis (#{format_host(data)})" end)
       end
 
       data = %__MODULE__{data | socket: socket, last_disconnect_reason: nil, backoff_current: nil}
@@ -98,7 +98,7 @@ defmodule Redix.PubSub.Connection do
     else
       {:error, reason} ->
         log(data, :failed_connection, fn ->
-          "Failed to connect to Redis (#{Utils.format_host(data)}): " <>
+          "Failed to connect to Redis (#{format_host(data)}): " <>
             Exception.message(%ConnectionError{reason: reason})
         end)
 
@@ -503,5 +503,9 @@ defmodule Redix.PubSub.Connection do
       |> Keyword.fetch!(action)
 
     Logger.log(level, message)
+  end
+
+  defp format_host(%{opts: opts} = _state) do
+    "#{opts[:host]}:#{opts[:port]}"
   end
 end

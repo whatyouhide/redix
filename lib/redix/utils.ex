@@ -42,11 +42,6 @@ defmodule Redix.Utils do
     end
   end
 
-  @spec format_host(Redix.Connection.state()) :: String.t()
-  def format_host(%{opts: opts} = _state) do
-    "#{opts[:host]}:#{opts[:port]}"
-  end
-
   # Setups the `:buffer` option of the given socket.
   defp setup_socket_buffers(socket, transport) do
     inet_mod = if transport == :ssl, do: :ssl, else: :inet

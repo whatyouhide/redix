@@ -1,7 +1,7 @@
 defmodule Redix.Connection do
   @moduledoc false
 
-  alias Redix.{ConnectionError, Protocol, SocketOwner, StartOptions, Utils}
+  alias Redix.{ConnectionError, Protocol, SocketOwner, StartOptions}
 
   require Logger
 
@@ -147,7 +147,7 @@ defmodule Redix.Connection do
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     log(data, :failed_connection, fn ->
       [
-        "Disconnected from Redis (#{Utils.format_host(data)}): ",
+        "Disconnected from Redis (#{format_host(data)}): ",
         Exception.message(%ConnectionError{reason: reason})
       ]
     end)
@@ -157,7 +157,7 @@ defmodule Redix.Connection do
 
   def connecting(:info, {:connected, owner, socket}, %__MODULE__{socket_owner: owner} = data) do
     if data.backoff_current do
-      log(data, :reconnection, fn -> "Reconnected to Redis (#{Utils.format_host(data)})" end)
+      log(data, :reconnection, fn -> "Reconnected to Redis (#{format_host(data)})" end)
     end
 
     data = %{data | socket: socket, backoff_current: nil}
@@ -172,7 +172,7 @@ defmodule Redix.Connection do
     # We log this when the socket owner stopped while connecting.
     log(data, :failed_connection, fn ->
       [
-        "Failed to connect to Redis (#{Utils.format_host(data)}): ",
+        "Failed to connect to Redis (#{format_host(data)}): ",
         Exception.message(%ConnectionError{reason: reason})
       ]
     end)
@@ -218,7 +218,7 @@ defmodule Redix.Connection do
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     log(data, :failed_connection, fn ->
       [
-        "Disconnected from Redis (#{Utils.format_host(data)}): ",
+        "Disconnected from Redis (#{format_host(data)}): ",
         Exception.message(%ConnectionError{reason: reason})
       ]
     end)
@@ -325,4 +325,8 @@ defmodule Redix.Connection do
   end
 
   defp parse_client_reply(_other), do: nil
+
+  defp format_host(%{opts: opts} = _state) do
+    "#{opts[:host]}:#{opts[:port]}"
+  end
 end
