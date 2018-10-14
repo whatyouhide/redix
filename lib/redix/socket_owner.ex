@@ -3,7 +3,7 @@ defmodule Redix.SocketOwner do
 
   use GenServer
 
-  alias Redix.{Protocol, Utils}
+  alias Redix.{Connector, Protocol}
 
   defstruct [
     :conn,
@@ -36,7 +36,7 @@ defmodule Redix.SocketOwner do
   def handle_info(msg, state)
 
   def handle_info(:connect, state) do
-    with {:ok, socket} <- Utils.connect(state.opts),
+    with {:ok, socket} <- Connector.connect(state.opts),
          :ok <- setopts(state, socket, active: :once) do
       send(state.conn, {:connected, self(), socket})
       {:noreply, %{state | socket: socket}}

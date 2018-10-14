@@ -3,7 +3,7 @@ defmodule Redix.PubSub.Connection do
 
   @behaviour :gen_statem
 
-  alias Redix.{ConnectionError, Protocol, Utils}
+  alias Redix.{ConnectionError, Connector, Protocol}
 
   require Logger
 
@@ -29,7 +29,7 @@ defmodule Redix.PubSub.Connection do
     data = %__MODULE__{opts: opts, transport: transport}
 
     if opts[:sync_connect] do
-      with {:ok, socket} <- Utils.connect(data.opts),
+      with {:ok, socket} <- Connector.connect(data.opts),
            :ok <- setopts(data, socket, active: :once) do
         data = %__MODULE__{
           data
@@ -87,7 +87,7 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnected(:internal, :connect, data) do
-    with {:ok, socket} <- Utils.connect(data.opts),
+    with {:ok, socket} <- Connector.connect(data.opts),
          :ok <- setopts(data, socket, active: :once) do
       if data.last_disconnect_reason do
         log(data, :reconnection, fn -> "Reconnected to Redis (#{format_host(data)})" end)
