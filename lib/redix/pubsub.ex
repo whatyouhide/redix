@@ -137,6 +137,11 @@ defmodule Redix.PubSub do
   `Redix.PubSub.start_link/2`, the `Redix.PubSub` process will exit and not send
   any `:disconnected` messages to subscribed clients.
 
+  ## Sentinel support
+
+  Works exactly the same as for normal `Redix` connections. See the documentation for `Redix`
+  for more information.
+
   ## Examples
 
   This is an example of a workflow using the PubSub functionality; it uses
@@ -275,6 +280,9 @@ defmodule Redix.PubSub do
     * `:ssl` - (boolean) if `true`, connect through SSL, otherwise through TCP. The
       `:socket_opts` option applies to both SSL and TCP, so it can be used for things
       like certificates. See `:ssl.connect/4`. Defaults to `false`.
+
+    * `:sentinels` - (list of options) exactly the same as the `:sentinel` options in
+      `Redix.start_link/1`.
 
   ## Examples
 

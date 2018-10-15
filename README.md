@@ -74,7 +74,13 @@ Redix is low-level, but it's still built to handle most things thrown at it. For
 
 ## Contributing
 
-Clone the repository and run `$ mix test` to make sure everything is working. For tests to pass, you must have a Redis server running on `localhost`, port `6379`. Both may be configured using the environment variables `REDIX_TEST_HOST` and `REDIX_TEST_PORT` respectively. **Note**: tests will wipe clean all the databases on the running Redis server, as they call `FLUSHALL` multiple times.
+To run the Redix test suite you will have to have Redis running locally. Redix requires a somewhat complex setup for running tests (because it needs a few instances running, for pub/sub and sentinel). For this reason, in this repository you'll find a `docker-compose.yml` file so that you can use [Docker][docker] and [docker-compose][] to spin up all the necessary Redis instaces with just one command. Make sure you have Docker installed and then just run:
+
+```bash
+docker-compose up
+```
+
+Now, you're ready to run tests with the `$ mix test` command.
 
 ## License
 
@@ -85,3 +91,5 @@ Redix is released under the MIT license. See the [license file](LICENSE.txt).
 [redix-pubsub]: https://github.com/whatyouhide/redix_pubsub
 [docs-reconnections]: http://hexdocs.pm/redix/reconnections.html
 [docs-real-world-usage]: http://hexdocs.pm/redix/real-world-usage.html
+[docker]: https://www.docker.com
+[docker-compose]: https://docs.docker.com/compose/

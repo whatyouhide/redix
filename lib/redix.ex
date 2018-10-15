@@ -27,6 +27,27 @@ defmodule Redix do
   increased exponentially. Some aspects of this behaviour can be configured; see
   `start_link/2` and the "Reconnections" page in the docs for more information.
 
+  ## Sentinel
+
+  **Note**: support for Redis Sentinel is still experimental. It works, but the API might
+  change a little bit and the design might be revisited.
+
+  Redix supports [Redis Sentinel](https://redis.io/topics/sentinel) by passing a `:sentinel`
+  option to `start_link/1` (or `start_link/2`) instead of `:host` and `:port`. In `:sentinel`,
+  you'll specify a list of sentinel nodes to try when connecting and the name of a primary group
+  (see `start_link/1` for more detailed information on these options). When connecting, Redix will
+  attempt to connect to each of the specified sentinels in the given order. When it manages to
+  connect to a sentinel, it will ask that sentinel for the address of the primary for the given
+  primary group. Then, it will connect to that primary and ask it for confirmation that it is
+  indeed a primary. If anything in this process doesn't go right, the next sentinel in the list
+  will be tried.
+
+  All of this happens in case of disconnections as well. If there's a disconnection, the whole
+  process of asking sentinels for a primary is executed again.
+
+  You should only care about Redis Sentinel when starting a `Redix` connection: once started,
+  using the connection will be exactly the same as the non-sentinel scenario.
+
   ## Transactions or pipelining?
 
   Pipelining and transactions have things in common but they're fundamentally different.
@@ -183,6 +204,36 @@ defmodule Redix do
     * `:ssl` - (boolean) if `true`, connect through SSL, otherwise through TCP. The
       `:socket_opts` option applies to both SSL and TCP, so it can be used for things
       like certificates. See `:ssl.connect/4`. Defaults to `false`.
+
+    * `:sentinel` - (keyword list) options for using
+      [Redis Sentinel](https://redis.io/topics/sentinel). If this option is provided, then the
+      `:host` and `:port` option cannot be provided. For the available sentinel options, see the
+      "Sentinel options" section below.
+
+  ### Sentinel options
+
+  The following options can be used to configure the Redis Sentinel behaviour when connecting.
+  These options should be passed in the `:sentinel` key in the connection options. For more
+  information on support for Redis sentinel, see the `Redix` module documentation.
+
+    * `:sentinels` - (list) a list of `{host, port}` tuples where `host` is a binary and port is
+      an integer. Each element in this list is the address of a sentinel to be contacted in order
+      to obtain the address of a primary. This option is required.
+
+    * `:group` - (binary) the name of the group that identifies the primary in the sentinel
+      configuration. This option is required.
+
+    * `:socket_opts` - (list of options) the socket options that will be used when connecting to
+      the sentinels. Defaults to `[]`.
+
+    * `:ssl` - (boolean) if `true`, connect to the sentinels via through SSL, otherwise through
+      TCP. The `:socket_opts` applies to both TCP and SSL, so it can be used for things like
+      certificates. See `:ssl.connect/4`. Defaults to `false`.
+
+    * `:timeout` - (timeout) the timeout (in milliseconds or `:infinity`) that will be used to
+      interact with the sentinels. This timeout will be used as the timeout when connecting to
+      each sentinel and when asking sentinels for a primary. The Redis documentation suggests
+      to keep this timeout short so that connection to Redis can happen quickly.
 
   ## Examples
 

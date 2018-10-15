@@ -1,17 +1,29 @@
 version: '3'
 
 services:
-  redix-base:
+  base:
     image: "redis:alpine"
     command: redis-server --port 6379
     ports:
       - "6379:6379"
     sysctls:
       net.core.somaxconn: 1024
-  redix-pubsub:
+
+  pubsub:
     image: "redis:alpine"
     command: redis-server --port 6380
     ports:
       - "6380:6380"
+    sysctls:
+      net.core.somaxconn: 1024
+
+  sentinel:
+    build: ./test/docker/sentinel
+    ports:
+      - "6381:6381"
+      - "6382:6382"
+      - "26379:26379"
+      - "26380:26380"
+      - "26381:26381"
     sysctls:
       net.core.somaxconn: 1024
