@@ -292,7 +292,7 @@ defmodule RedixTest do
     end
 
     test "Redis errors", %{conn: c} do
-      assert_raise Redix.Error, "ERR unknown command 'NONEXISTENT'", fn ->
+      assert_raise Redix.Error, ~r/ERR unknown command .NONEXISTENT./, fn ->
         Redix.command!(c, ["NONEXISTENT"])
       end
 
