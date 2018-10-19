@@ -53,7 +53,7 @@ defmodule MyApp.Redix do
   end
 
   defp random_index() do
-    rem(System.unique_integer([:positive]), 5)
+    rem(System.unique_integer([:positive]), @pool_size)
   end
 end
 ```
