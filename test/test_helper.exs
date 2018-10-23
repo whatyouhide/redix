@@ -10,8 +10,3 @@ case :gen_tcp.connect(String.to_charlist(host), port, []) do
   {:error, reason} ->
     Mix.raise("Cannot connect to Redis (http://#{host}:#{port}): #{:inet.format_error(reason)}")
 end
-
-defmodule Redix.TestHelpers do
-  def test_host(), do: unquote(host)
-  def test_port(), do: unquote(port)
-end

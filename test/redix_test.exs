@@ -1,19 +1,15 @@
 defmodule RedixTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
   alias Redix.{
     ConnectionError,
-    Error,
-    TestHelpers
+    Error
   }
 
-  @host TestHelpers.test_host()
-  @port TestHelpers.test_port()
-
   setup_all do
-    {:ok, conn} = Redix.start_link(host: @host, port: @port)
+    {:ok, conn} = Redix.start_link()
     Redix.command!(conn, ["FLUSHALL"])
     Redix.stop(conn)
     :ok
@@ -21,18 +17,18 @@ defmodule RedixTest do
 
   describe "start_link/2" do
     test "specifying a database" do
-      {:ok, c} = Redix.start_link(host: @host, port: @port, database: 1)
+      {:ok, c} = Redix.start_link(database: 1)
       assert Redix.command(c, ~w(SET my_key my_value)) == {:ok, "OK"}
 
       # Let's check we didn't write to the default database (which is 0).
-      {:ok, c} = Redix.start_link(host: @host, port: @port)
+      {:ok, c} = Redix.start_link()
       assert Redix.command(c, ~w(GET my_key)) == {:ok, nil}
     end
 
     test "specifying a non existing database" do
       capture_log(fn ->
         Process.flag(:trap_exit, true)
-        {:ok, pid} = Redix.start_link(host: @host, port: @port, database: 1000)
+        {:ok, pid} = Redix.start_link(database: 1000)
 
         assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
         assert message in ["ERR invalid DB index", "ERR DB index is out of range"]
@@ -42,7 +38,7 @@ defmodule RedixTest do
     test "specifying a password when no password is set" do
       capture_log(fn ->
         Process.flag(:trap_exit, true)
-        {:ok, pid} = Redix.start_link(host: @host, port: @port, password: "foo")
+        {:ok, pid} = Redix.start_link(password: "foo")
 
         error = %Error{message: "ERR Client sent AUTH, but no password is set"}
         assert_receive {:EXIT, ^pid, ^error}, 500
@@ -67,18 +63,18 @@ defmodule RedixTest do
     end
 
     test "using a redis:// url" do
-      {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
+      {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
     test "name registration" do
-      {:ok, pid} = Redix.start_link(host: @host, port: @port, name: :redix_server)
+      {:ok, pid} = Redix.start_link(name: :redix_server)
       assert Process.whereis(:redix_server) == pid
       assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
     end
 
     test "passing options along with a Redis URI" do
-      {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}", name: :redix_uri)
+      {:ok, pid} = Redix.start_link("redis://localhost", name: :redix_uri)
       assert Process.whereis(:redix_uri) == pid
     end
   end
@@ -104,7 +100,7 @@ defmodule RedixTest do
 
   describe "stop/1" do
     test "stops the connection" do
-      {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
+      {:ok, pid} = Redix.start_link()
       ref = Process.monitor(pid)
       assert Redix.stop(pid) == :ok
 
@@ -112,7 +108,7 @@ defmodule RedixTest do
     end
 
     test "closes the socket as well" do
-      {:ok, pid} = Redix.start_link(host: @host, port: @port, sync_connect: true)
+      {:ok, pid} = Redix.start_link(sync_connect: true)
 
       # This is a hack to get the socket. If I'll have a better idea, good for me :).
       {_, data} = :sys.get_state(pid)
@@ -402,7 +398,7 @@ defmodule RedixTest do
     end
 
     test "mid-command disconnections", %{conn: conn} do
-      {:ok, kill_conn} = Redix.start_link(host: @host, port: @port)
+      {:ok, kill_conn} = Redix.start_link()
 
       capture_log(fn ->
         task = Task.async(fn -> Redix.command(conn, ~w(BLPOP mid_command_disconnection 0)) end)
@@ -438,7 +434,7 @@ defmodule RedixTest do
   end
 
   test ":exit_on_disconnection option" do
-    {:ok, c} = Redix.start_link(host: @host, port: @port, exit_on_disconnection: true)
+    {:ok, c} = Redix.start_link(exit_on_disconnection: true)
     Process.flag(:trap_exit, true)
 
     capture_log(fn ->
@@ -448,7 +444,7 @@ defmodule RedixTest do
   end
 
   defp connect(_context) do
-    {:ok, conn} = Redix.start_link(host: @host, port: @port)
+    {:ok, conn} = Redix.start_link()
     {:ok, %{conn: conn}}
   end
 end

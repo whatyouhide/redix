@@ -1,0 +1,17 @@
+version: '3'
+
+services:
+  redix-base:
+    image: "redis:alpine"
+    command: redis-server --port 6379
+    ports:
+      - "6379:6379"
+    sysctls:
+      net.core.somaxconn: 1024
+  redix-pubsub:
+    image: "redis:alpine"
+    command: redis-server --port 6380
+    ports:
+      - "6380:6380"
+    sysctls:
+      net.core.somaxconn: 1024

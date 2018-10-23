@@ -1,5 +1,5 @@
 defmodule Redix.PubSubTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -7,9 +7,12 @@ defmodule Redix.PubSubTest do
 
   @moduletag :pubsub
 
+  # See docker-compose.
+  @port 6380
+
   setup do
-    {:ok, pubsub} = PubSub.start_link()
-    {:ok, conn} = Redix.start_link()
+    {:ok, pubsub} = PubSub.start_link(port: @port)
+    {:ok, conn} = Redix.start_link(port: @port)
     {:ok, %{pubsub: pubsub, conn: conn}}
   end
 
@@ -226,7 +229,7 @@ defmodule Redix.PubSubTest do
   end
 
   test ":exit_on_disconnection option", %{conn: conn} do
-    {:ok, pubsub} = PubSub.start_link(exit_on_disconnection: true)
+    {:ok, pubsub} = PubSub.start_link(port: @port, exit_on_disconnection: true)
 
     # We need to subscribe to something so that this client becomes a PubSub
     # client and we can kill it with "CLIENT KILL TYPE pubsub".
