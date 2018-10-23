@@ -16,7 +16,7 @@ defmodule Redix.PubSub do
   each to different channels/patterns.
 
   A `Redix.PubSub` process can be started via `Redix.PubSub.start_link/2`; such
-  a process holds a single TCP connection to the Redis server.
+  a process holds a single TCP (or SSL) connection to the Redis server.
 
   `Redix.PubSub` has a message-oriented API. Subscribe operations are synchronous and return
   a reference that can then be used to match on all messages sent by the `Redix.PubSub` process.
@@ -30,12 +30,21 @@ defmodule Redix.PubSub do
       receive do message -> message end
       #=> {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "my_channel"}}
 
-  After a subscription, messages published to a channel are delivered to all
-  Elixir processes subscribed to that channel via `Redix.PubSub`:
+  When the `:subscribed` message is received, it's guaranteed that the `Redix.PubSub` process has
+  subscribed to the given channel. This means that after a subscription, messages published to
+  a channel are delivered to all Elixir processes subscribed to that channel via `Redix.PubSub`:
 
       # Someone publishes "hello" on "my_channel"
       receive do message -> message end
       #=> {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "my_channel", payload: "hello"}}
+
+  It's advised to wait for the subscription confirmation for a channel before doing any
+  other operation involving that channel.
+
+  Note that unsubscription confirmations are delivered right away even if the `Redix.PubSub`
+  process is still subscribed to the given channel: this is by design, as once a process
+  is unsubscribed from a channel it won't receive messages anyways, even if the `Redix.PubSub`
+  process still receives them.
 
   Messages are also delivered as a confirmation of an unsubscription as well as when the
   `Redix.PubSub` connection goes down. See the "Messages" section below.

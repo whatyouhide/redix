@@ -5,6 +5,8 @@ defmodule Redix.PubSubTest do
 
   alias Redix.{ConnectionError, PubSub}
 
+  @moduletag :pubsub
+
   setup do
     {:ok, pubsub} = PubSub.start_link()
     {:ok, conn} = Redix.start_link()
@@ -86,11 +88,9 @@ defmodule Redix.PubSubTest do
     assert {:ok, ^ref} = PubSub.subscribe(pubsub, "foo", self())
 
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
-    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+    refute_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
 
-    wait_until_passes(200, fn ->
-      assert subscribed_channels(conn) == MapSet.new(["foo"])
-    end)
+    assert subscribed_channels(conn) == MapSet.new(["foo"])
 
     Redix.command!(conn, ~w(PUBLISH foo hello))
 
@@ -110,9 +110,7 @@ defmodule Redix.PubSubTest do
     assert {:ok, mirror_ref} = PubSub.subscribe(pubsub, channel, mirror)
     assert_receive {^mirror, {:redix_pubsub, ^pubsub, ^mirror_ref, :subscribed, _properties}}
 
-    wait_until_passes(200, fn ->
-      assert subscribed_channels(conn) == MapSet.new(["foo"])
-    end)
+    assert subscribed_channels(conn) == MapSet.new(["foo"])
 
     # Let's ensure both those pids receive messages published on that channel.
     Redix.command!(conn, ["PUBLISH", channel, "hello"])
@@ -142,9 +140,7 @@ defmodule Redix.PubSubTest do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, _properties}
 
-    wait_until_passes(200, fn ->
-      assert subscribed_channels(conn) == MapSet.new(["foo"])
-    end)
+    assert subscribed_channels(conn) == MapSet.new(["foo"])
 
     Redix.command!(conn, ~w(PUBLISH foo hello))
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{payload: "hello"}}
@@ -159,9 +155,7 @@ defmodule Redix.PubSubTest do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, _properties}
 
-    wait_until_passes(200, fn ->
-      assert subscribed_channels(conn) == MapSet.new(["foo"])
-    end)
+    assert subscribed_channels(conn) == MapSet.new(["foo"])
 
     Redix.command!(conn, ~w(PUBLISH foo hello))
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{payload: "hello"}}
@@ -187,10 +181,33 @@ defmodule Redix.PubSubTest do
     wait_until_passes(200, fn ->
       assert subscribed_channels(conn) == MapSet.new()
     end)
-
-    Process.sleep(100)
   end
 
+  test "subscribing then unsubscribing before confirmation from Redis works fine",
+       %{pubsub: pubsub} do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert :ok = PubSub.unsubscribe(pubsub, "foo", self())
+
+    refute_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :unsubscribed, %{channel: "foo"}}
+  end
+
+  test "subscribing, unsubscribing, resubscribing before confirmation from Redis works fine",
+       %{pubsub: pubsub, conn: conn} do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert :ok = PubSub.unsubscribe(pubsub, "foo", self())
+    assert {:ok, other_ref} = PubSub.subscribe(pubsub, "foo", self())
+
+    refute_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :unsubscribed, %{channel: "foo"}}
+    assert_receive {:redix_pubsub, ^pubsub, ^other_ref, :subscribed, %{channel: "foo"}}
+
+    Redix.command!(conn, ~w(PUBLISH foo hello))
+    assert_receive {:redix_pubsub, ^pubsub, ^other_ref, :message, properties}
+    assert %{channel: "foo", payload: "hello"} = properties
+  end
+
+  @tag :focus
   test "disconnections/reconnections", %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
@@ -198,14 +215,16 @@ defmodule Redix.PubSubTest do
     capture_log(fn ->
       Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
 
-      assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected,
-                      %{error: %Redix.ConnectionError{}}}
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, properties}
+      assert %{error: %Redix.ConnectionError{}} = properties
 
       assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}, 1000
     end)
 
     Redix.command!(conn, ~w(PUBLISH foo hello))
-    assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "foo", payload: "hello"}}
+
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "foo", payload: "hello"}},
+                   1000
   end
 
   test ":exit_on_disconnection option", %{conn: conn} do
