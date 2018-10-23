@@ -10,8 +10,8 @@ defmodule Redix.URI do
     end
 
     []
-    |> Keyword.put(:host, host)
-    |> Keyword.put(:port, port)
+    |> put_if_not_nil(:host, host)
+    |> put_if_not_nil(:port, port)
     |> put_if_not_nil(:password, password(uri))
     |> put_if_not_nil(:database, database(uri))
   end
