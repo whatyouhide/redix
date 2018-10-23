@@ -18,6 +18,10 @@ defmodule Redix.SocketOwner do
     GenServer.start_link(__MODULE__, {conn, opts, queue_table}, [])
   end
 
+  def normal_stop(conn) do
+    GenServer.stop(conn, :normal)
+  end
+
   @impl true
   def init({conn, opts, queue_table}) do
     state = %__MODULE__{

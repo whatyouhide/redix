@@ -102,12 +102,25 @@ defmodule RedixTest do
              put_in(default_spec, args_path, ["redis://localhost", [name: :redix]])
   end
 
-  test "stop/1" do
-    {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
-    ref = Process.monitor(pid)
-    assert Redix.stop(pid) == :ok
+  describe "stop/1" do
+    test "stops the connection" do
+      {:ok, pid} = Redix.start_link("redis://#{@host}:#{@port}/3")
+      ref = Process.monitor(pid)
+      assert Redix.stop(pid) == :ok
 
-    assert_receive {:DOWN, ^ref, _, _, :normal}, 500
+      assert_receive {:DOWN, ^ref, _, _, :normal}, 500
+    end
+
+    test "closes the socket as well" do
+      {:ok, pid} = Redix.start_link(host: @host, port: @port, sync_connect: true)
+
+      # This is a hack to get the socket. If I'll have a better idea, good for me :).
+      {_, data} = :sys.get_state(pid)
+
+      assert Port.info(data.socket) != nil
+      assert Redix.stop(pid) == :ok
+      assert Port.info(data.socket) == nil
+    end
   end
 
   describe "command/2" do

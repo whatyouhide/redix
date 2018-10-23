@@ -109,6 +109,13 @@ defmodule Redix.Connection do
     end
   end
 
+  @impl true
+  def terminate(reason, _state, data) do
+    if reason == :normal do
+      :ok = SocketOwner.normal_stop(data.socket_owner)
+    end
+  end
+
   ## State functions
 
   # "Disconnected" state: the connection is down and the socket owner is not alive.
