@@ -19,9 +19,7 @@ defmodule Redix.PubSubTest do
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "bar"}}
 
-    wait_until_passes(200, fn ->
-      assert subscribed_channels(conn) == MapSet.new(["foo", "bar"])
-    end)
+    assert subscribed_channels(conn) == MapSet.new(["foo", "bar"])
 
     # Then, we test messages are routed correctly.
     Redix.command!(conn, ~w(PUBLISH foo hello))
