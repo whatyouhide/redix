@@ -41,6 +41,7 @@ defmodule Redix.ConnectionError do
     * `:timeout`: when Redis doesn't reply to the request in time.
 
   """
+  @type t :: %__MODULE__{reason: atom}
 
   defexception [:reason]
 

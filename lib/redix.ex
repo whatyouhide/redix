@@ -407,7 +407,8 @@ defmodule Redix do
 
   """
   @spec pipeline(connection(), [command()], keyword()) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom() | Redix.Error.t()}
+          {:ok, [Redix.Protocol.redis_value()]}
+          | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     pipeline_without_checks(conn, commands, opts)
@@ -489,7 +490,7 @@ defmodule Redix do
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
 
   @spec noreply_pipeline(connection(), [command()], keyword()) ::
-          :ok | {:error, atom() | Redix.Error.t()}
+          :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def noreply_pipeline(conn, commands, opts \\ []) do
     assert_valid_pipeline_commands(commands)
     commands = [["CLIENT", "REPLY", "OFF"]] ++ commands ++ [["CLIENT", "REPLY", "ON"]]
@@ -711,7 +712,8 @@ defmodule Redix do
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
 
   @spec transaction_pipeline(connection(), [command()], keyword()) ::
-          {:ok, [Redix.Protocol.redis_value()]} | {:error, atom() | Redix.Error.t()}
+          {:ok, [Redix.Protocol.redis_value()]}
+          | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def transaction_pipeline(conn, [_ | _] = commands, options \\ []) when is_list(commands) do
     with {:ok, responses} <- Redix.pipeline(conn, [["MULTI"]] ++ commands ++ [["EXEC"]], options),
          do: {:ok, List.last(responses)}
