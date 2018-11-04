@@ -14,6 +14,7 @@ defmodule Redix.Connection do
     :table,
     :socket,
     :backoff_current,
+    :connected_address,
     counter: 0,
     client_reply: :on
   ]
@@ -98,8 +99,8 @@ defmodule Redix.Connection do
       # We don't need to handle a timeout here because we're using a timeout in
       # connect/3 down the pipe.
       receive do
-        {:connected, ^socket_owner, socket} ->
-          {:ok, :connected, %__MODULE__{data | socket: socket}}
+        {:connected, ^socket_owner, socket, address} ->
+          {:ok, :connected, %__MODULE__{data | socket: socket, connected_address: address}}
 
         {:stopped, ^socket_owner, reason} ->
           {:stop, %Redix.ConnectionError{reason: reason}}
@@ -155,20 +156,25 @@ defmodule Redix.Connection do
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     log(data, :failed_connection, fn ->
       [
-        "Disconnected from Redis (#{format_host(data)}): ",
+        "Disconnected from Redis (#{data.connected_address}): ",
         Exception.message(%ConnectionError{reason: reason})
       ]
     end)
 
+    data = %{data | connected_address: nil}
     disconnect(data, reason)
   end
 
-  def connecting(:info, {:connected, owner, socket}, %__MODULE__{socket_owner: owner} = data) do
+  def connecting(
+        :info,
+        {:connected, owner, socket, address},
+        %__MODULE__{socket_owner: owner} = data
+      ) do
     if data.backoff_current do
-      log(data, :reconnection, fn -> "Reconnected to Redis (#{format_host(data)})" end)
+      log(data, :reconnection, fn -> "Reconnected to Redis (#{address})" end)
     end
 
-    data = %{data | socket: socket, backoff_current: nil}
+    data = %{data | socket: socket, backoff_current: nil, connected_address: address}
     {:next_state, :connected, %{data | socket: socket}}
   end
 
@@ -180,7 +186,7 @@ defmodule Redix.Connection do
     # We log this when the socket owner stopped while connecting.
     log(data, :failed_connection, fn ->
       [
-        "Failed to connect to Redis (#{format_host(data)}): ",
+        "Failed to connect to Redis (#{format_address(data)}): ",
         Exception.message(%ConnectionError{reason: reason})
       ]
     end)
@@ -226,11 +232,12 @@ defmodule Redix.Connection do
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     log(data, :failed_connection, fn ->
       [
-        "Disconnected from Redis (#{format_host(data)}): ",
+        "Disconnected from Redis (#{data.connected_address}): ",
         Exception.message(%ConnectionError{reason: reason})
       ]
     end)
 
+    data = %{data | connected_address: nil}
     disconnect(data, reason)
   end
 
@@ -334,7 +341,11 @@ defmodule Redix.Connection do
 
   defp parse_client_reply(_other), do: nil
 
-  defp format_host(%{opts: opts} = _state) do
-    "#{opts[:host]}:#{opts[:port]}"
+  defp format_address(%{opts: opts} = _state) do
+    if opts[:sentinel] do
+      "sentinel"
+    else
+      "#{opts[:host]}:#{opts[:port]}"
+    end
   end
 end
