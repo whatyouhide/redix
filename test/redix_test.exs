@@ -172,9 +172,8 @@ defmodule RedixTest do
     test "Redis errors", %{conn: c} do
       {:ok, _} = Redix.command(c, ~w(SET errs foo))
 
-      assert_raise Redix.Error, "ERR value is not an integer or out of range", fn ->
-        Redix.command(c, ~w(INCR errs))
-      end
+      message = "ERR value is not an integer or out of range"
+      assert Redix.command(c, ~w(INCR errs)) == {:error, %Redix.Error{message: message}}
     end
 
     test "passing an empty list returns an error", %{conn: c} do

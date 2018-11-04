@@ -527,16 +527,8 @@ defmodule Redix do
   The return value is `{:ok, response}` if the request is successful and the
   response is not a Redis error. `{:error, reason}` is returned in case there's
   an error in the request (such as losing the connection to Redis in between the
-  request). If Redis returns an error (such as a type error), a `Redix.Error`
-  exception is raised; the reason for this is that these errors are semantic
-  errors that most of the times won't go away by themselves over time and users
-  of Redix should be notified of them as soon as possible. Connection errors,
-  instead, are often temporary errors that will go away when the connection is
-  back.
-
-  The return value can also be just `:ok` in case replies are being skipped
-  (through `CLIENT REPLY SKIP` or `CLIENT REPLY OFF`). See the module documentation
-  for more information.
+  request). `reason` can also be a `Redix.Error` exception in case Redis is
+  reachable but returns an error (such as a type error).
 
   If the given command is an empty command (`[]`), an `ArgumentError`
   exception is raised.
@@ -566,14 +558,12 @@ defmodule Redix do
 
   """
   @spec command(connection(), command(), keyword()) ::
-          :ok
-          | {:ok, Redix.Protocol.redis_value()}
+          {:ok, Redix.Protocol.redis_value()}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def command(conn, command, opts \\ []) do
     case pipeline(conn, [command], opts) do
-      {:ok, [%Redix.Error{} = error]} -> raise(error)
+      {:ok, [%Redix.Error{} = error]} -> {:error, error}
       {:ok, [response]} -> {:ok, response}
-      {:ok, []} -> :ok
       {:error, _reason} = error -> error
     end
   end
@@ -583,16 +573,10 @@ defmodule Redix do
 
   This function works exactly like `command/3` but:
 
-    * if the command is successful, then the result is returned not wrapped in a
-      `{:ok, result}` tuple.
-    * if there's a Redis error, a `Redix.Error` error is raised (with the
-      original message).
-    * if there's a connection error, a `Redix.ConnectionError`
+    * if the command is successful, then the result is returned directly (not wrapped in a
+      `{:ok, result}` tuple).
+    * if there's a Redis error or a connection error, a `Redix.Error` or `Redix.ConnectionError`
       error is raised.
-
-  The return value can also be just `:ok` in case replies are being skipped
-  (through `CLIENT REPLY SKIP` or `CLIENT REPLY OFF`). See the module documentation
-  for more information.
 
   This function accepts the same options as `command/3`.
 
@@ -620,7 +604,6 @@ defmodule Redix do
   @spec command!(connection(), command(), keyword()) :: Redix.Protocol.redis_value() | no_return()
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
-      :ok -> :ok
       {:ok, response} -> response
       {:error, error} -> raise error
     end
