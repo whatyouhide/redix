@@ -21,7 +21,8 @@ defmodule Redix.StartOptions do
     backoff_initial: 500,
     backoff_max: 30000,
     log: @default_log_options,
-    exit_on_disconnection: false
+    exit_on_disconnection: false,
+    timeout: 5000
   ]
 
   @allowed_options [:host, :port, :database, :password, :name, :sentinel] ++
