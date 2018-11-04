@@ -5,7 +5,8 @@ defmodule Redix.SentinelTest do
 
   @sentinel_config [
     sentinels: [{"localhost", 26379}, {"localhost", 26380}, {"localhost", 26381}],
-    group: "main"
+    group: "main",
+    timeout: 500
   ]
 
   test "connection can select primary" do
@@ -14,6 +15,15 @@ defmodule Redix.SentinelTest do
     assert Redix.command!(primary, ["PING"]) == "PONG"
     assert Redix.command!(primary, ["CONFIG", "GET", "port"]) == ["port", "6381"]
     assert ["master", _, _] = Redix.command!(primary, ["ROLE"])
+  end
+
+  test "connection can select replica" do
+    sentinel_config = Keyword.put(@sentinel_config, :role, :replica)
+    {:ok, replica} = Redix.start_link(sentinel: sentinel_config, sync_connect: true, timeout: 500)
+
+    assert Redix.command!(replica, ["PING"]) == "PONG"
+    assert Redix.command!(replica, ["CONFIG", "GET", "port"]) == ["port", "6382"]
+    assert ["slave" | _] = Redix.command!(replica, ["ROLE"])
   end
 
   test "Redix.PubSub supports sentinel as well" do
@@ -40,9 +50,10 @@ defmodule Redix.SentinelTest do
             exit_on_disconnection: true
           )
 
-        assert_receive {:EXIT, ^conn, %Redix.ConnectionError{reason: :no_sentinel_replied}}
+        assert_receive {:EXIT, ^conn,
+                        %Redix.ConnectionError{reason: :no_viable_sentinel_connection}}
       end)
 
-    assert log =~ "Couldn't connect to a primary through {'nonexistent', 9999}: :nxdomain"
+    assert log =~ "Couldn't connect to primary through {'nonexistent', 9999}: :nxdomain"
   end
 end

@@ -110,6 +110,7 @@ defmodule Redix.Connection do
   end
 
   @impl true
+  # TODO: check if socket owner is alive here.
   def terminate(reason, _state, data) do
     if reason == :normal do
       :ok = SocketOwner.normal_stop(data.socket_owner)

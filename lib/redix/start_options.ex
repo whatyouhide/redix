@@ -10,7 +10,8 @@ defmodule Redix.StartOptions do
   @default_sentinel_options [
     timeout: 500,
     socket_opts: [],
-    ssl: false
+    ssl: false,
+    role: :primary
   ]
 
   @default_options [

@@ -64,28 +64,27 @@ defmodule Redix.Connector do
   end
 
   defp connect_through_sentinel([], _sentinel_opts, _opts, _transport) do
-    {:error, :no_sentinel_replied}
+    {:error, :no_viable_sentinel_connection}
   end
 
   defp connect_through_sentinel([sentinel | rest], sentinel_opts, opts, transport) do
-    Logger.debug(fn -> "Attempting to connect through sentinel: #{inspect(sentinel)}" end)
-
     with {:ok, sent_socket} <- connect_to_sentinel(sentinel, sentinel_opts, transport),
          _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end),
-         {:ok, primary_address} <-
-           ask_sentinel_for_primary(transport, sent_socket, sentinel_opts),
-         _ = Logger.debug(fn -> "Sentinel reported primary: #{inspect(primary_address)}" end),
-         {:ok, primary_socket} <- connect_directly_to_primary(opts, primary_address),
-         :ok <- verify_primary_role(primary_socket, opts) do
+         {:ok, server_address} <- ask_sentinel_for_server(transport, sent_socket, sentinel_opts),
+         _ =
+           Logger.debug(fn ->
+             "Sentinel reported #{sentinel_opts[:role]}: #{inspect(server_address)}"
+           end),
+         {:ok, server_socket} <- connect_directly_to_server(opts, server_address),
+         :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
       :ok = transport.close(sent_socket)
-      {:ok, primary_socket}
+      {:ok, server_socket}
     else
       {:error, reason} ->
-        log(
-          opts,
-          :failed_connection,
-          "Couldn't connect to a primary through #{inspect(sentinel)}: " <> inspect(reason)
-        )
+        log(opts, :failed_connection, fn ->
+          "Couldn't connect to #{sentinel_opts[:role]} through #{inspect(sentinel)}: " <>
+            inspect(reason)
+        end)
 
         connect_through_sentinel(rest, sentinel_opts, opts, transport)
     end
@@ -96,30 +95,55 @@ defmodule Redix.Connector do
     transport.connect(host, port, socket_opts, sentinel_opts[:timeout])
   end
 
-  defp ask_sentinel_for_primary(transport, sent_socket, sentinel_opts) do
+  defp ask_sentinel_for_server(transport, sent_socket, sentinel_opts) do
     group = Keyword.fetch!(sentinel_opts, :group)
-    command = ["SENTINEL", "get-master-addr-by-name", group]
 
-    case sync_command(transport, sent_socket, command, sentinel_opts[:timeout]) do
-      {:ok, [primary_host, primary_port]} -> {:ok, {primary_host, primary_port}}
-      {:ok, nil} -> {:error, :sentinel_doesnt_know_primary}
-      {:error, reason} -> {:error, reason}
+    case sentinel_opts[:role] do
+      :primary ->
+        command = ["SENTINEL", "get-master-addr-by-name", group]
+
+        case sync_command(transport, sent_socket, command, sentinel_opts[:timeout]) do
+          {:ok, [primary_host, primary_port]} -> {:ok, {primary_host, primary_port}}
+          {:ok, nil} -> {:error, :sentinel_no_primary_found}
+          {:error, reason} -> {:error, reason}
+        end
+
+      :replica ->
+        command = ["SENTINEL", "slaves", group]
+
+        case sync_command(transport, sent_socket, command, sentinel_opts[:timeout]) do
+          {:ok, replicas} when replicas != [] ->
+            _ = Logger.debug(fn -> "Available replicas: #{inspect(replicas)}" end)
+            ["name", _, "ip", host, "port", port | _] = Enum.random(replicas)
+            {:ok, {host, port}}
+
+          {:ok, []} ->
+            {:error, :sentinel_no_replicas_found_for_given_primary}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
-  defp connect_directly_to_primary(opts, {primary_host, primary_port}) do
-    connect_directly(to_charlist(primary_host), String.to_integer(primary_port), opts)
+  defp connect_directly_to_server(opts, {host, port}) do
+    connect_directly(to_charlist(host), String.to_integer(port), opts)
   end
 
-  defp verify_primary_role(primary_socket, opts) do
+  defp verify_server_role(server_socket, opts, sentinel_opts) do
     transport = if opts[:ssl], do: :ssl, else: :gen_tcp
     timeout = opts[:timeout] || @default_timeout
 
-    case sync_command(transport, primary_socket, ["ROLE"], timeout) do
-      {:ok, ["master" | _]} -> :ok
+    expected_role =
+      case sentinel_opts[:role] do
+        :primary -> "master"
+        :replica -> "slave"
+      end
+
+    case sync_command(transport, server_socket, ["ROLE"], timeout) do
+      {:ok, [^expected_role | _]} -> :ok
       {:ok, [role | _]} -> {:error, {:wrong_role, role}}
-      {:error, %Redix.Error{}} = error -> error
-      {:error, reason} -> {:error, reason}
+      {:error, _reason_or_redis_error} = error -> error
     end
   end
 

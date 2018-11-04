@@ -223,6 +223,11 @@ defmodule Redix do
     * `:group` - (binary) the name of the group that identifies the primary in the sentinel
       configuration. This option is required.
 
+    * `:role` - (`:primary` or `:replica`) if `:primary`, the connection will be established
+      with the primary for the given group. If `:replica`, Redix will ask the sentinel for all
+      the available replicas for the given group and try to connect to one of them **at random**.
+      Defaults to `:primary`.
+
     * `:socket_opts` - (list of options) the socket options that will be used when connecting to
       the sentinels. Defaults to `[]`.
 
