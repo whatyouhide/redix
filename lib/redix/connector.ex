@@ -69,20 +69,36 @@ defmodule Redix.Connector do
   end
 
   defp connect_through_sentinel([sentinel | rest], sentinel_opts, opts, transport) do
-    with {:ok, sent_socket} <- connect_to_sentinel(sentinel, sentinel_opts, transport),
-         _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end),
-         {:ok, {server_host, server_port}} <-
-           ask_sentinel_for_server(transport, sent_socket, sentinel_opts),
-         _ =
-           Logger.debug(fn ->
-             "Sentinel reported #{sentinel_opts[:role]}: #{server_host}:#{server_port}"
-           end),
-         {:ok, server_socket, _address} <-
-           connect_directly_to_server(opts, server_host, server_port),
-         :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
-      :ok = transport.close(sent_socket)
-      {:ok, server_socket, "#{server_host}:#{server_port}"}
-    else
+    case connect_to_sentinel(sentinel, sentinel_opts, transport) do
+      {:ok, sent_socket} ->
+        _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end)
+
+        with {:ok, {server_host, server_port}} <-
+               ask_sentinel_for_server(transport, sent_socket, sentinel_opts),
+             _ =
+               Logger.debug(fn ->
+                 "Sentinel reported #{sentinel_opts[:role]}: #{server_host}:#{server_port}"
+               end),
+             {:ok, server_socket, _address} <-
+               connect_directly(
+                 String.to_charlist(server_host),
+                 String.to_integer(server_port),
+                 opts
+               ),
+             :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
+          :ok = transport.close(sent_socket)
+          {:ok, server_socket, "#{server_host}:#{server_port}"}
+        else
+          {:error, reason} ->
+            log(opts, :failed_connection, fn ->
+              "Couldn't connect to #{sentinel_opts[:role]} through #{inspect(sentinel)}: " <>
+                inspect(reason)
+            end)
+
+            :ok = transport.close(sent_socket)
+            connect_through_sentinel(rest, sentinel_opts, opts, transport)
+        end
+
       {:error, reason} ->
         log(opts, :failed_connection, fn ->
           "Couldn't connect to #{sentinel_opts[:role]} through #{inspect(sentinel)}: " <>
@@ -127,10 +143,6 @@ defmodule Redix.Connector do
             {:error, reason}
         end
     end
-  end
-
-  defp connect_directly_to_server(opts, host, port) do
-    connect_directly(to_charlist(host), String.to_integer(port), opts)
   end
 
   defp verify_server_role(server_socket, opts, sentinel_opts) do
