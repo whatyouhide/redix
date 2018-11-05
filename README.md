@@ -64,9 +64,52 @@ Redix.pipeline!(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
 
 Redix is resilient against network errors. For example, if the connection to Redis drops, Redix will automatically try to reconnect periodically at a given "backoff" interval. Look at the documentation for the `Redix` module and at the ["Reconnections" page][docs-reconnections] in the documentation for more information on the available options and on the exact reconnection behaviour.
 
+#### Redis Sentinel
+
+Redix supports [Redis Sentinel][sentinel] out of the box. You can specify a list of sentinels to connect to when starting a `Redix` (or `Redix.PubSub`) connection. Every time that connection will need to connect to a Redis server (the first time or after a disconnection), it will try to connect to one of the sentinels in order to ask that sentinel for the current primary or a replica.
+
+```elixir
+sentinels = [{"sent1.example.com", 26379}, {"sent2.example.com", 26379}]
+{:ok, primary} = Redix.start_link(sentinel: [sentinels: sentinels, group: "main"])
+```
+
+##### Terminology
+
+Redix doesn't support the use of the terms "master" and "slave" that are usually used with Redis Sentinel. I don't think those are good terms to use, period. Instead, Redix uses the terms "primary" and "replica". If you're interested in the discussions around this, [this][redis-terminology-issue] issue in the Redis repository might be interesting to you.
+
 #### Pub/Sub
 
-Redix doesn't support the Pub/Sub features of Redis. For that, there's [`redix_pubsub`][redix-pubsub].
+A `Redix.PubSub` process can be started via `Redix.PubSub.start_link/2`:
+
+```elixir
+{:ok, pubsub} = Redix.PubSub.start_link()
+```
+
+Most communication with the `Redix.PubSub` process happens via Elixir messages (that simulate a Pub/Sub interaction with the pub/sub server).
+
+```elixir
+{:ok, pubsub} = Redix.PubSub.start_link()
+
+Redix.PubSub.subscribe(pubsub, "my_channel", self())
+#=> {:ok, ref}
+```
+
+Confirmation of subscriptions is delivered as an Elixir message:
+
+```elixir
+receive do
+  {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "my_channel"}} -> :ok
+end
+```
+
+If someone publishes a message on a channel we're subscribed to:
+
+```elixir
+receive do
+  {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "my_channel", payload: "hello"}} ->
+    IO.puts("Received a message!")
+end
+```
 
 ## Using Redix in the Real World™
 
@@ -88,8 +131,10 @@ Redix is released under the MIT license. See the [license file](LICENSE.txt).
 
 
 [redis]: http://redis.io
+[redis-sentinel]: https://redis.io/topics/sentinel
 [redix-pubsub]: https://github.com/whatyouhide/redix_pubsub
 [docs-reconnections]: http://hexdocs.pm/redix/reconnections.html
 [docs-real-world-usage]: http://hexdocs.pm/redix/real-world-usage.html
 [docker]: https://www.docker.com
 [docker-compose]: https://docs.docker.com/compose/
+[redis-terminology-issue]: https://github.com/antirez/redis/issues/5335
