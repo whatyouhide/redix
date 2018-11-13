@@ -32,13 +32,18 @@ defmodule Redix.StartOptionsTest do
     end
 
     test "sentinel options" do
-      opts = StartOptions.sanitize(sentinel: [sentinels: [{"foo", 1}], group: "foo"])
-      assert opts[:sentinel][:sentinels] == [{'foo', 1}]
+      opts =
+        StartOptions.sanitize(sentinel: [sentinels: ["redis://localhost:26379"], group: "foo"])
+
+      assert [sentinel] = opts[:sentinel][:sentinels]
+      assert sentinel[:host] == 'localhost'
+      assert sentinel[:port] == 26379
+
       assert opts[:sentinel][:group] == "foo"
     end
 
     test "sentinel addresses are validated" do
-      assert_raise ArgumentError, ~r/sentinel addresses must be in the form {host, port}/, fn ->
+      assert_raise ArgumentError, ~r/sentinel address should be specified/, fn ->
         StartOptions.sanitize(sentinel: [sentinels: [:not_a_sentinel], group: "foo"])
       end
     end

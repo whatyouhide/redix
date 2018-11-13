@@ -91,7 +91,7 @@ defmodule Redix.Connector do
         else
           {:error, reason} ->
             log(opts, :failed_connection, fn ->
-              "Couldn't connect to #{sentinel_opts[:role]} through #{inspect(sentinel)}: " <>
+              "Couldn't connect to #{sentinel_opts[:role]} through #{format_host(sentinel)}: " <>
                 inspect(reason)
             end)
 
@@ -101,7 +101,7 @@ defmodule Redix.Connector do
 
       {:error, reason} ->
         log(opts, :failed_connection, fn ->
-          "Couldn't connect to #{sentinel_opts[:role]} through #{inspect(sentinel)}: " <>
+          "Couldn't connect to #{sentinel_opts[:role]} through #{format_host(sentinel)}: " <>
             inspect(reason)
         end)
 
@@ -109,7 +109,9 @@ defmodule Redix.Connector do
     end
   end
 
-  defp connect_to_sentinel(_sentinel = {host, port}, sentinel_opts, transport) do
+  defp connect_to_sentinel(sentinel, sentinel_opts, transport) do
+    host = Keyword.fetch!(sentinel, :host)
+    port = Keyword.fetch!(sentinel, :port)
     socket_opts = @socket_opts ++ Keyword.fetch!(sentinel_opts, :socket_opts)
     transport.connect(host, port, socket_opts, sentinel_opts[:timeout])
   end
@@ -160,6 +162,12 @@ defmodule Redix.Connector do
       {:ok, [role | _]} -> {:error, {:wrong_role, role}}
       {:error, _reason_or_redis_error} = error -> error
     end
+  end
+
+  defp format_host(opts) when is_list(opts) do
+    host = Keyword.fetch!(opts, :host)
+    port = Keyword.fetch!(opts, :port)
+    "#{host}:#{port}"
   end
 
   # Setups the `:buffer` option of the given socket.

@@ -3,22 +3,32 @@ defmodule Redix.SentinelTest do
 
   import ExUnit.CaptureLog
 
-  @sentinel_config [
-    sentinels: [{"localhost", 26379}, {"localhost", 26380}, {"localhost", 26381}],
-    group: "main",
-    timeout: 500
+  @sentinels [
+    "redis://localhost:26379",
+    "redis://localhost:26380",
+    [host: "localhost", port: 26381]
   ]
 
-  test "connection can select primary" do
-    {:ok, primary} = Redix.start_link(sentinel: @sentinel_config, sync_connect: true)
+  setup do
+    sentinel_config = [
+      sentinels: Enum.shuffle(@sentinels),
+      group: "main",
+      timeout: 500
+    ]
+
+    %{sentinel_config: sentinel_config}
+  end
+
+  test "connection can select primary", %{sentinel_config: sentinel_config} do
+    {:ok, primary} = Redix.start_link(sentinel: sentinel_config, sync_connect: true)
 
     assert Redix.command!(primary, ["PING"]) == "PONG"
     assert Redix.command!(primary, ["CONFIG", "GET", "port"]) == ["port", "6381"]
     assert ["master", _, _] = Redix.command!(primary, ["ROLE"])
   end
 
-  test "connection can select replica" do
-    sentinel_config = Keyword.put(@sentinel_config, :role, :replica)
+  test "connection can select replica", %{sentinel_config: sentinel_config} do
+    sentinel_config = Keyword.put(sentinel_config, :role, :replica)
     {:ok, replica} = Redix.start_link(sentinel: sentinel_config, sync_connect: true, timeout: 500)
 
     assert Redix.command!(replica, ["PING"]) == "PONG"
@@ -26,9 +36,9 @@ defmodule Redix.SentinelTest do
     assert ["slave" | _] = Redix.command!(replica, ["ROLE"])
   end
 
-  test "Redix.PubSub supports sentinel as well" do
-    {:ok, primary} = Redix.start_link(sentinel: @sentinel_config, sync_connect: true)
-    {:ok, pubsub} = Redix.PubSub.start_link(sentinel: @sentinel_config, sync_connect: true)
+  test "Redix.PubSub supports sentinel as well", %{sentinel_config: sentinel_config} do
+    {:ok, primary} = Redix.start_link(sentinel: sentinel_config, sync_connect: true)
+    {:ok, pubsub} = Redix.PubSub.start_link(sentinel: sentinel_config, sync_connect: true)
 
     {:ok, ref} = Redix.PubSub.subscribe(pubsub, "foo", self())
 
@@ -46,7 +56,7 @@ defmodule Redix.SentinelTest do
       capture_log(fn ->
         {:ok, conn} =
           Redix.start_link(
-            sentinel: [sentinels: [{"nonexistent", 9999}], group: "main"],
+            sentinel: [sentinels: ["redis://nonexistent:9999"], group: "main"],
             exit_on_disconnection: true
           )
 
@@ -54,6 +64,6 @@ defmodule Redix.SentinelTest do
                         %Redix.ConnectionError{reason: :no_viable_sentinel_connection}}
       end)
 
-    assert log =~ "Couldn't connect to primary through {'nonexistent', 9999}: :nxdomain"
+    assert log =~ "Couldn't connect to primary through nonexistent:9999: :nxdomain"
   end
 end
