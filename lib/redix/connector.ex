@@ -73,7 +73,8 @@ defmodule Redix.Connector do
       {:ok, sent_socket} ->
         _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end)
 
-        with {:ok, {server_host, server_port}} <-
+        with :ok <- maybe_auth(transport, sent_socket, sentinel, sentinel_opts[:timeout]),
+             {:ok, {server_host, server_port}} <-
                ask_sentinel_for_server(transport, sent_socket, sentinel_opts),
              _ =
                Logger.debug(fn ->
