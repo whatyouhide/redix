@@ -45,6 +45,11 @@ defmodule RedixTest do
       end)
     end
 
+    test "specifying a password when a password is set" do
+      {:ok, pid} = Redix.start_link(port: 16379, password: "some-password")
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
     test "when unable to connect to Redis with sync_connect: true" do
       capture_log(fn ->
         Process.flag(:trap_exit, true)

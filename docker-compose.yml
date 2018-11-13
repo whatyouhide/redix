@@ -15,6 +15,14 @@ services:
     sysctls:
       net.core.somaxconn: 1024
 
+  base_with_auth:
+    image: "redis:alpine"
+    command: redis-server --requirepass some-password
+    ports:
+      - "16379:6379"
+    sysctls:
+      net.core.somaxconn: 1024
+
   sentinel:
     build: ./test/docker/sentinel
     ports:
