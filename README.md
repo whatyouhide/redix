@@ -9,7 +9,16 @@
 
 Redix is a [Redis][redis] client written in pure Elixir with focus on speed, correctness, and resiliency (that is, being able to automatically reconnect to Redis in case of network errors).
 
-This README refers to the `master` branch of Redix, not the latest released version on Hex. Make sure to checkt [the documentation](http://hexdocs.pm/redix) for the version you're using.
+This README refers to the `master` branch of Redix, not the latest released version on Hex. Make sure to check [the documentation](http://hexdocs.pm/redix) for the version you're using.
+
+## Features
+
+  * Idiomatic interface for sending commands to Redis
+  * Pipelining
+  * Resiliency (automatic reconnections)
+  * Pub/Sub
+  * SSL
+  * Redis Sentinel
 
 ## Installation
 
@@ -69,7 +78,7 @@ Redix is resilient against network errors. For example, if the connection to Red
 Redix supports [Redis Sentinel][sentinel] out of the box. You can specify a list of sentinels to connect to when starting a `Redix` (or `Redix.PubSub`) connection. Every time that connection will need to connect to a Redis server (the first time or after a disconnection), it will try to connect to one of the sentinels in order to ask that sentinel for the current primary or a replica.
 
 ```elixir
-sentinels = [{"sent1.example.com", 26379}, {"sent2.example.com", 26379}]
+sentinels = ["redis://sent1.example.com:26379", "redis://sent2.example.com:26379"]
 {:ok, primary} = Redix.start_link(sentinel: [sentinels: sentinels, group: "main"])
 ```
 

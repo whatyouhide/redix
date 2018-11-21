@@ -29,7 +29,7 @@ defmodule Redix do
 
   ## Sentinel
 
-  **Note**: support for Redis Sentinel is still experimental. It works, but the API might
+  **Note**: support for Redis Sentinel **is still experimental**. It works, but the API might
   change a little bit and the design might be revisited.
 
   Redix supports [Redis Sentinel](https://redis.io/topics/sentinel) by passing a `:sentinel`
