@@ -208,7 +208,6 @@ defmodule Redix.PubSubTest do
     assert %{channel: "foo", payload: "hello"} = properties
   end
 
-  @tag :focus
   test "disconnections/reconnections", %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}

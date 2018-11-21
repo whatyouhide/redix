@@ -216,9 +216,12 @@ defmodule Redix do
   These options should be passed in the `:sentinel` key in the connection options. For more
   information on support for Redis sentinel, see the `Redix` module documentation.
 
-    * `:sentinels` - (list) a list of `{host, port}` tuples where `host` is a binary and port is
-      an integer. Each element in this list is the address of a sentinel to be contacted in order
-      to obtain the address of a primary. This option is required.
+    * `:sentinels` - (list) a list of sentinel addresses. Each element in this list is the address
+      of a sentinel to be contacted in order to obtain the address of a primary. The address of
+      a sentinel can be passed as a Redis URI (see the "Using a Redis URI" section above) or
+      a keyword list with `:host`, `:port`, `:password` options (same as when connecting to a
+      Redis instance direclty). Note that the password can either be passed in the sentinel
+      address or globally -- see the `:password` option below. This option is required.
 
     * `:group` - (binary) the name of the group that identifies the primary in the sentinel
       configuration. This option is required.
@@ -239,6 +242,13 @@ defmodule Redix do
       interact with the sentinels. This timeout will be used as the timeout when connecting to
       each sentinel and when asking sentinels for a primary. The Redis documentation suggests
       to keep this timeout short so that connection to Redis can happen quickly.
+
+    * `:password` - (string) if you don't want to specify a password for each sentinel you
+      list, you can use this option to specify a password that will be used to authenticate
+      on sentinels if they don't specify a password. This option is recommended over passing
+      a password for each sentinel because in the future we might to sentinel auto-discovery,
+      which means authentication can only be done through a global password that works for all
+      sentinels.
 
   ## Examples
 

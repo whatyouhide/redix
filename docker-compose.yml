@@ -33,3 +33,11 @@ services:
       - "26381:26381"
     sysctls:
       net.core.somaxconn: 1024
+
+  sentinel_with_auth:
+    build: ./test/docker/sentinel_with_auth
+    ports:
+      - "6383:6383"
+      - "26383:26383"
+    sysctls:
+      net.core.somaxconn: 1024

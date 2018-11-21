@@ -65,7 +65,7 @@ defmodule Redix.StartOptions do
     sentinel_opts =
       case Keyword.fetch(sentinel_opts, :sentinels) do
         {:ok, sentinels} when is_list(sentinels) and sentinels != [] ->
-          sentinels = Enum.map(sentinels, &normalize_sentinel_address/1)
+          sentinels = Enum.map(sentinels, &normalize_sentinel_address(&1, sentinel_opts))
           Keyword.replace!(sentinel_opts, :sentinels, sentinels)
 
         {:ok, sentinels} ->
@@ -88,11 +88,11 @@ defmodule Redix.StartOptions do
     Keyword.merge(@default_sentinel_options, sentinel_opts)
   end
 
-  defp normalize_sentinel_address(sentinel_uri) when is_binary(sentinel_uri) do
-    sentinel_uri |> Redix.URI.opts_from_uri() |> normalize_sentinel_address()
+  defp normalize_sentinel_address(sentinel_uri, sentinel_opts) when is_binary(sentinel_uri) do
+    sentinel_uri |> Redix.URI.opts_from_uri() |> normalize_sentinel_address(sentinel_opts)
   end
 
-  defp normalize_sentinel_address(opts) when is_list(opts) do
+  defp normalize_sentinel_address(opts, sentinel_opts) when is_list(opts) do
     opts =
       if opts[:host] do
         Keyword.update!(opts, :host, &to_charlist/1)
@@ -104,10 +104,17 @@ defmodule Redix.StartOptions do
       raise ArgumentError, "a port should be specified for each sentinel"
     end
 
+    opts =
+      if global_password = sentinel_opts[:password] do
+        Keyword.put_new(opts, :password, global_password)
+      else
+        opts
+      end
+
     opts
   end
 
-  defp normalize_sentinel_address(other) do
+  defp normalize_sentinel_address(other, _sentinel_opts) do
     raise ArgumentError,
           "sentinel address should be specified as a URI or a keyword list, got: " <>
             inspect(other)

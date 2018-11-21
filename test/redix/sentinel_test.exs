@@ -66,4 +66,21 @@ defmodule Redix.SentinelTest do
 
     assert log =~ "Couldn't connect to primary through nonexistent:9999: :nxdomain"
   end
+
+  test "sentinel supports password", %{sentinel_config: sentinel_config} do
+    sentinel_config =
+      Keyword.merge(sentinel_config,
+        password: "sentinel-password",
+        sentinels: ["redis://localhost:26383"]
+      )
+
+    assert {:ok, pid} =
+             Redix.start_link(
+               sentinel: sentinel_config,
+               password: "main-password",
+               sync_connect: true
+             )
+
+    assert Redix.command!(pid, ["PING"]) == "PONG"
+  end
 end
