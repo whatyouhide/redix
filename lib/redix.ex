@@ -286,24 +286,6 @@ defmodule Redix do
     start_link(Keyword.merge(opts, other_opts))
   end
 
-  # TODO: Remove on Redix 0.9.
-  def start_link(redis_opts, connection_opts)
-      when is_list(redis_opts) and is_list(connection_opts) do
-    IO.warn("""
-    start_link/2 with two lists of options as arguments is deprecated. Options can now be
-    passed as a single list, but you can still pass a Redis URI and a list of options.
-    These are all valid:
-
-        start_link()
-        start_link(host: "redis.example.com", name: :redix)
-        start_link("redis://redis.example.com", name: :redix)
-
-    start_link/2 with two lists of options is going to be removed in the next Redix version.
-    """)
-
-    Redix.start_link(Keyword.merge(redis_opts, connection_opts))
-  end
-
   @doc """
   Returns a child spec to use Redix in supervision trees.
 

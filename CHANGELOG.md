@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.9.0
+
+### Breaking changes
+
+  * Bring `Redix.PubSub` into Redix. Pub/Sub functionality lived in a separate library, [redix_pubsub](https://github.com/whatyouhide/redix_pubsub). Now, that functionality has been moved into Redix. This means that if you use redix_pubsub and upgrade your Redix version to 0.9, you will use the redix_pubsub version of `Redix.PubSub`. If you also upgrade your redix_pubsub version, redix_pubsub will warn and avoid compiling `Redix.PubSub` so you can use the latest version in Redix. In general, if you upgrade Redix to 0.9 or later just drop the redix_pubsub dependency and make sure your application works with the latest `Redix.PubSub` API (the message format changed slightly in recent versions).
+
+  * Add support for Redis Sentinel.
+
+  * Don't raise `Redix.Error` errors on non-bang variants of functions. This means that for example `Redix.command/3` won't raise a `Redix.Error` exception in case of Redis errors (like wront typing) and will return that error instead. In general, if you're pattern matching on `{:error, _}` to handle **connection errors** (for example, to retry after a while), now specifically match on `{:error, %Redix.ConnectionError{}}`. If you want to handle all possible errors the same way, keep matching on `{:error, _}`.
+
+### Bug fixes and improvements
+
+  * Fix a bug that wouldn't let you use Redis URIs without host or port.
+  * Don't ignore the `:timeout` option when connecting to Redis.
+
 ## v0.8.2
 
 ### Bug fixes and improvements
