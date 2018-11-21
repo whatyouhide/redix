@@ -104,14 +104,7 @@ defmodule Redix.StartOptions do
       raise ArgumentError, "a port should be specified for each sentinel"
     end
 
-    opts =
-      if global_password = sentinel_opts[:password] do
-        Keyword.put_new(opts, :password, global_password)
-      else
-        opts
-      end
-
-    opts
+    Keyword.merge(Keyword.take(sentinel_opts, [:password]), opts)
   end
 
   defp normalize_sentinel_address(other, _sentinel_opts) do

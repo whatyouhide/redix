@@ -246,7 +246,7 @@ defmodule Redix do
     * `:password` - (string) if you don't want to specify a password for each sentinel you
       list, you can use this option to specify a password that will be used to authenticate
       on sentinels if they don't specify a password. This option is recommended over passing
-      a password for each sentinel because in the future we might to sentinel auto-discovery,
+      a password for each sentinel because in the future we might do sentinel auto-discovery,
       which means authentication can only be done through a global password that works for all
       sentinels.
 
