@@ -64,7 +64,7 @@ defmodule Redix.SentinelTest do
                         %Redix.ConnectionError{reason: :no_viable_sentinel_connection}}
       end)
 
-    assert log =~ "Couldn't connect to primary through nonexistent:9999: :nxdomain"
+    assert log =~ "Couldn't connect to sentinel nonexistent:9999: :nxdomain"
   end
 
   test "sentinel supports password", %{sentinel_config: sentinel_config} do
