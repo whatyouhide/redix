@@ -102,8 +102,7 @@ defmodule Redix.Connector do
 
       {:error, reason} ->
         log(opts, :failed_connection, fn ->
-          "Couldn't connect to #{sentinel_opts[:role]} through #{format_host(sentinel)}: " <>
-            inspect(reason)
+          "Couldn't connect to sentinel #{format_host(sentinel)}: #{inspect(reason)}"
         end)
 
         connect_through_sentinel(rest, sentinel_opts, opts, transport)
