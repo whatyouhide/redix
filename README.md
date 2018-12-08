@@ -75,7 +75,7 @@ Redix is resilient against network errors. For example, if the connection to Red
 
 #### Redis Sentinel
 
-Redix supports [Redis Sentinel][sentinel] out of the box. You can specify a list of sentinels to connect to when starting a `Redix` (or `Redix.PubSub`) connection. Every time that connection will need to connect to a Redis server (the first time or after a disconnection), it will try to connect to one of the sentinels in order to ask that sentinel for the current primary or a replica.
+Redix supports [Redis Sentinel][redis-sentinel] out of the box. You can specify a list of sentinels to connect to when starting a `Redix` (or `Redix.PubSub`) connection. Every time that connection will need to connect to a Redis server (the first time or after a disconnection), it will try to connect to one of the sentinels in order to ask that sentinel for the current primary or a replica.
 
 ```elixir
 sentinels = ["redis://sent1.example.com:26379", "redis://sent2.example.com:26379"]
