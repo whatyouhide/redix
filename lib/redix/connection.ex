@@ -220,7 +220,7 @@ defmodule Redix.Connection do
           # The socket owner will get a closed message at some point, so we just move to the
           # disconnected state.
           :ok = data.transport.close(data.socket)
-          {:next_state, :disconnected}
+          {:next_state, :disconnected, data}
       end
     else
       reply(from, {:ok, []})
