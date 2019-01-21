@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.1
+
+### Bug fixes and improvements
+
+  * Fix a bad return type from a `gen_statem` callback (#120).
+  * Improve logging for Redis Sentinel.
+
 ## v0.9.0
 
 ### Breaking changes
