@@ -5,7 +5,7 @@ defmodule Redix.URI do
   def opts_from_uri(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
-    unless scheme == "redis" do
+    unless scheme in ["redis", "rediss"] do
       raise ArgumentError, "expected scheme to be redis://, got: #{scheme}://"
     end
 
@@ -14,6 +14,7 @@ defmodule Redix.URI do
     |> put_if_not_nil(:port, port)
     |> put_if_not_nil(:password, password(uri))
     |> put_if_not_nil(:database, database(uri))
+    |> enable_ssl_if_secure_scheme(scheme)
   end
 
   defp password(%URI{userinfo: nil}) do
@@ -30,4 +31,9 @@ defmodule Redix.URI do
 
   defp put_if_not_nil(opts, _key, nil), do: opts
   defp put_if_not_nil(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp enable_ssl_if_secure_scheme(opts, "rediss"),
+    do: Keyword.put(opts, :ssl, true)
+
+  defp enable_ssl_if_secure_scheme(opts, _), do: opts
 end

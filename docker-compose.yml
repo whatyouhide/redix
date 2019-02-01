@@ -41,3 +41,16 @@ services:
       - "26383:26383"
     sysctls:
       net.core.somaxconn: 1024
+
+  base_with_stunnel:
+    image: dweomer/stunnel
+    environment:
+      - STUNNEL_SERVICE=base
+      - STUNNEL_ACCEPT=6384
+      - STUNNEL_CONNECT=base:6379
+    links:
+      - base
+    ports:
+      - 6384:6384
+    sysctls:
+      net.core.somaxconn: 1024
