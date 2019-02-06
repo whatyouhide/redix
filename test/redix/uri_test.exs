@@ -47,4 +47,13 @@ defmodule Redix.URITest do
     assert opts[:host] == "localhost"
     assert is_nil(opts[:database])
   end
+
+  test "opts_from_uri/1: accepts rediss scheme" do
+    opts = opts_from_uri("rediss://example.com")
+    assert opts[:host] == "example.com"
+    assert opts[:ssl] == true
+    assert is_nil(opts[:port])
+    assert is_nil(opts[:database])
+    assert is_nil(opts[:password])
+  end
 end

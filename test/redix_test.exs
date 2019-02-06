@@ -72,6 +72,11 @@ defmodule RedixTest do
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
+    test "using a rediss:// url" do
+      {:ok, pid} = Redix.start_link("rediss://localhost:6384/3")
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
     test "name registration" do
       {:ok, pid} = Redix.start_link(name: :redix_server)
       assert Process.whereis(:redix_server) == pid
