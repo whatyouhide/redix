@@ -4,7 +4,7 @@ defmodule Redix.URITest do
   import Redix.URI
 
   test "opts_from_uri/1: invalid scheme" do
-    message = "expected scheme to be redis://, got: foo://"
+    message = "expected scheme to be redis:// or rediss://, got: foo://"
 
     assert_raise ArgumentError, message, fn ->
       opts_from_uri("foo://example.com")

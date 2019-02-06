@@ -6,7 +6,7 @@ defmodule Redix.URI do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
     unless scheme in ["redis", "rediss"] do
-      raise ArgumentError, "expected scheme to be redis://, got: #{scheme}://"
+      raise ArgumentError, "expected scheme to be redis:// or rediss://, got: #{scheme}://"
     end
 
     []
@@ -32,8 +32,6 @@ defmodule Redix.URI do
   defp put_if_not_nil(opts, _key, nil), do: opts
   defp put_if_not_nil(opts, key, value), do: Keyword.put(opts, key, value)
 
-  defp enable_ssl_if_secure_scheme(opts, "rediss"),
-    do: Keyword.put(opts, :ssl, true)
-
-  defp enable_ssl_if_secure_scheme(opts, _), do: opts
+  defp enable_ssl_if_secure_scheme(opts, "rediss"), do: Keyword.put(opts, :ssl, true)
+  defp enable_ssl_if_secure_scheme(opts, _scheme), do: opts
 end
