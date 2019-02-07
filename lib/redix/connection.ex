@@ -229,7 +229,7 @@ defmodule Redix.Connection do
   end
 
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
-    log(data, :failed_connection, fn ->
+    log(data, :disconnection, fn ->
       [
         "Disconnected from Redis (#{data.connected_address}): ",
         Exception.message(%ConnectionError{reason: reason})
