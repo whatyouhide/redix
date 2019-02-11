@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.2
+
+### Bug fixes and improvements
+
+  * Add support for URLs with the `rediss` scheme.
+  * Fix a bug where we used the wrong logging level in some places.
+
 ## v0.9.1
 
 ### Bug fixes and improvements
