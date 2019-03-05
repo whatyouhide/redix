@@ -77,3 +77,11 @@ And then use the new wrapper in your application:
 MyApp.Redix.command(["PING"])
 #=> {:ok, "PONG"}
 ```
+
+### Caveats of the name-based pool
+
+The name-based pool works well enough for many use cases but it has a few caveats.
+
+The first one is that the load of requests to Redis is distributed fairly among the connections in the pool, but is not distributed in a "smart" way. For example, you might want to send less requests to connections that are behaving in a worse way, such as slower connections. This avoids bottling up connections that are already slow by sending more requests to them and distributes the load more evenly.
+
+The other caveat is that you need to think about possible race conditions when using this kind of pool since every time you issue a command you could be using a different connections. If you issue commands from the same process, things will work since the process will block until it receives a reply so we know that Redis received and processed the command before we can issue a new one. However, if you issue commands from different processes, you can't be sure of the order that they get processed by Redis. After all, this is often true when doing things from different processes and is not particularly Redix specific.
