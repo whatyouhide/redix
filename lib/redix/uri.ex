@@ -26,8 +26,19 @@ defmodule Redix.URI do
     password
   end
 
-  defp database(%URI{path: path}) when path in [nil, "/"], do: nil
-  defp database(%URI{path: "/" <> db}), do: String.to_integer(db)
+  defp database(%URI{path: path}) when path in [nil, "/"] do
+    nil
+  end
+
+  defp database(%URI{path: "/" <> path = full_path}) do
+    case Integer.parse(path) do
+      {db, ""} ->
+        db
+
+      _other ->
+        raise ArgumentError, "expected database to be an integer, got: #{inspect(full_path)}"
+    end
+  end
 
   defp put_if_not_nil(opts, _key, nil), do: opts
   defp put_if_not_nil(opts, key, value), do: Keyword.put(opts, key, value)

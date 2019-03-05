@@ -46,6 +46,12 @@ defmodule Redix.URITest do
     opts = opts_from_uri("redis://localhost/")
     assert opts[:host] == "localhost"
     assert is_nil(opts[:database])
+
+    message = "expected database to be an integer, got: \"/2/namespace\""
+
+    assert_raise ArgumentError, message, fn ->
+      opts_from_uri("redis://localhost/2/namespace")
+    end
   end
 
   test "opts_from_uri/1: accepts rediss scheme" do
