@@ -420,13 +420,17 @@ defmodule RedixTest do
       end)
     end
 
-    test "no leaking messages when timeout happen at the same time as disconnections", %{conn: c} do
+    test "no leaking messages when timeout happens at the same time as disconnections", %{
+      conn: conn
+    } do
+      {:ok, kill_conn} = Redix.start_link()
+
       capture_log(fn ->
         {_pid, ref} =
           Process.spawn(
             fn ->
               error = %ConnectionError{reason: :timeout}
-              assert Redix.command(c, ~w(BLPOP my_list 0), timeout: 0) == {:error, error}
+              assert Redix.command(conn, ~w(BLPOP my_list 0), timeout: 0) == {:error, error}
 
               # The fact that we timed out should be respected here, even if the
               # connection is killed (no {:error, :disconnected} message should
@@ -436,7 +440,10 @@ defmodule RedixTest do
             [:link, :monitor]
           )
 
-        Redix.command!(c, ~w(QUIT))
+        # Give the process time to issue the command to Redis, then kill the connection.
+        Process.sleep(50)
+        Redix.command!(kill_conn, ~w(CLIENT KILL TYPE normal SKIPME yes))
+
         assert_receive {:DOWN, ^ref, _, _, _}, 200
       end)
     end

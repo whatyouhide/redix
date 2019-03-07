@@ -86,10 +86,10 @@ defmodule Redix.PubSubTest do
   test "subscribing the same pid to the same channel more than once has no effect",
        %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
-    assert {:ok, ^ref} = PubSub.subscribe(pubsub, "foo", self())
-
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
-    refute_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+
+    assert {:ok, ^ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
 
     assert subscribed_channels(conn) == MapSet.new(["foo"])
 
@@ -182,15 +182,6 @@ defmodule Redix.PubSubTest do
     wait_until_passes(200, fn ->
       assert subscribed_channels(conn) == MapSet.new()
     end)
-  end
-
-  test "subscribing then unsubscribing before confirmation from Redis works fine",
-       %{pubsub: pubsub} do
-    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
-    assert :ok = PubSub.unsubscribe(pubsub, "foo", self())
-
-    refute_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
-    assert_receive {:redix_pubsub, ^pubsub, ^ref, :unsubscribed, %{channel: "foo"}}
   end
 
   test "subscribing, unsubscribing, resubscribing before confirmation from Redis works fine",
