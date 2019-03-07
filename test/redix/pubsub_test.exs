@@ -184,21 +184,6 @@ defmodule Redix.PubSubTest do
     end)
   end
 
-  test "subscribing, unsubscribing, resubscribing before confirmation from Redis works fine",
-       %{pubsub: pubsub, conn: conn} do
-    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
-    assert :ok = PubSub.unsubscribe(pubsub, "foo", self())
-    assert {:ok, other_ref} = PubSub.subscribe(pubsub, "foo", self())
-
-    refute_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
-    assert_receive {:redix_pubsub, ^pubsub, ^ref, :unsubscribed, %{channel: "foo"}}
-    assert_receive {:redix_pubsub, ^pubsub, ^other_ref, :subscribed, %{channel: "foo"}}
-
-    Redix.command!(conn, ~w(PUBLISH foo hello))
-    assert_receive {:redix_pubsub, ^pubsub, ^other_ref, :message, properties}
-    assert %{channel: "foo", payload: "hello"} = properties
-  end
-
   test "disconnections/reconnections", %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
