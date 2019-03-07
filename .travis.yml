@@ -10,8 +10,8 @@ stages:
   - test
 
 # Defaults for all stages.
-elixir: "1.7"
-otp_release: "21.1"
+elixir: "1.8"
+otp_release: "21.2"
 
 env:
   - DOCKER_COMPOSE_VERSION=1.22.0
@@ -23,6 +23,9 @@ script:
 jobs:
   include:
     - stage: test
+
+    - otp_release: "20.3"
+      elixir: "1.7"
 
     - otp_release: "19.3"
       elixir: "1.6"
