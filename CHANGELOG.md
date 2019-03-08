@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.9.3
+
+### Bug fixes and improvements
+
+  * Fix a bug related to quickly reconnecting PIDs in `Redix.PubSub`.
+  * Improve error messages here and there.
+
 ## v0.9.2
 
 ### Bug fixes and improvements
