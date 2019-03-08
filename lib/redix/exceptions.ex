@@ -49,10 +49,9 @@ defmodule Redix.ConnectionError do
     format_reason(reason)
   end
 
-  # :inet.format_error/1 doesn't format :tcp_closed.
-  defp format_reason(:tcp_closed) do
-    "TCP connection closed"
-  end
+  # :inet.format_error/1 doesn't format closed messages.
+  defp format_reason(:tcp_closed), do: "TCP connection closed"
+  defp format_reason(:ssl_closed), do: "SSL connection closed"
 
   # Manually returned by us when the connection is closed and someone tries to
   # send a command to Redis.
@@ -62,11 +61,8 @@ defmodule Redix.ConnectionError do
 
   defp format_reason(reason) do
     case :inet.format_error(reason) do
-      'unknown POSIX error' ->
-        inspect(reason)
-
-      message ->
-        List.to_string(message)
+      'unknown POSIX error' -> inspect(reason)
+      message -> List.to_string(message)
     end
   end
 end
