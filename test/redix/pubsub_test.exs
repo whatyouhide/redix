@@ -136,6 +136,22 @@ defmodule Redix.PubSubTest do
     assert_receive {^mirror, {:redix_pubsub, ^pubsub, ^mirror_ref, :message, %{payload: "hello"}}}
   end
 
+  test "if a pid crashes and then resubscribes right away it is resubscribed correctly",
+       %{pubsub: pubsub} do
+    parent = self()
+    {pid, monitor_ref} = spawn_monitor(fn -> message_mirror(parent) end)
+
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", pid)
+    assert_receive {^pid, {:redix_pubsub, ^pubsub, ^ref, :subscribed, _properties}}
+
+    Process.exit(pid, :kill)
+    assert_receive {:DOWN, ^monitor_ref, _, _, _}
+
+    pid = spawn(fn -> message_mirror(parent) end)
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", pid)
+    assert_receive {^pid, {:redix_pubsub, ^pubsub, ^ref, :subscribed, _properties}}
+  end
+
   test "after unsubscribing from a channel, resubscribing one recipient resubscribes correctly",
        %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())

@@ -308,10 +308,10 @@ defmodule Redix.PubSub do
 
     case Keyword.pop(opts, :name) do
       {nil, opts} ->
-        :gen_statem.start_link(Redix.PubSub.Connection, opts, [])
+        :gen_statem.start_link(Redix.PubSub.Connection, opts, debug: [])
 
       {atom, opts} when is_atom(atom) ->
-        :gen_statem.start_link({:local, atom}, Redix.PubSub.Connection, opts, [])
+        :gen_statem.start_link({:local, atom}, Redix.PubSub.Connection, opts, debug: [])
 
       {{:global, _term} = tuple, opts} ->
         :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, [])

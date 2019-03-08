@@ -264,8 +264,11 @@ defmodule Redix.PubSub.Connection do
   def connected(:info, {transport, socket, bytes}, %__MODULE__{socket: socket} = data)
       when transport in [:tcp, :ssl] do
     :ok = setopts(data, socket, active: :once)
-    data = new_bytes(data, bytes)
-    {:keep_state, data}
+
+    case new_bytes(data, bytes) do
+      {:ok, data} -> {:keep_state, data}
+      {:error, reason} -> disconnect(data, reason)
+    end
   end
 
   def connected(:info, {:DOWN, ref, :process, pid, _reason}, data) do
@@ -299,17 +302,17 @@ defmodule Redix.PubSub.Connection do
   ## Helpers
 
   defp new_bytes(data, "") do
-    data
+    {:ok, data}
   end
 
   defp new_bytes(data, bytes) do
     case (data.continuation || (&Protocol.parse/1)).(bytes) do
       {:ok, resp, rest} ->
-        data = handle_pubsub_msg(data, resp)
-        new_bytes(%{data | continuation: nil}, rest)
+        with {:ok, data} <- handle_pubsub_msg(data, resp),
+             do: new_bytes(%{data | continuation: nil}, rest)
 
       {:continuation, continuation} ->
-        %{data | continuation: continuation}
+        {:ok, %{data | continuation: continuation}}
     end
   end
 
@@ -329,7 +332,7 @@ defmodule Redix.PubSub.Connection do
       # We did not have any pending subscribers for this target. This can happen if subscribers
       # unsubscribe before their subscription is moved out of the pending subscriptions.
       {nil, data} ->
-        data
+        {:ok, data}
 
       # We had pending subscribers, so we just move them to subscribers and notify them they're
       # subscribed now.
@@ -339,7 +342,7 @@ defmodule Redix.PubSub.Connection do
           send(pid, ref, kind, %{target_type => target})
         end)
 
-        put_in(data.subscriptions[target_key], pending_subscribers)
+        {:ok, put_in(data.subscriptions[target_key], pending_subscribers)}
     end
   end
 
@@ -350,13 +353,29 @@ defmodule Redix.PubSub.Connection do
     target_key = key_for_target(operation, target)
 
     case data.subscriptions do
+      # If an unsubscription confirmation arrives from Redis but we have subscribers for that
+      # target, we move the subscribers to pending_subscriptions and then subscribe again
+      # to Redis.
       %{^target_key => subscribers} ->
         data = update_in(data.subscriptions, &Map.delete(&1, target_key))
         data = put_in(data.pending_subscriptions[target_key], subscribers)
-        data
+
+        if MapSet.size(subscribers) != 0 do
+          subscribe_operation =
+            case operation do
+              :unsubscribe -> :subscribe
+              :punsubscribe -> :psubscribe
+            end
+
+          with :ok <- subscribe_with_operation(data, subscribe_operation, [target]) do
+            {:ok, data}
+          end
+        else
+          {:ok, data}
+        end
 
       _other ->
-        data
+        {:ok, data}
     end
   end
 
@@ -369,7 +388,7 @@ defmodule Redix.PubSub.Connection do
       send(pid, ref, :message, properties)
     end)
 
-    data
+    {:ok, data}
   end
 
   defp handle_pubsub_msg(data, ["pmessage", pattern, channel, payload]) do
@@ -381,7 +400,7 @@ defmodule Redix.PubSub.Connection do
       send(pid, ref, :pmessage, properties)
     end)
 
-    data
+    {:ok, data}
   end
 
   # Returns {targets_to_subscribe_to, already_subscribed_targets, data}.
