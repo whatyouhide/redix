@@ -138,12 +138,19 @@ defmodule Redix.PubSub.Connection do
     {data, ref} = monitor_new(data, pid)
     :ok = :gen_statem.reply(from, {:ok, ref})
 
-    # We can just add subscribers to channels here since when we'll reconnect, the connection
-    # will have to reconnect to all the channels/patterns anyways.
-    {_targets_to_subscribe_to, _already_subscribed_targets, data} =
-      subscribe_pid_to_targets(data, operation, targets, pid)
+    target_type =
+      case operation do
+        :subscribe -> :channel
+        :psubscribe -> :pattern
+      end
 
-    send(pid, ref, :disconnected, %{reason: data.last_disconnect_reason})
+    data =
+      Enum.reduce(targets, data, fn target_name, data_acc ->
+        update_in(data_acc.subscriptions[{target_type, target_name}], fn
+          {:disconnected, subscribers} -> {:disconnected, MapSet.put(subscribers, pid)}
+          nil -> {:disconnected, MapSet.new([pid])}
+        end)
+      end)
 
     {:keep_state, data}
   end
@@ -152,27 +159,33 @@ defmodule Redix.PubSub.Connection do
       when operation in [:unsubscribe, :punsubscribe] do
     :ok = :gen_statem.reply(from, :ok)
 
-    case data.monitors[pid] do
-      ref when is_reference(ref) ->
-        {_targets_to_unsubscribe_from, data} =
-          unsubscribe_pid_from_targets(data, operation, targets, pid)
+    target_type =
+      case operation do
+        :subscribe -> :channel
+        :psubscribe -> :pattern
+      end
 
-        {kind, target_type} =
-          case operation do
-            :unsubscribe -> {:unsubscribed, :channel}
-            :punsubscribe -> {:punsubscribed, :pattern}
-          end
+    data =
+      Enum.reduce(targets, data, fn target_name, data_acc ->
+        target_key = {target_type, target_name}
 
-        Enum.each(targets, fn target ->
-          send(pid, ref, kind, %{target_type => target})
-        end)
+        case data_acc.subscriptions[target_key] do
+          nil ->
+            data_acc
 
-        data = demonitor_if_not_subscribed_to_anything(data, pid)
-        {:keep_state, data}
+          {:disconnected, subscribers} ->
+            subscribers = MapSet.delete(subscribers, pid)
 
-      nil ->
-        :keep_state_and_data
-    end
+            if MapSet.size(subscribers) == 0 do
+              update_in(data_acc.subscriptions, &Map.delete(&1, target_key))
+            else
+              put_in(data_acc.subscriptions[target_key], {:disconnected, subscribers})
+            end
+        end
+      end)
+
+    data = demonitor_if_not_subscribed_to_anything(data, pid)
+    {:keep_state, data}
   end
 
   def connected(:internal, :handle_connection, data) do
@@ -565,7 +578,9 @@ defmodule Redix.PubSub.Connection do
   def disconnect(data, reason, handle_disconnection?) do
     {next_backoff, data} = next_backoff(data)
 
-    _ = data.transport.close(data.socket)
+    if data.socket do
+      _ = data.transport.close(data.socket)
+    end
 
     data = put_in(data.last_disconnect_reason, %ConnectionError{reason: reason})
     data = put_in(data.socket, nil)
