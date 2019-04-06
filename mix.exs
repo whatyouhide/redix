@@ -51,7 +51,8 @@ defmodule Redix.Mixfile do
   defp deps() do
     [
       {:ex_doc, "~> 0.19", only: :dev},
-      {:stream_data, "~> 0.4", only: :test}
+      {:stream_data, "~> 0.4", only: :test},
+      {:propcheck, "~> 1.1", only: :test}
     ]
   end
 end
