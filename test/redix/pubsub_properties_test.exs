@@ -10,7 +10,13 @@ defmodule Redix.PubSubPropertiesTest do
   defstruct [:channels, :ref]
 
   defmodule PubSub do
-    def start_link(), do: Redix.PubSub.start_link(name: __MODULE__, backoff_initial: 0)
+    @opts [
+      name: __MODULE__,
+      backoff_initial: 0,
+      log: [disconnection: :debug, reconnection: :debug]
+    ]
+
+    def start_link(), do: Redix.PubSub.start_link(@opts)
 
     def subscribe(channel) do
       {:ok, ref} = Redix.PubSub.subscribe(__MODULE__, channel, self())
