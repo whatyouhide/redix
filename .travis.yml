@@ -19,7 +19,6 @@ env:
 script:
   - docker-compose up --detach
   - mix test --trace --exclude propcheck
-  - MIX_ENV=test mix propcheck.inspect
 
 jobs:
   include:
