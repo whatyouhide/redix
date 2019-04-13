@@ -60,8 +60,8 @@ defmodule Redix.SentinelTest do
             exit_on_disconnection: true
           )
 
-        assert_receive {:EXIT, ^conn,
-                        %Redix.ConnectionError{reason: :no_viable_sentinel_connection}}
+        assert_receive {:EXIT, ^conn, error}, 10000
+        assert %Redix.ConnectionError{reason: :no_viable_sentinel_connection} = error
       end)
 
     assert log =~ "Couldn't connect to sentinel nonexistent:9999: :nxdomain"
