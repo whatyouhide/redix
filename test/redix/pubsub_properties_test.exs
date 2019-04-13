@@ -41,10 +41,8 @@ defmodule Redix.PubSubPropertiesTest do
   end
 
   property "subscribing and unsubscribing from channels", [:verbose] do
-    num_tests = if System.get_env("CI"), do: 50, else: 500
-
     numtests(
-      num_tests,
+      200,
       forall cmds <- commands(__MODULE__) do
         trap_exit do
           {:ok, _} = PubSub.start_link()
