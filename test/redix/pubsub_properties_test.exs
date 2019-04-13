@@ -54,11 +54,11 @@ defmodule Redix.PubSubPropertiesTest do
           :ok = ControlConn.stop()
 
           fail_report = """
-          History: #{inspect(history)}
+          History: #{inspect(history, pretty: true)}
 
-          State: #{inspect(state)}
+          State: #{inspect(state, pretty: true)}
 
-          Result: #{inspect(result)}
+          Result: #{inspect(result, pretty: true)}
           """
 
           (result == :ok)
