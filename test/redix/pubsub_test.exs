@@ -219,6 +219,23 @@ defmodule Redix.PubSubTest do
                    1000
   end
 
+  @tag :capture_log
+  test "subscribing while the connection is down", %{pubsub: pubsub, conn: conn} do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}, 1000
+
+    Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}
+
+    assert {:ok, ^ref} = PubSub.subscribe(pubsub, "bar", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "bar"}}, 1000
+    Redix.command!(conn, ~w(PUBLISH bar hello))
+
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "bar", payload: "hello"}},
+                   1000
+  end
+
   test ":exit_on_disconnection option", %{conn: conn} do
     {:ok, pubsub} = PubSub.start_link(port: @port, exit_on_disconnection: true)
 
