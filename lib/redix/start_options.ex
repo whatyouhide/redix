@@ -20,12 +20,11 @@ defmodule Redix.StartOptions do
     sync_connect: false,
     backoff_initial: 500,
     backoff_max: 30000,
-    log: @default_log_options,
     exit_on_disconnection: false,
     timeout: 5000
   ]
 
-  @allowed_options [:host, :port, :database, :password, :name, :sentinel] ++
+  @allowed_options [:host, :port, :database, :password, :name, :sentinel, :log] ++
                      Keyword.keys(@default_options)
 
   def sanitize(options) when is_list(options) do
@@ -34,7 +33,7 @@ defmodule Redix.StartOptions do
     |> assert_only_known_options()
     |> maybe_sanitize_sentinel_opts()
     |> maybe_sanitize_host_and_port()
-    |> fill_default_log_options()
+    |> warn_deprecated_log_option_and_add_defaults()
   end
 
   defp assert_only_known_options(options) do
@@ -47,8 +46,19 @@ defmodule Redix.StartOptions do
     options
   end
 
-  defp fill_default_log_options(options) do
-    Keyword.update!(options, :log, &Keyword.merge(@default_log_options, &1))
+  defp warn_deprecated_log_option_and_add_defaults(opts) do
+    case Keyword.fetch(opts, :log) do
+      {:ok, log_opts} ->
+        IO.warn(
+          "The :log option has been deprecated in favour of using :telemetry. " <>
+            "See https://hexdocs.pm/redix/telemetry.html for more information."
+        )
+
+        Keyword.replace!(opts, :log, Keyword.merge(@default_log_options, log_opts))
+
+      :error ->
+        Keyword.put(opts, :log, @default_log_options)
+    end
   end
 
   defp maybe_sanitize_sentinel_opts(options) do

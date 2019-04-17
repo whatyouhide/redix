@@ -265,8 +265,9 @@ defmodule Redix.PubSub do
       will be ignored. Defaults to `false`.
 
     * `:log` - (keyword list) a keyword list of `{action, level}` where `level` is
-      the log level to use to log `action`. The possible actions and their default
-      values are:
+      the log level to use to log `action`. **This option is deprecated** in favor
+      of Telemetry. See the "Telemetry" section in the module documentation.
+      The possible actions and their default values are:
         * `:disconnection` (defaults to `:error`) - logged when the connection to
           Redis is lost
         * `:failed_connection` (defaults to `:error`) - logged when Redix can't

@@ -1,7 +1,7 @@
 defmodule Redix.Connection do
   @moduledoc false
 
-  alias Redix.{ConnectionError, Protocol, SocketOwner, StartOptions}
+  alias Redix.{ConnectionError, Protocol, SocketOwner, StartOptions, Telemetry}
 
   require Logger
 
@@ -153,12 +153,10 @@ defmodule Redix.Connection do
   # the socket owner to die so that it can finish processing the data it's processing. When it's
   # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
-    log(data, :failed_connection, fn ->
-      [
-        "Disconnected from Redis (#{data.connected_address}): ",
-        Exception.message(%ConnectionError{reason: reason})
-      ]
-    end)
+    Telemetry.execute(:disconnected, data.opts[:log], %{
+      address: data.connected_address,
+      reason: %ConnectionError{reason: reason}
+    })
 
     data = %{data | connected_address: nil}
     disconnect(data, reason)
@@ -170,7 +168,7 @@ defmodule Redix.Connection do
         %__MODULE__{socket_owner: owner} = data
       ) do
     if data.backoff_current do
-      log(data, :reconnection, fn -> "Reconnected to Redis (#{address})" end)
+      Telemetry.execute(:reconnected, data.opts[:log], %{address: address})
     end
 
     data = %{data | socket: socket, backoff_current: nil, connected_address: address}
@@ -183,12 +181,10 @@ defmodule Redix.Connection do
 
   def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     # We log this when the socket owner stopped while connecting.
-    log(data, :failed_connection, fn ->
-      [
-        "Failed to connect to Redis (#{format_address(data)}): ",
-        Exception.message(%ConnectionError{reason: reason})
-      ]
-    end)
+    Telemetry.execute(:failed_connection, data.opts[:log], %{
+      address: format_address(data),
+      reason: %ConnectionError{reason: reason}
+    })
 
     disconnect(data, reason)
   end
@@ -229,12 +225,10 @@ defmodule Redix.Connection do
   end
 
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
-    log(data, :disconnection, fn ->
-      [
-        "Disconnected from Redis (#{data.connected_address}): ",
-        Exception.message(%ConnectionError{reason: reason})
-      ]
-    end)
+    Telemetry.execute(:disconnection, data.opts[:log], %{
+      address: data.connected_address,
+      reason: reason
+    })
 
     data = %{data | connected_address: nil}
     disconnect(data, reason)
@@ -289,15 +283,6 @@ defmodule Redix.Connection do
       end
 
     {backoff_current, %{data | backoff_current: backoff_current}}
-  end
-
-  defp log(data, kind, message) do
-    level =
-      data.opts
-      |> Keyword.fetch!(:log)
-      |> Keyword.fetch!(kind)
-
-    Logger.log(level, message)
   end
 
   defp get_client_reply(data, commands) do
