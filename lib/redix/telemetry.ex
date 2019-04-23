@@ -10,9 +10,7 @@ defmodule Redix.Telemetry do
       [:redix, :failed_connection]
     ]
 
-    # Avoid warnings if :telemetry is not available.
-    telemetry = :telemetry
-    telemetry.attach_many("redix-default-telemetry-handler", events, &handle_event/4, :no_config)
+    :telemetry.attach_many("redix-default-telemetry-handler", events, &handle_event/4, :no_config)
   end
 
   def handle_event([:redix, event], _measurements, metadata, :no_config)
@@ -37,20 +35,8 @@ defmodule Redix.Telemetry do
     end
   end
 
-  @spec execute(atom(), map()) :: :ok
-  def execute(event, metadata) do
+  def execute(event, metadata) when is_atom(event) and is_map(metadata) do
     metadata = Map.put(metadata, :connection, self())
-    :ok = telemetry_execute(event, metadata)
-  end
-
-  # TODO: remove this once we depend not optionally on Telemetry.
-  if Code.ensure_compiled?(:telemetry) do
-    defp telemetry_execute(event, metadata) do
-      :ok = :telemetry.execute([:redix, event], _measurements = %{}, metadata)
-    end
-  else
-    defp telemetry_execute(_event, _metadata) do
-      :ok
-    end
+    :ok = :telemetry.execute([:redix, event], _measurements = %{}, metadata)
   end
 end
