@@ -38,7 +38,7 @@ defmodule Redix.Mixfile do
   end
 
   def application() do
-    [extra_applications: [:logger]]
+    [extra_applications: [:logger, :ssl]]
   end
 
   defp package() do
@@ -53,6 +53,7 @@ defmodule Redix.Mixfile do
     [
       {:telemetry, "~> 0.4.0"},
       {:ex_doc, "~> 0.19", only: :dev},
+      {:dialyxir, "~> 1.0.0-rc.6", only: :dev},
       {:stream_data, "~> 0.4", only: :test},
       {:propcheck, "~> 1.1", only: :test}
     ]
