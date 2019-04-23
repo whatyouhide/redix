@@ -4,6 +4,8 @@ defmodule Redix.Connector do
   @socket_opts [:binary, active: false]
   @default_timeout 5000
 
+  alias Redix.Telemetry
+
   require Logger
 
   @spec connect(keyword()) :: {:ok, socket, connected_address} | {:error, term} | {:stop, term}
@@ -91,19 +93,20 @@ defmodule Redix.Connector do
           {:ok, server_socket, "#{server_host}:#{server_port}"}
         else
           {:error, reason} ->
-            log(opts, :failed_connection, fn ->
-              "Couldn't connect to #{sentinel_opts[:role]} through #{format_host(sentinel)}: " <>
-                inspect(reason)
-            end)
+            Telemetry.execute(:failed_connection, %{
+              reason: reason,
+              sentinel_address: format_host(sentinel)
+            })
 
             :ok = transport.close(sent_socket)
             connect_through_sentinel(rest, sentinel_opts, opts, transport)
         end
 
       {:error, reason} ->
-        log(opts, :failed_connection, fn ->
-          "Couldn't connect to sentinel #{format_host(sentinel)}: #{inspect(reason)}"
-        end)
+        Telemetry.execute(:failed_connection, %{
+          reason: reason,
+          sentinel_address: format_host(sentinel)
+        })
 
         connect_through_sentinel(rest, sentinel_opts, opts, transport)
     end
@@ -196,14 +199,5 @@ defmodule Redix.Connector do
         {:continuation, continuation} -> recv_response(transport, socket, continuation, timeout)
       end
     end
-  end
-
-  defp log(opts, kind, message) do
-    level =
-      opts
-      |> Keyword.fetch!(:log)
-      |> Keyword.fetch!(kind)
-
-    Logger.log(level, message)
   end
 end

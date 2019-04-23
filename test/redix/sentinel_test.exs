@@ -1,8 +1,6 @@
 defmodule Redix.SentinelTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
-
   @sentinels [
     "redis://localhost:26379",
     "redis://localhost:26380",
@@ -52,19 +50,14 @@ defmodule Redix.SentinelTest do
   test "when no sentinels are reachable" do
     Process.flag(:trap_exit, true)
 
-    log =
-      capture_log(fn ->
-        {:ok, conn} =
-          Redix.start_link(
-            sentinel: [sentinels: ["redis://nonexistent:9999"], group: "main"],
-            exit_on_disconnection: true
-          )
+    {:ok, conn} =
+      Redix.start_link(
+        sentinel: [sentinels: ["redis://nonexistent:9999"], group: "main"],
+        exit_on_disconnection: true
+      )
 
-        assert_receive {:EXIT, ^conn, error}, 10000
-        assert %Redix.ConnectionError{reason: :no_viable_sentinel_connection} = error
-      end)
-
-    assert log =~ "Couldn't connect to sentinel nonexistent:9999: :nxdomain"
+    assert_receive {:EXIT, ^conn, error}, 10000
+    assert %Redix.ConnectionError{reason: :no_viable_sentinel_connection} = error
   end
 
   test "sentinel supports password", %{sentinel_config: sentinel_config} do

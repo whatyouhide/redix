@@ -1,12 +1,6 @@
 defmodule Redix.StartOptions do
   @moduledoc false
 
-  @default_log_options [
-    disconnection: :error,
-    failed_connection: :error,
-    reconnection: :info
-  ]
-
   @default_sentinel_options [
     timeout: 500,
     socket_opts: [],
@@ -20,7 +14,6 @@ defmodule Redix.StartOptions do
     sync_connect: false,
     backoff_initial: 500,
     backoff_max: 30000,
-    log: @default_log_options,
     exit_on_disconnection: false,
     timeout: 5000
   ]
@@ -29,12 +22,24 @@ defmodule Redix.StartOptions do
                      Keyword.keys(@default_options)
 
   def sanitize(options) when is_list(options) do
+    # TODO: remove support for :log in Redix v0.11+.
+    options =
+      if Keyword.has_key?(options, :log) do
+        IO.warn(
+          "The :log option has been deprecated in favour of using :telemetry. " <>
+            "See https://hexdocs.pm/redix/telemetry.html for more information."
+        )
+
+        Keyword.delete(options, :log)
+      else
+        options
+      end
+
     @default_options
     |> Keyword.merge(options)
     |> assert_only_known_options()
     |> maybe_sanitize_sentinel_opts()
     |> maybe_sanitize_host_and_port()
-    |> fill_default_log_options()
   end
 
   defp assert_only_known_options(options) do
@@ -45,10 +50,6 @@ defmodule Redix.StartOptions do
     end)
 
     options
-  end
-
-  defp fill_default_log_options(options) do
-    Keyword.update!(options, :log, &Keyword.merge(@default_log_options, &1))
   end
 
   defp maybe_sanitize_sentinel_opts(options) do

@@ -30,6 +30,7 @@ defmodule Redix.Mixfile do
           "README.md",
           "pages/Reconnections.md",
           "pages/Real-world usage.md",
+          "pages/Telemetry.md",
           "CHANGELOG.md"
         ]
       ]
@@ -50,6 +51,7 @@ defmodule Redix.Mixfile do
 
   defp deps() do
     [
+      {:telemetry, "~> 0.4.0"},
       {:ex_doc, "~> 0.19", only: :dev},
       {:stream_data, "~> 0.4", only: :test},
       {:propcheck, "~> 1.1", only: :test}

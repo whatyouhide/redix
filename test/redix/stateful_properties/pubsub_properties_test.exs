@@ -12,8 +12,7 @@ defmodule Redix.PubSubPropertiesTest do
   defmodule PubSub do
     @opts [
       name: __MODULE__,
-      backoff_initial: 0,
-      log: [disconnection: :debug, reconnection: :debug]
+      backoff_initial: 0
     ]
 
     def start_link(), do: Redix.PubSub.start_link(@opts)

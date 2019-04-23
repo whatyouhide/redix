@@ -3,9 +3,7 @@ defmodule Redix.PubSub.Connection do
 
   @behaviour :gen_statem
 
-  alias Redix.{ConnectionError, Connector, Protocol}
-
-  require Logger
+  alias Redix.{ConnectionError, Connector, Protocol, Telemetry}
 
   defstruct [
     :opts,
@@ -68,10 +66,10 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnected(:internal, :handle_disconnection, data) do
-    log(data, :disconnection, fn ->
-      "Disconnected from Redis (#{data.connected_address}): " <>
-        Exception.message(data.last_disconnect_reason)
-    end)
+    Telemetry.execute(:disconnection, %{
+      address: data.connected_address,
+      reason: data.last_disconnect_reason
+    })
 
     if data.opts[:exit_on_disconnection] do
       {:stop, data.last_disconnect_reason}
@@ -107,7 +105,7 @@ defmodule Redix.PubSub.Connection do
     with {:ok, socket, address} <- Connector.connect(data.opts),
          :ok <- setopts(data, socket, active: :once) do
       if data.last_disconnect_reason do
-        log(data, :reconnection, fn -> "Reconnected to Redis (#{address})" end)
+        Telemetry.execute(:reconnected, %{address: address})
       end
 
       data = %__MODULE__{
@@ -121,10 +119,10 @@ defmodule Redix.PubSub.Connection do
       {:next_state, :connected, data, {:next_event, :internal, :handle_connection}}
     else
       {:error, reason} ->
-        log(data, :failed_connection, fn ->
-          "Failed to connect to Redis (#{format_address(data)}): " <>
-            Exception.message(%ConnectionError{reason: reason})
-        end)
+        Telemetry.execute(:failed_connection, %{
+          address: format_address(data),
+          reason: %ConnectionError{reason: reason}
+        })
 
         disconnect(data, reason, _handle_disconnection? = false)
 
@@ -600,15 +598,6 @@ defmodule Redix.PubSub.Connection do
   defp send(pid, ref, kind, properties)
        when is_pid(pid) and is_reference(ref) and is_atom(kind) and is_map(properties) do
     send(pid, {:redix_pubsub, self(), ref, kind, properties})
-  end
-
-  defp log(data, action, message) do
-    level =
-      data.opts
-      |> Keyword.fetch!(:log)
-      |> Keyword.fetch!(action)
-
-    Logger.log(level, message)
   end
 
   defp format_address(%{opts: opts} = _state) do
