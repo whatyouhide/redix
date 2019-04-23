@@ -29,7 +29,7 @@ Redix connections (both `Redix` and `Redix.PubSub`) execute the following Teleme
   * `[:redix, :failed_connection]` - executed when Redix can't connect to the specified Redis server, either when starting up the connection or after a disconnection. There are no measurements associated with this event. Metadata are:
 
     * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
-    * `:address` - the address the connection was connected to.
+    * `:address` or `:sentinel_address` - the address the connection was trying to connect to (either a Redis server or a Redis Sentinel instance).
 
   * `[:redix, :reconnection]` - executed when a Redix connection that had disconnected reconnects to a Redis server. There are no measurements associated with this event. Metadata are:
 
@@ -39,13 +39,15 @@ More events might be added in the future and that won't be considered a breaking
 
 ## Default handler for logging
 
-If you want a quick solution to log Redix events, call `Redix.attach_default_telemetry_handler/0` when starting your application. This will attach a default handler for Redix events that logs them at the following levels:
+By default, Redix provides a Telemetry event handler that performs logging. Events will be logged as follows:
 
   * `[:redix, :disconnection]` and `[:redix, :failed_connection]` are logged at the `:error` level.
 
   * `[:redix, :reconnection]` is logged at the `:info` level.
 
-These are reasonable defaults that work for most applications. The default event handler does not support customizing the log levels with a `:log` option like it's possible today. If you want more control over how these events are logged, you have to write your own event handler, see below.
+These are reasonable defaults that work for most applications. The default event handler does not support customizing the log levels. To use this default log handler, call this when starting your application:
+
+    Redix.attach_default_telemetry_handler()
 
 ## Writing your own handler
 

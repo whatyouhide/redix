@@ -1,12 +1,6 @@
 defmodule Redix.StartOptions do
   @moduledoc false
 
-  @default_log_options [
-    disconnection: :error,
-    failed_connection: :error,
-    reconnection: :info
-  ]
-
   @default_sentinel_options [
     timeout: 500,
     socket_opts: [],
@@ -24,6 +18,7 @@ defmodule Redix.StartOptions do
     timeout: 5000
   ]
 
+  # TODO: remove support for :log in Redix v0.11+.
   @allowed_options [:host, :port, :database, :password, :name, :sentinel, :log] ++
                      Keyword.keys(@default_options)
 
@@ -33,7 +28,7 @@ defmodule Redix.StartOptions do
     |> assert_only_known_options()
     |> maybe_sanitize_sentinel_opts()
     |> maybe_sanitize_host_and_port()
-    |> warn_deprecated_log_option_and_add_defaults()
+    |> warn_deprecated_log_option()
   end
 
   defp assert_only_known_options(options) do
@@ -46,18 +41,16 @@ defmodule Redix.StartOptions do
     options
   end
 
-  defp warn_deprecated_log_option_and_add_defaults(opts) do
-    case Keyword.fetch(opts, :log) do
-      {:ok, log_opts} ->
-        IO.warn(
-          "The :log option has been deprecated in favour of using :telemetry. " <>
-            "See https://hexdocs.pm/redix/telemetry.html for more information."
-        )
+  defp warn_deprecated_log_option(opts) do
+    if Keyword.has_key?(opts, :log) do
+      IO.warn(
+        "The :log option has been deprecated in favour of using :telemetry. " <>
+          "See https://hexdocs.pm/redix/telemetry.html for more information."
+      )
 
-        Keyword.replace!(opts, :log, Keyword.merge(@default_log_options, log_opts))
-
-      :error ->
-        Keyword.put(opts, :log, @default_log_options)
+      Keyword.delete(opts, :log)
+    else
+      opts
     end
   end
 
