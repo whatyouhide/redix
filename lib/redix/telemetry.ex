@@ -35,7 +35,7 @@ defmodule Redix.Telemetry do
           "Failed to connect to Redis (#{metadata.address}): #{human_reason}"
 
         :disconnection ->
-          human_reason = Exception.message(reason: metadata.reason)
+          human_reason = Exception.message(metadata.reason)
           "Disconnected from Redis (#{metadata.address}): #{human_reason}"
 
         :reconnection ->
