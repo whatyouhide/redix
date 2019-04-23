@@ -25,15 +25,18 @@ Redix connections (both `Redix` and `Redix.PubSub`) execute the following Teleme
 
     * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
     * `:address` - the address the connection was connected to.
+    * `:conn` - the PID of the Redix connection that emitted the event.
 
   * `[:redix, :failed_connection]` - executed when Redix can't connect to the specified Redis server, either when starting up the connection or after a disconnection. There are no measurements associated with this event. Metadata are:
 
     * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
     * `:address` or `:sentinel_address` - the address the connection was trying to connect to (either a Redis server or a Redis Sentinel instance).
+    * `:conn` - the PID of the Redix connection that emitted the event.
 
   * `[:redix, :reconnection]` - executed when a Redix connection that had disconnected reconnects to a Redis server. There are no measurements associated with this event. Metadata are:
 
     * `:address` - the address the connection successfully reconnected to.
+    * `:conn` - the PID of the Redix connection that emitted the event.
 
 More events might be added in the future and that won't be considered a breaking change, so if you're writing a handler for Redix events be sure to ignore events that are not known. All future Redix events will start with the `:redix` atom, like the ones above.
 
