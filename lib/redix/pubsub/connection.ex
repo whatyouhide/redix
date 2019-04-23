@@ -159,8 +159,8 @@ defmodule Redix.PubSub.Connection do
 
     target_type =
       case operation do
-        :subscribe -> :channel
-        :psubscribe -> :pattern
+        :unsubscribe -> :channel
+        :punsubscribe -> :pattern
       end
 
     data =
@@ -284,7 +284,7 @@ defmodule Redix.PubSub.Connection do
           {:ok, data}
 
         {:error, reason} ->
-          disconnect(data, reason, _handle_disconnection? = true)
+          {:error, reason}
       end
     else
       Enum.each(subscribes, &send_subscription_confirmation(data, &1, target_key))
@@ -312,7 +312,7 @@ defmodule Redix.PubSub.Connection do
           {:ok, data}
 
         {:error, reason} ->
-          disconnect(data, reason, _handle_disconnection? = true)
+          {:error, reason}
       end
     end
   end
