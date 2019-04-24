@@ -791,7 +791,20 @@ defmodule Redix do
   end
 
   defp pipeline_without_checks(conn, commands, opts) do
-    Redix.Connection.pipeline(conn, commands, opts[:timeout] || @default_timeout)
+    timeout = opts[:timeout] || @default_timeout
+    {elapsed_time, result} = :timer.tc(Redix.Connection, :pipeline, [conn, commands, timeout])
+
+    case result do
+      {:ok, result} ->
+        metadata = %{connection: conn, commands: commands}
+        :ok = :telemetry.execute([:redix, :pipeline], %{elapsed_time: elapsed_time}, metadata)
+        {:ok, result}
+
+      {:error, reason} ->
+        metadata = %{connection: conn, commands: commands, reason: reason}
+        :ok = :telemetry.execute([:redix, :error], %{}, metadata)
+        {:error, reason}
+    end
   end
 
   defp assert_valid_pipeline_commands([] = _commands) do
