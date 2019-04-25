@@ -42,17 +42,19 @@ Redix connections (both `Redix` and `Redix.PubSub`) execute the following Teleme
 
   * `[:redix, :pipeline]` - executed when a pipeline (or command, which is a pipeline with just one command) is successfully sent to the server and a reply comes from the server. Measurements are:
 
-    * `:elapsed_time` (integer) - the elapsed time in microseconds that it took to send the pipeline to the server and get a reply.
+    * `:elapsed_time` (integer) - the elapsed time that it took to send the pipeline to the server and get a reply. The elapsed time is expressed in the `:native` time unit. See `System.convert_time_unit/3`.
 
     Metadata are:
 
       * `:connection` - the connection that emitted the event. If the connection was registered with a name, the name is used here, otherwise the PID.
       * `:commands` - the commands sent to the server. This is always a list of commands, so even if you do `Redix.command(conn, ["PING"])` than the list of commands will be `[["PING"]]`.
+      * `:start_time` - the system time when the pipeline was issued. This could be useful for tracing. The time unit is `:native`, see `System.convert_time_unit/3`.
 
-  * `[:redix, :error]` - executed when there's an error talking to the server. There are no measurements. Metadata are:
+  * `[:redix, :pipeline, :error]` - executed when there's an error talking to the server. There are no measurements. Metadata are:
 
       * `:connection` - the connection that emitted the event. If the connection was registered with a name, the name is used here, otherwise the PID.
       * `:commands` - the commands sent to the server. This is always a list of commands, so even if you do `Redix.command(conn, ["PING"])` than the list of commands will be `[["PING"]]`.
+      * `:start_time` - the system time when the pipeline was issued. This could be useful for tracing. The time unit is `:native`, see `System.convert_time_unit/3`.
       * `:reason` - the error reason.
 
 More events might be added in the future and that won't be considered a breaking change, so if you're writing a handler for Redix events be sure to ignore events that are not known. All future Redix events will start with the `:redix` atom, like the ones above.

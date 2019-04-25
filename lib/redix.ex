@@ -792,17 +792,25 @@ defmodule Redix do
 
   defp pipeline_without_checks(conn, commands, opts) do
     timeout = opts[:timeout] || @default_timeout
-    {elapsed_time, result} = :timer.tc(Redix.Connection, :pipeline, [conn, commands, timeout])
 
-    case result do
-      {:ok, result} ->
-        metadata = %{connection: conn, commands: commands}
-        :ok = :telemetry.execute([:redix, :pipeline], %{elapsed_time: elapsed_time}, metadata)
-        {:ok, result}
+    telemetry_metadata = %{
+      connection: conn,
+      commands: commands,
+      start_time: System.system_time()
+    }
+
+    start_time = System.monotonic_time()
+
+    case Redix.Connection.pipeline(conn, commands, timeout) do
+      {:ok, response} ->
+        end_time = System.monotonic_time()
+        measurements = %{elapsed_time: end_time - start_time}
+        :ok = :telemetry.execute([:redix, :pipeline], measurements, telemetry_metadata)
+        {:ok, response}
 
       {:error, reason} ->
-        metadata = %{connection: conn, commands: commands, reason: reason}
-        :ok = :telemetry.execute([:redix, :error], %{}, metadata)
+        telemetry_metadata = Map.put(telemetry_metadata, :reason, reason)
+        :ok = :telemetry.execute([:redix, :pipeline, :error], %{}, telemetry_metadata)
         {:error, reason}
     end
   end
