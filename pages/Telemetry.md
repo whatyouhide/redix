@@ -2,74 +2,13 @@
 
 Since version v0.10.0, Redix uses [Telemetry][telemetry] for instrumentation and for having an extensible way of doing logging. Telemetry is a metrics and instrumentation library for Erlang and Elixir applications that is based on publishing events through a common interface and attaching handlers to handle those events. For more information about the library itself, see [its README][telemetry].
 
-Telemetry is an optional dependency for Redix, so if you want to use it, add it explicitly to your dependencies:
-
-    defp deps do
-      [
-        # ...
-        {:redix, ">= 0.0.0"},
-        {:telemetry, ">= 0.0.0"}
-      ]
-
 Before version v0.10.0, `Redix.start_link/1` and `Redix.PubSub.start_link/1` supported a `:log` option to control logging. For example, if you wanted to log disconnections at the `:error` level and reconnections and the `:debug` level, you would do:
 
     Redix.start_link(log: [disconnection: :error, reconnection: :debug])
 
-The `:log` option is now deprecated in favour of either using the default Redix event handler or writing your own. See below for more information.
+The `:log` option is now deprecated in favour of either using the default Redix event handler or writing your own.
 
-## Events
-
-Redix connections (both `Redix` and `Redix.PubSub`) execute the following Telemetry events:
-
-  * `[:redix, :disconnection]` - executed when the connection is lost with the Redis server. There are no measurements associated with this event. Metadata are:
-
-    * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
-    * `:address` - the address the connection was connected to.
-    * `:conn` - the PID of the Redix connection that emitted the event.
-
-  * `[:redix, :failed_connection]` - executed when Redix can't connect to the specified Redis server, either when starting up the connection or after a disconnection. There are no measurements associated with this event. Metadata are:
-
-    * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
-    * `:address` or `:sentinel_address` - the address the connection was trying to connect to (either a Redis server or a Redis Sentinel instance).
-    * `:conn` - the PID of the Redix connection that emitted the event.
-
-  * `[:redix, :reconnection]` - executed when a Redix connection that had disconnected reconnects to a Redis server. There are no measurements associated with this event. Metadata are:
-
-    * `:address` - the address the connection successfully reconnected to.
-    * `:conn` - the PID of the Redix connection that emitted the event.
-
-`Redix` connections execute the following Telemetry events when commands or pipelines of any kind are executed.
-
-  * `[:redix, :pipeline]` - executed when a pipeline (or command, which is a pipeline with just one command) is successfully sent to the server and a reply comes from the server. Measurements are:
-
-    * `:elapsed_time` (integer) - the elapsed time that it took to send the pipeline to the server and get a reply. The elapsed time is expressed in the `:native` time unit. See `System.convert_time_unit/3`.
-
-    Metadata are:
-
-      * `:connection` - the connection that emitted the event. If the connection was registered with a name, the name is used here, otherwise the PID.
-      * `:commands` - the commands sent to the server. This is always a list of commands, so even if you do `Redix.command(conn, ["PING"])` than the list of commands will be `[["PING"]]`.
-      * `:start_time` - the system time when the pipeline was issued. This could be useful for tracing. The time unit is `:native`, see `System.convert_time_unit/3`.
-
-  * `[:redix, :pipeline, :error]` - executed when there's an error talking to the server. There are no measurements. Metadata are:
-
-      * `:connection` - the connection that emitted the event. If the connection was registered with a name, the name is used here, otherwise the PID.
-      * `:commands` - the commands sent to the server. This is always a list of commands, so even if you do `Redix.command(conn, ["PING"])` than the list of commands will be `[["PING"]]`.
-      * `:start_time` - the system time when the pipeline was issued. This could be useful for tracing. The time unit is `:native`, see `System.convert_time_unit/3`.
-      * `:reason` - the error reason.
-
-More events might be added in the future and that won't be considered a breaking change, so if you're writing a handler for Redix events be sure to ignore events that are not known. All future Redix events will start with the `:redix` atom, like the ones above.
-
-## Default handler for logging
-
-By default, Redix provides a Telemetry event handler that performs logging. Events will be logged as follows:
-
-  * `[:redix, :disconnection]` and `[:redix, :failed_connection]` are logged at the `:error` level.
-
-  * `[:redix, :reconnection]` is logged at the `:info` level.
-
-These are reasonable defaults that work for most applications. The default event handler does not support customizing the log levels. To use this default log handler, call this when starting your application:
-
-    Redix.attach_default_telemetry_handler()
+For information on the Telemetry events that Redix emits, see `Redix.Telemetry`.
 
 ## Writing your own handler
 

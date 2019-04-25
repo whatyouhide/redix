@@ -4,8 +4,6 @@ defmodule Redix.Connector do
   @socket_opts [:binary, active: false]
   @default_timeout 5000
 
-  alias Redix.Telemetry
-
   require Logger
 
   @spec connect(keyword()) :: {:ok, socket, connected_address} | {:error, term} | {:stop, term}
@@ -93,7 +91,7 @@ defmodule Redix.Connector do
           {:ok, server_socket, "#{server_host}:#{server_port}"}
         else
           {:error, reason} ->
-            Telemetry.execute(:failed_connection, %{
+            :telemetry.execute([:redix, :failed_connection], %{}, %{
               reason: reason,
               sentinel_address: format_host(sentinel)
             })
@@ -103,7 +101,7 @@ defmodule Redix.Connector do
         end
 
       {:error, reason} ->
-        Telemetry.execute(:failed_connection, %{
+        :telemetry.execute([:redix, :failed_connection], %{}, %{
           reason: reason,
           sentinel_address: format_host(sentinel)
         })

@@ -80,31 +80,7 @@ defmodule Redix do
 
   ## Telemetry
 
-  Redix uses Telemetry for instrumentation and logging. The following events are published:
-
-    * `[:redix, :disconnection]` - executed when the connection is lost with the Redis
-      server. There are no measurements associated with this event. Metadata are:
-
-      * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
-      * `:address` - the address the connection was connected to.
-
-    * `[:redix, :failed_connection]` - executed when Redix can't connect to the specified
-      Redis server, either when starting up the connection or after a disconnection. There
-      are no measurements associated with this event. Metadata are:
-
-      * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
-      * `:address` - the address the connection was connected to.
-
-    * `[:redix, :reconnection]` - executed when a Redix connection that had disconnected
-      reconnects to a Redis server. There are no measurements associated with this event.
-      Metadata are:
-
-      * `:address` - the address the connection successfully reconnected to.
-
-  A default handler that logs these events appropriately is provided, see
-  `attach_default_telemetry_handler/0`. Otherwise, you can write your own handler
-  to instrument or log events. For more detailed information about Redix and Telemetry,
-  see the [Telemetry page](telemetry.html) in the documentation.
+  Redix uses Telemetry for instrumentation and logging. See `Redix.Telemetry`.
   """
 
   # This module is only a "wrapper" module that exposes the public API alongside
@@ -762,32 +738,6 @@ defmodule Redix do
       {:ok, response} -> response
       {:error, error} -> raise(error)
     end
-  end
-
-  @doc """
-  Attaches the default Redix-provided telemetry handler.
-
-  [Telemetry](https://github.com/beam-telemetry/telemetry) is a library
-  for metrics and instrumentation of Erlang and Elixir applications.
-
-  This function attaches a default Redix-provided handler that logs
-  (using Elixir's `Logger`) the following events:
-
-    * disconnections (`:error` level)
-    * failed connections (`:error` level)
-    * successful reconnections (`:info` level)
-
-  If you want to attach your own handler, look at the
-  [Telemetry page](telemetry.html) in the documentation.
-
-  ## Examples
-
-      :ok = Redix.attach_default_telemetry_handler()
-
-  """
-  @spec attach_default_telemetry_handler() :: :ok
-  def attach_default_telemetry_handler() do
-    :ok = Redix.Telemetry.attach_default_handler()
   end
 
   defp pipeline_without_checks(conn, commands, opts) do
