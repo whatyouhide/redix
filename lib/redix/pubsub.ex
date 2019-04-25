@@ -381,7 +381,7 @@ defmodule Redix.PubSub do
 
   ## Examples
 
-      iex> Redix.subscribe(conn, ["foo", "bar"], self())
+      iex> Redix.PubSub.subscribe(conn, ["foo", "bar"], self())
       {:ok, subscription_ref}
       iex> flush()
       {:redix_pubsub, ^conn, ^subscription_ref, :subscribed, %{channel: "foo"}}
