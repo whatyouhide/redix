@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.10.0
+
+### Bug fixes and improvements
+
+  * Add support for [Telemetry](https://github.com/beam-telemetry/telemetry) and publish the following events: `[:redix, :pipeline]`, `[:redix, :pipeline, :error]`, `[:redix, :disconnection]`, `[:redix, :reconnection]`, `[:redix, failed_connection]`.
+  * Deprecate the `:log` option in `Redix.start_link/1` and `Redix.PubSub.start_link/1` in favour of Telemetry events and a default log handler that can be activated with `Redix.Telemetry.attach_default_handler/0`. See the documentation for [`Redix.Telemetry`](https://hexdocs.pm/redix/0.10.0/Redix.Telemetry.html). This is a hard deprecation that shows a warning. Support for the `:log` option will be removed in the next version.
+  * Fix a few minor bugs in `Redix.PubSub`.
+
 ## v0.9.3
 
 ### Bug fixes and improvements
