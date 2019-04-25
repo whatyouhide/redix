@@ -24,20 +24,20 @@ defmodule Redix.Connection do
   def start_link(opts) when is_list(opts) do
     opts = StartOptions.sanitize(opts)
 
-    case Keyword.pop(opts, :name) do
-      {nil, opts} ->
+    case Keyword.fetch(opts, :name) do
+      :error ->
         :gen_statem.start_link(__MODULE__, opts, [])
 
-      {atom, opts} when is_atom(atom) ->
+      {:ok, atom} when is_atom(atom) ->
         :gen_statem.start_link({:local, atom}, __MODULE__, opts, [])
 
-      {{:global, _term} = tuple, opts} ->
+      {:ok, {:global, _term} = tuple} ->
         :gen_statem.start_link(tuple, __MODULE__, opts, [])
 
-      {{:via, via_module, _term} = tuple, opts} when is_atom(via_module) ->
+      {:ok, {:via, via_module, _term} = tuple} when is_atom(via_module) ->
         :gen_statem.start_link(tuple, __MODULE__, opts, [])
 
-      {other, _opts} ->
+      {:ok, other} ->
         raise ArgumentError, """
         expected :name option to be one of the following:
 
@@ -152,6 +152,7 @@ defmodule Redix.Connection do
   # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     :telemetry.execute([:redix, :disconnection], %{}, %{
+      connection: data.opts[:name] || self(),
       address: data.connected_address,
       reason: %ConnectionError{reason: reason}
     })
@@ -166,7 +167,10 @@ defmodule Redix.Connection do
         %__MODULE__{socket_owner: owner} = data
       ) do
     if data.backoff_current do
-      :telemetry.execute([:redix, :reconnection], %{}, %{address: address})
+      :telemetry.execute([:redix, :reconnection], %{}, %{
+        connection: data.opts[:name] || self(),
+        address: address
+      })
     end
 
     data = %{data | socket: socket, backoff_current: nil, connected_address: address}
@@ -180,6 +184,7 @@ defmodule Redix.Connection do
   def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     # We log this when the socket owner stopped while connecting.
     :telemetry.execute([:redix, :failed_connection], %{}, %{
+      connection: data.opts[:name] || self(),
       address: format_address(data),
       reason: %ConnectionError{reason: reason}
     })
@@ -224,6 +229,7 @@ defmodule Redix.Connection do
 
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     :telemetry.execute([:redix, :disconnection], %{}, %{
+      connection: data.opts[:name] || self(),
       address: data.connected_address,
       reason: %ConnectionError{reason: reason}
     })

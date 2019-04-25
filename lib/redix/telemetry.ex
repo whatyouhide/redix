@@ -11,7 +11,8 @@ defmodule Redix.Telemetry do
 
       * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
       * `:address` - the address the connection was connected to.
-      * `:conn` - the PID of the Redix connection that emitted the event.
+      * `:connection` - the PID or registered name of the Redix connection
+        that emitted the event.
 
     * `[:redix, :failed_connection]` - executed when Redix can't connect to
       the specified Redis server, either when starting up the connection or
@@ -21,14 +22,16 @@ defmodule Redix.Telemetry do
       * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
       * `:address` or `:sentinel_address` - the address the connection was trying
         to connect to (either a Redis server or a Redis Sentinel instance).
-      * `:conn` - the PID of the Redix connection that emitted the event.
+      * `:connection` - the PID or registered name of the Redix connection
+        that emitted the event.
 
     * `[:redix, :reconnection]` - executed when a Redix connection that had
       disconnected reconnects to a Redis server. There are no measurements
       associated with this event. Metadata are:
 
       * `:address` - the address the connection successfully reconnected to.
-      * `:conn` - the PID of the Redix connection that emitted the event.
+      * `:connection` - the PID or registered name of the Redix connection
+          that emitted the event.
 
   `Redix` connections execute the following Telemetry events when commands or
   pipelines of any kind are executed.
@@ -114,19 +117,32 @@ defmodule Redix.Telemetry do
 
     case event do
       :failed_connection when is_binary(sentinel_address) ->
-        human_reason = Exception.message(metadata.reason)
-        _ = Logger.error("Failed to connect to sentinel #{sentinel_address}: #{human_reason}")
+        _ =
+          Logger.error(fn ->
+            "Connection #{inspect(metadata.connection)} failed to connect to sentinel " <>
+              "at #{sentinel_address}: #{Exception.message(metadata.reason)}"
+          end)
 
       :failed_connection ->
-        human_reason = Exception.message(metadata.reason)
-        _ = Logger.error("Failed to connect to Redis (#{metadata.address}): #{human_reason}")
+        _ =
+          Logger.error(fn ->
+            "Connection #{inspect(metadata.connection)} failed to connect to Redis " <>
+              "at #{metadata.address}: #{Exception.message(metadata.reason)}"
+          end)
 
       :disconnection ->
-        human_reason = Exception.message(metadata.reason)
-        _ = Logger.error("Disconnected from Redis (#{metadata.address}): #{human_reason}")
+        _ =
+          Logger.error(fn ->
+            "Connection #{inspect(metadata.connection)} disconnected from Redis " <>
+              "at #{metadata.address}: #{Exception.message(metadata.reason)}"
+          end)
 
       :reconnection ->
-        _ = Logger.info("Reconnected to Redis (#{metadata.address})")
+        _ =
+          Logger.info(fn ->
+            "Connection #{inspect(metadata.connection)} reconnected to Redis " <>
+              "at #{metadata.address}"
+          end)
     end
   end
 end

@@ -307,20 +307,20 @@ defmodule Redix.PubSub do
   def start_link(opts) when is_list(opts) do
     opts = StartOptions.sanitize(opts)
 
-    case Keyword.pop(opts, :name) do
-      {nil, opts} ->
+    case Keyword.fetch(opts, :name) do
+      :error ->
         :gen_statem.start_link(Redix.PubSub.Connection, opts, debug: [])
 
-      {atom, opts} when is_atom(atom) ->
+      {:ok, atom} when is_atom(atom) ->
         :gen_statem.start_link({:local, atom}, Redix.PubSub.Connection, opts, debug: [])
 
-      {{:global, _term} = tuple, opts} ->
+      {:ok, {:global, _term} = tuple} ->
         :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, [])
 
-      {{:via, via_module, _term} = tuple, opts} when is_atom(via_module) ->
+      {:ok, {:via, via_module, _term} = tuple} when is_atom(via_module) ->
         :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, [])
 
-      {other, _opts} ->
+      {:ok, other} ->
         raise ArgumentError, """
         expected :name option to be one of the following:
 

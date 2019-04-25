@@ -67,6 +67,7 @@ defmodule Redix.PubSub.Connection do
 
   def disconnected(:internal, :handle_disconnection, data) do
     :telemetry.execute([:redix, :disconnection], %{}, %{
+      connection: data.opts[:name] || self(),
       address: data.connected_address,
       reason: data.last_disconnect_reason
     })
@@ -105,7 +106,10 @@ defmodule Redix.PubSub.Connection do
     with {:ok, socket, address} <- Connector.connect(data.opts),
          :ok <- setopts(data, socket, active: :once) do
       if data.last_disconnect_reason do
-        :telemetry.execute([:redix, :reconnected], %{}, %{address: address})
+        :telemetry.execute([:redix, :reconnection], %{}, %{
+          connection: data.opts[:name] || self(),
+          address: address
+        })
       end
 
       data = %__MODULE__{
@@ -120,6 +124,7 @@ defmodule Redix.PubSub.Connection do
     else
       {:error, reason} ->
         :telemetry.execute([:redix, :failed_connection], %{}, %{
+          connection: data.opts[:name] || self(),
           address: format_address(data),
           reason: %ConnectionError{reason: reason}
         })
