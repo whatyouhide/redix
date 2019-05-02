@@ -22,8 +22,19 @@ defmodule Redix.URI do
   end
 
   defp password(%URI{userinfo: userinfo}) do
-    [_user, password] = String.split(userinfo, ":", parts: 2)
-    password
+    case String.split(userinfo, ":", parts: 2) do
+      ["", password] ->
+        password
+
+      [user, password] when byte_size(password) > 0 ->
+        raise ArgumentError,
+              "the user in the Redis URI is ignored and should not be present, " <>
+                "got: #{inspect(user)}"
+
+      _other ->
+        raise ArgumentError,
+              "expected password in the Redis URI to be given as redis://:PASSWORD@HOST"
+    end
   end
 
   defp database(%URI{path: path}) when path in [nil, "/"] do
