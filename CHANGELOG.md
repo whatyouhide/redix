@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.10.1
+
+### Bug fixes and improvements
+
+  * Improve password checking in Redis URIs.
+  * Fix a bug when naming Redix connections with something other than a local name.
+
 ## v0.10.0
 
 ### Bug fixes and improvements
