@@ -56,12 +56,14 @@ defmodule Redix.Connection do
   end
 
   def pipeline(conn, commands, timeout) do
+    conn = GenServer.whereis(conn)
+
     request_id = Process.monitor(conn)
 
     # We cast to the connection process knowing that it will reply at some point,
     # either after roughly timeout or when a response is ready.
     cast = {:pipeline, commands, _from = {self(), request_id}, timeout}
-    :ok = :gen_statem.cast(GenServer.whereis(conn), cast)
+    :ok = :gen_statem.cast(conn, cast)
 
     receive do
       {^request_id, resp} ->
