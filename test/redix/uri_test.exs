@@ -32,11 +32,6 @@ defmodule Redix.URITest do
     assert opts[:host] == "localhost"
     assert opts[:password] == "pass"
 
-    # If there's a user, we error out.
-    assert_raise ArgumentError, ~r/the user in the Redis URI/, fn ->
-      opts_from_uri("redis://user:pass@localhost")
-    end
-
     # If there's no ":", we error out.
     assert_raise ArgumentError, ~r/expected password/, fn ->
       opts_from_uri("redis://not_a_user_or_password@localhost")
