@@ -88,7 +88,7 @@ defmodule Redix do
   # function in this module goes through Redix.Connection.pipeline/3 one way or
   # another.
 
-  @type command() :: [binary()]
+  @type command() :: [String.Chars.t()]
   @type connection() :: GenServer.server()
 
   @default_timeout 5000
