@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.10.2
+
+  * Allow a discarded username when using Redis URIs.
+  * Fix the `Redix.command/0` type which was `[binary()]` but which should have been `[String.Chars.t()]` since we call `to_string/1` on each command.
+
 ## v0.10.1
 
 ### Bug fixes and improvements
