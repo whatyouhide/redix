@@ -78,6 +78,25 @@ defmodule Redix do
   Redix supports SSL by passing `ssl: true` in `start_link/1`. You can use the `:socket_opts`
   option to pass options that will be used by the SSL socket, like certificates.
 
+  If the [CAStore](https://hex.pm/packages/castore) dependency is available, Redix will pick
+  up its CA certificate store file automatically. You can select a different CA certificate
+  store by passing in the `:cacertfile` or `:cacerts` socket options. If the server uses a
+  self-signed certificate, e.g. for testing purposes, disable certificate verification by
+  passing `verify: :verify_none` in the socket options.
+
+  Some Redis servers, notably Amazon ElastiCache, use a wildcard certificates that require
+  additional socket options to be set for succesful verification (requires OTP 21.0 or
+  later):
+
+      Redix.start_link(
+        host: "example.com", port: 9999, ssl: true,
+        socket_opts: [
+          customize_hostname_check: [
+            match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+          ]
+        ]
+      )
+
   ## Telemetry
 
   Redix uses Telemetry for instrumentation and logging. See `Redix.Telemetry`.
@@ -166,12 +185,16 @@ defmodule Redix do
   The following options can be used to tweak how the Redix connection behaves.
 
     * `:socket_opts` - (list of options) this option specifies a list of options
-      that are passed to `:gen_tcp.connect/4` when connecting to the Redis
+      that are passed to the network layer when connecting to the Redis
       server. Some socket options (like `:active` or `:binary`) will be
-      overridden by Redix so that it functions properly. Defaults to `[]`.
+      overridden by Redix so that it functions properly.
+
+      Defaults to `[]` for TCP and `[verify: :verify_peer, depth: 2]` for SSL.
+      If the `CAStore` dependency is available, the `cacertfile` option is added
+      to the SSL options by default as well.
 
     * `:timeout` - (integer) connection timeout (in milliseconds) also directly
-      passed to `:gen_tcp.connect/4`. Defaults to `5000`.
+      passed to the network layer. Defaults to `5000`.
 
     * `:sync_connect` - (boolean) decides whether Redix should initiate the TCP
       connection to the Redis server *before* or *after* returning from

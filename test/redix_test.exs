@@ -72,9 +72,28 @@ defmodule RedixTest do
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
-    test "using a rediss:// url" do
-      {:ok, pid} = Redix.start_link("rediss://localhost:6384/3")
+    test "using a rediss:// url, ignoring certificate" do
+      {:ok, pid} =
+        Redix.start_link("rediss://localhost:6384/3",
+          socket_opts: [verify: :verify_none, reuse_sessions: false]
+        )
+
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "using a rediss:// url, unknown certificate" do
+      capture_log(fn ->
+        Process.flag(:trap_exit, true)
+
+        assert {:error, error} =
+                 Redix.start_link("rediss://localhost:6384/3",
+                   socket_opts: [reuse_sessions: false],
+                   sync_connect: true
+                 )
+
+        assert %Redix.ConnectionError{reason: {:tls_alert, _}} = error
+        assert_receive {:EXIT, _pid, ^error}, 1000
+      end)
     end
 
     test "name registration" do
