@@ -22,15 +22,18 @@ This README refers to the `master` branch of Redix, not the latest released vers
 
 ## Installation
 
-Add the `:redix` dependency to your `mix.exs` file:
+Add the `:redix` dependency to your `mix.exs` file. If you plan on connecting to a Redis server [over SSL][docs-ssl] you may want to add the optional [`:castore`][castore] dependency as well:
 
 ```elixir
 defp deps() do
-  [{:redix, ">= 0.0.0"}]
+  [
+    {:redix, ">= 0.0.0"},
+    {:castore, ">= 0.0.0"}
+  ]
 end
 ```
 
-Then, run `mix deps.get` in your shell to fetch the new dependency.
+Then, run `mix deps.get` in your shell to fetch the new dependencies.
 
 ## Usage
 
@@ -142,6 +145,8 @@ Redix is released under the MIT license. See the [license file](LICENSE.txt).
 [redis]: http://redis.io
 [redis-sentinel]: https://redis.io/topics/sentinel
 [redix-pubsub]: https://github.com/whatyouhide/redix_pubsub
+[castore]: https://github.com/ericmj/castore
+[docs-ssl]: https://hexdocs.pm/redix/Redix.html#module-ssl
 [docs-reconnections]: http://hexdocs.pm/redix/reconnections.html
 [docs-real-world-usage]: http://hexdocs.pm/redix/real-world-usage.html
 [docker]: https://www.docker.com

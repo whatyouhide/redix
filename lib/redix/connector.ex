@@ -3,6 +3,7 @@ defmodule Redix.Connector do
 
   @socket_opts [:binary, active: false]
   @default_timeout 5000
+  @default_ssl_opts [verify: :verify_peer, depth: 2]
 
   require Logger
 
@@ -23,7 +24,7 @@ defmodule Redix.Connector do
 
   defp connect_directly(host, port, opts) do
     transport = if opts[:ssl], do: :ssl, else: :gen_tcp
-    socket_opts = @socket_opts ++ Keyword.fetch!(opts, :socket_opts)
+    socket_opts = build_socket_opts(transport, opts[:socket_opts])
     timeout = opts[:timeout] || @default_timeout
 
     with {:ok, socket} <- transport.connect(host, port, socket_opts, timeout),
@@ -113,7 +114,7 @@ defmodule Redix.Connector do
   defp connect_to_sentinel(sentinel, sentinel_opts, transport) do
     host = Keyword.fetch!(sentinel, :host)
     port = Keyword.fetch!(sentinel, :port)
-    socket_opts = @socket_opts ++ Keyword.fetch!(sentinel_opts, :socket_opts)
+    socket_opts = build_socket_opts(transport, sentinel_opts[:socket_opts])
     transport.connect(host, port, socket_opts, sentinel_opts[:timeout])
   end
 
@@ -169,6 +170,21 @@ defmodule Redix.Connector do
     host = Keyword.fetch!(opts, :host)
     port = Keyword.fetch!(opts, :port)
     "#{host}:#{port}"
+  end
+
+  defp build_socket_opts(:gen_tcp, user_socket_opts) do
+    @socket_opts ++ user_socket_opts
+  end
+
+  defp build_socket_opts(:ssl, user_socket_opts) do
+    default_opts =
+      if Code.ensure_loaded?(CAStore) do
+        [{:cacertfile, CAStore.file_path()} | @default_ssl_opts]
+      else
+        @default_ssl_opts
+      end
+
+    @socket_opts ++ user_socket_opts ++ default_opts
   end
 
   # Setups the `:buffer` option of the given socket.
