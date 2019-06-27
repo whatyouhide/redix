@@ -84,9 +84,8 @@ defmodule Redix do
   self-signed certificate, e.g. for testing purposes, disable certificate verification by
   passing `verify: :verify_none` in the socket options.
 
-  Some Redis servers, notably Amazon ElastiCache, use a wildcard certificates that require
-  additional socket options to be set for succesful verification (requires OTP 21.0 or
-  later):
+  Some Redis servers, notably Amazon ElastiCache, use wildcard certificates that require
+  additional socket options for succesful verification (requires OTP 21.0 or later):
 
       Redix.start_link(
         host: "example.com", port: 9999, ssl: true,
