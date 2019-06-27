@@ -81,7 +81,7 @@ defmodule Redix do
   If the [CAStore](https://hex.pm/packages/castore) dependency is available, Redix will pick
   up its CA certificate store file automatically. You can select a different CA certificate
   store by passing in the `:cacertfile` or `:cacerts` socket options. If the server uses a
-  self-signed certificate, e.g. for testing purposes, disable certificate verification by
+  self-signed certificate, such as for testing purposes, disable certificate verification by
   passing `verify: :verify_none` in the socket options.
 
   Some Redis servers, notably Amazon ElastiCache, use wildcard certificates that require
