@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.3
+
+  * Support TCP Connections
+  
 ## v0.10.2
 
   * Allow a discarded username when using Redis URIs.
