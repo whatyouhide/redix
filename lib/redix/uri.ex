@@ -5,7 +5,7 @@ defmodule Redix.URI do
   def opts_from_uri(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
-    unless scheme in ["redis", "rediss"] do
+    unless scheme in ["redis", "rediss", "tcp"] do
       raise ArgumentError, "expected scheme to be redis:// or rediss://, got: #{scheme}://"
     end
 
