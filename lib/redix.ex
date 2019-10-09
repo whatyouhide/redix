@@ -353,8 +353,12 @@ defmodule Redix do
     child_spec_with_args([uri, opts])
   end
 
-  def child_spec(uri_or_opts) when is_binary(uri_or_opts) or is_list(uri_or_opts) do
-    child_spec_with_args([uri_or_opts])
+  def child_spec(uri) when is_binary(uri) do
+    child_spec_with_args([uri])
+  end
+
+  def child_spec(opts) when is_list(opts) do
+    child_spec_with_args(opts)
   end
 
   defp child_spec_with_args(args) do

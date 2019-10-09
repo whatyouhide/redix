@@ -120,8 +120,8 @@ defmodule RedixTest do
     assert Redix.child_spec("redis://localhost") ==
              put_in(default_spec, args_path, ["redis://localhost"])
 
-    assert Redix.child_spec([]) == put_in(default_spec, args_path, [[]])
-    assert Redix.child_spec(name: :redix) == put_in(default_spec, args_path, [[name: :redix]])
+    assert Redix.child_spec([]) == put_in(default_spec, args_path, [])
+    assert Redix.child_spec(name: :redix) == put_in(default_spec, args_path, name: :redix)
 
     assert Redix.child_spec({"redis://localhost", name: :redix}) ==
              put_in(default_spec, args_path, ["redis://localhost", [name: :redix]])
