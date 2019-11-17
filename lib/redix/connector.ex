@@ -159,11 +159,9 @@ defmodule Redix.Connector do
         :replica -> "slave"
       end
 
-    case sync_command(transport, server_socket, ["ROLE"], timeout) do
+    case sync_get_role(transport, server_socket, timeout) do
       {:ok, [^expected_role | _]} -> :ok
       {:ok, [role | _]} -> {:error, {:wrong_role, role}}
-      {:error, %Redix.Error{message: "ERR unknown command 'ROLE'"}} ->
-        verify_with_info_command(transport, server_socket, timeout, expected_role)
       {:error, _reason_or_redis_error} = error -> error
     end
   end
@@ -171,14 +169,20 @@ defmodule Redix.Connector do
   # The ROLE command was introduced in Redis 2.8.12 - for older versions we can
   # get the same information by calling "INFO replication" and pulling the role
   # attribute from the result.
-  defp verify_with_info_command(transport, server_socket, timeout, expected_role) do
-    with {:ok, resp} <- sync_command(transport, server_socket, ["INFO", "replication"], timeout) do
-      case pluck_role_from_info_response(resp) do
-        {:ok, ^expected_role} -> :ok
-        {:ok, role} -> {:error, {:wrong_role, role}}
-        {:error, _reason} = error -> error
-      end
+  defp sync_get_role(transport, server_socket, timeout) do
+    with {:error, %Redix.Error{}} <- sync_command(transport, server_socket, ["ROLE"], timeout),
+         {:ok, resp} <- sync_command(transport, server_socket, ["INFO", "replication"], timeout),
+         {:ok, role} <- pluck_role_from_info_response(resp) do
+      {:ok, [role]}
     end
+  end
+
+  defp pluck_role_from_info_response(resp) do
+    # "INFO replication" returns a bunch of lines, and we're interested into the "role:xxx" line.
+    Enum.find_value(String.split(resp), _default = {:error, :info_has_no_role_information}, fn
+      "role:" <> role -> {:ok, role}
+      _other -> nil
+    end)
   end
 
   defp format_host(opts) when is_list(opts) do
@@ -228,24 +232,5 @@ defmodule Redix.Connector do
         {:continuation, continuation} -> recv_response(transport, socket, continuation, timeout)
       end
     end
-  end
-
-  # Parses the response from an 'INFO replication' command and returns the value
-  # of the "role" attribute
-  defp pluck_role_from_info_response(resp) do
-    newline = ~r{(\r\n|\r|\n)}
-
-    resp
-    # Trim any leading or trailing whitespace
-    |> String.trim()
-    # Split the response on newlines
-    |> String.split(newline)
-    # Split each line on ":"
-    |> Enum.map(&String.split(&1, ":"))
-    # Only keep lists (line) with two elements (key & value)
-    |> Enum.filter(fn t -> length(t) == 2 end)
-    # Turn the list of 2 element lists into a map
-    |> Map.new(fn [k, v] -> {k, v} end)
-    |> Map.fetch("role")
   end
 end
