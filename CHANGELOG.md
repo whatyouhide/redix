@@ -1,6 +1,15 @@
 # Changelog
 
+## v0.10.3
+
+### Bug fixes and improvements
+
+  * Use more secure SSL default options and optionally use [castore](https://github.com/elixir-mint/castore) if available as a certificate store.
+  * Fix the default Telemetry handler for Redis Sentinel events.
+
 ## v0.10.2
+
+### Bug fixes and improvements
 
   * Allow a discarded username when using Redis URIs.
   * Fix the `Redix.command/0` type which was `[binary()]` but which should have been `[String.Chars.t()]` since we call `to_string/1` on each command.
