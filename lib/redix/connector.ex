@@ -93,6 +93,7 @@ defmodule Redix.Connector do
         else
           {:error, reason} ->
             :telemetry.execute([:redix, :failed_connection], %{}, %{
+              connection: opts[:name] || self(),
               reason: reason,
               sentinel_address: format_host(sentinel)
             })
@@ -103,6 +104,7 @@ defmodule Redix.Connector do
 
       {:error, reason} ->
         :telemetry.execute([:redix, :failed_connection], %{}, %{
+          connection: opts[:name] || self(),
           reason: reason,
           sentinel_address: format_host(sentinel)
         })
