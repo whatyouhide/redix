@@ -179,9 +179,12 @@ defmodule Redix.Connector do
   end
 
   defp build_socket_opts(:ssl, user_socket_opts) do
+    # Needs to be dynamic to avoid compile-time warnings.
+    ca_store_mod = CAStore
+
     default_opts =
-      if Code.ensure_loaded?(CAStore) do
-        [{:cacertfile, CAStore.file_path()} | @default_ssl_opts]
+      if Code.ensure_loaded?(ca_store_mod) do
+        [{:cacertfile, ca_store_mod.file_path()} | @default_ssl_opts]
       else
         @default_ssl_opts
       end
