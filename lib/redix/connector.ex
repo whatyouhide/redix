@@ -5,6 +5,8 @@ defmodule Redix.Connector do
   @default_timeout 5000
   @default_ssl_opts [verify: :verify_peer, depth: 2]
 
+  alias Redix.ConnectionError
+
   require Logger
 
   @spec connect(keyword()) :: {:ok, socket, connected_address} | {:error, term} | {:stop, term}
@@ -94,7 +96,7 @@ defmodule Redix.Connector do
           {:error, reason} ->
             :telemetry.execute([:redix, :failed_connection], %{}, %{
               connection: opts[:name] || self(),
-              reason: reason,
+              reason: %ConnectionError{reason: reason},
               sentinel_address: format_host(sentinel)
             })
 
@@ -105,7 +107,7 @@ defmodule Redix.Connector do
       {:error, reason} ->
         :telemetry.execute([:redix, :failed_connection], %{}, %{
           connection: opts[:name] || self(),
-          reason: reason,
+          reason: %ConnectionError{reason: reason},
           sentinel_address: format_host(sentinel)
         })
 
