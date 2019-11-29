@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.10.4
+
+### Bug fixes and improvements
+
+  * Fix the default Telemetry handler for Redis Sentinel events (wasn't properly fixed in v0.10.3).
+  * Fix a compile-time warning about the [castore](https://github.com/elixir-mint/castore) library.
+
 ## v0.10.3
 
 ### Bug fixes and improvements
