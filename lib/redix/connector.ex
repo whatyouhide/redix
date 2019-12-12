@@ -190,6 +190,7 @@ defmodule Redix.Connector do
       else
         @default_ssl_opts
       end
+      |> Enum.reject(fn {key, _val} -> Keyword.has_key?(user_socket_opts, key) end)
 
     @socket_opts ++ user_socket_opts ++ default_opts
   end
