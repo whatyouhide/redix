@@ -190,6 +190,7 @@ defmodule Redix.Connector do
       else
         @default_ssl_opts
       end
+      |> Keyword.drop(Keyword.keys(user_socket_opts))
 
     @socket_opts ++ user_socket_opts ++ default_opts
   end
