@@ -265,11 +265,19 @@ defmodule Redix.PubSub.Connection do
   end
 
   def connected(:cast, {:monitors_disconnected, disconnected_map}, data) do
-    data = disconnected_map
-           |> Map.keys()
-           |> Enum.reduce(data, &handle_monitor_disconnect_message/2)
+    pids = Map.keys(disconnected_map)
+    data = update_in(data.monitors, &Map.drop(&1, pids))
 
-    {:keep_state, data}
+    targets = Map.keys(data.subscriptions)
+    channels = for {:channel, channel} <- targets, do: channel
+    patterns = for {:pattern, pattern} <- targets, do: pattern
+
+    pids = MapSet.new(pids)
+
+    with {:ok, data} <- unsubscribe_pid_from_targets(data, :unsubscribe, channels, pids),
+         {:ok, data} <- unsubscribe_pid_from_targets(data, :punsubscribe, patterns, pids) do
+      {:keep_state, data}
+    end
   end
 
   ## Helpers
@@ -458,7 +466,10 @@ defmodule Redix.PubSub.Connection do
   end
 
   # Returns {targets_to_unsubscribe_from, data}.
-  defp unsubscribe_pid_from_targets(data, operation, targets, pid) do
+  defp unsubscribe_pid_from_targets(data, operation, targets, pid)
+       when is_pid(pid), do: unsubscribe_pid_from_targets(data, operation, targets, MapSet.new([pid]))
+
+  defp unsubscribe_pid_from_targets(data, operation, targets, pids) do
     target_type =
       case operation do
         :unsubscribe -> :channel
@@ -472,10 +483,10 @@ defmodule Redix.PubSub.Connection do
         {target_state, data_acc} =
           get_and_update_in(
             data_acc.subscriptions[target_key],
-            &unsubscribe_pid_from_target(&1, pid)
+            &unsubscribe_pid_from_target(&1, pids)
           )
 
-        send_unsubscription_confirmation(data_acc, pid, target_key)
+        send_unsubscription_confirmation(data_acc, pids, target_key)
 
         case target_state do
           :now_empty -> {[target_key], data_acc}
@@ -489,24 +500,33 @@ defmodule Redix.PubSub.Connection do
     end
   end
 
-  defp unsubscribe_pid_from_target({:subscribed, subscribers}, pid) do
-    if MapSet.size(subscribers) == 1 and MapSet.member?(subscribers, pid) do
+  defp unsubscribe_pid_from_target(target_state, pid)
+       when is_pid(pid), do: unsubscribe_pid_from_target(target_state, MapSet.new([pid]))
+
+  defp unsubscribe_pid_from_target({:subscribed, subscribers}, pids) do
+    if MapSet.size(subscribers) == 1 and MapSet.subset?(subscribers, pids) do
       state = {:unsubscribing, _resubscribers = MapSet.new()}
       {:now_empty, state}
     else
-      state = {:subscribed, MapSet.delete(subscribers, pid)}
+      state = {:subscribed, MapSet.difference(subscribers, pids)}
       {:noop, state}
     end
   end
 
-  defp unsubscribe_pid_from_target({:subscribing, subscribes, unsubscribes}, pid) do
-    state = {:subscribing, MapSet.delete(subscribes, pid), MapSet.put(unsubscribes, pid)}
+  defp unsubscribe_pid_from_target({:subscribing, subscribes, unsubscribes}, pids) do
+    state = {:subscribing, MapSet.difference(subscribes, pids), MapSet.union(unsubscribes, pids)}
     {:noop, state}
   end
 
-  defp unsubscribe_pid_from_target({:unsubscribing, resubscribers}, pid) do
-    state = {:unsubscribing, MapSet.delete(resubscribers, pid)}
+  defp unsubscribe_pid_from_target({:unsubscribing, resubscribers}, pids) do
+    state = {:unsubscribing, MapSet.difference(resubscribers, pids)}
     {:noop, state}
+  end
+
+  defp send_unsubscription_confirmation(data, %MapSet{} = pids, target_key) do
+    pids
+    |> MapSet.to_list()
+    |> Enum.map(&send_unsubscription_confirmation(data, &1, target_key))
   end
 
   defp send_unsubscription_confirmation(data, pid, {:channel, channel}) do
