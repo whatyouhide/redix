@@ -13,6 +13,8 @@ defmodule Redix.PubSub.Connection do
     :backoff_current,
     :last_disconnect_reason,
     :connected_address,
+    :monitor,
+    monitor_module: Redix.PubSub.Connection.Monitor,
     subscriptions: %{},
     monitors: %{}
   ]
@@ -25,7 +27,14 @@ defmodule Redix.PubSub.Connection do
   @impl true
   def init(opts) do
     transport = if(opts[:ssl], do: :ssl, else: :gen_tcp)
-    data = %__MODULE__{opts: opts, transport: transport}
+    monitor_absorb_timeout = if(opts[:monitor_absorb_timeout], do: opts[:monitor_absorb_timeout], else: nil)
+    {:ok, monitor_pid} = Redix.PubSub.Connection.Monitor.start_link(conn: self(), absorb_timeout: monitor_absorb_timeout)
+
+    data = %__MODULE__{
+      opts: opts,
+      transport: transport,
+      monitor: monitor_pid
+    }
 
     if opts[:sync_connect] do
       with {:ok, socket, address} <- Connector.connect(data.opts),
@@ -255,7 +264,28 @@ defmodule Redix.PubSub.Connection do
     end
   end
 
+  def connected(:cast, {:monitors_disconnected, disconnected_map}, data) do
+    data = disconnected_map
+           |> Map.keys()
+           |> Enum.reduce(data, &handle_monitor_disconnect_message/2)
+
+    {:keep_state, data}
+  end
+
   ## Helpers
+
+  defp handle_monitor_disconnect_message(pid, data) do
+    data = update_in(data.monitors, &Map.delete(&1, pid))
+
+    targets = Map.keys(data.subscriptions)
+    channels = for {:channel, channel} <- targets, do: channel
+    patterns = for {:pattern, pattern} <- targets, do: pattern
+
+    with {:ok, data} <- unsubscribe_pid_from_targets(data, :unsubscribe, channels, pid),
+         {:ok, data} <- unsubscribe_pid_from_targets(data, :punsubscribe, patterns, pid) do
+      data
+    end
+  end
 
   defp new_bytes(data, "") do
     {:ok, data}
@@ -523,15 +553,9 @@ defmodule Redix.PubSub.Connection do
   end
 
   defp monitor_new(data, pid) do
-    case data.monitors do
-      %{^pid => ref} ->
-        {data, ref}
-
-      _ ->
-        ref = Process.monitor(pid)
-        data = put_in(data.monitors[pid], ref)
-        {data, ref}
-    end
+    {:ok, ref} = data.monitor_module.add(data.monitor, pid)
+    data = put_in(data.monitors[pid], ref)
+    {data, ref}
   end
 
   defp demonitor_if_not_subscribed_to_anything(data, pid) do
@@ -545,8 +569,7 @@ defmodule Redix.PubSub.Connection do
     if still_subscribed_to_something? do
       data
     else
-      {monitor_ref, data} = pop_in(data.monitors[pid])
-      Process.demonitor(monitor_ref, [:flush])
+      data.monitor_module.remove(data.monitor, pid)
       data
     end
   end
