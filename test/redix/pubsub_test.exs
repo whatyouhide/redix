@@ -11,7 +11,7 @@ defmodule Redix.PubSubTest do
   @port 6380
 
   setup do
-    {:ok, pubsub} = PubSub.start_link(port: @port)
+    {:ok, pubsub} = PubSub.start_link(port: @port, monitor_absorb_timeout: 0)
     {:ok, conn} = Redix.start_link(port: @port)
     {:ok, %{pubsub: pubsub, conn: conn}}
   end

@@ -61,12 +61,11 @@ defmodule Redix.PubSub.Connection.Monitor do
     {:noreply, state}
   end
 
-  def handle_info({:DOWN, ref, :process, monitored_pid, _reason}, state) do
+  def handle_info({:DOWN, ref, :process, monitored_pid, _reason}, %__MODULE__{absorb_timeout: absorb_timeout} = state) do
     state = update_in(state.monitored, &Map.delete(&1, monitored_pid))
     state = put_in(state.disconnected[monitored_pid], ref)
 
-    flush_monitors(self())
+    flush_monitors(self(), absorb_timeout)
     {:noreply, state}
   end
-
 end
