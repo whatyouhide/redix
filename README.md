@@ -1,6 +1,6 @@
 # Redix
 
-[![Build Status](https://travis-ci.org/whatyouhide/redix.svg?branch=master)](https://travis-ci.org/whatyouhide/redix)
+![](https://github.com/whatyouhide/redix/workflows/CI/badge.svg)
 [![Hex.pm](https://img.shields.io/hexpm/v/redix.svg)](https://hex.pm/packages/redix)
 
 > Fast, pipelined, resilient Redis client for Elixir.
