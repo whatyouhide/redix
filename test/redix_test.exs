@@ -106,6 +106,13 @@ defmodule RedixTest do
       {:ok, pid} = Redix.start_link("redis://localhost", name: :redix_uri)
       assert Process.whereis(:redix_uri) == pid
     end
+
+    test "using gen_statem options" do
+      fullsweep_after = Enum.random(0..50000)
+      {:ok, pid} = Redix.start_link(spawn_opt: [fullsweep_after: fullsweep_after])
+      {:garbage_collection, info} = Process.info(pid, :garbage_collection)
+      assert info[:fullsweep_after] == fullsweep_after
+    end
   end
 
   test "child_spec/1" do

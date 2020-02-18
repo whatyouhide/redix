@@ -47,5 +47,14 @@ defmodule Redix.StartOptionsTest do
         StartOptions.sanitize(sentinel: [sentinels: [:not_a_sentinel], group: "foo"])
       end
     end
+
+    test "gen_statem options are allowed" do
+      opts =
+        StartOptions.sanitize(hibernate_after: 1000, debug: [], spawn_opt: [fullsweep_after: 0])
+
+      assert opts[:hibernate_after] == 1000
+      assert opts[:debug] == []
+      assert opts[:spawn_opt] == [fullsweep_after: 0]
+    end
   end
 end

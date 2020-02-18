@@ -285,6 +285,19 @@ defmodule Redix.PubSub do
     * `:sentinel` - (list of options) exactly the same as the `:sentinel` options in
       `Redix.start_link/1`.
 
+    * `:hibernate_after` - (integer) if present, the Redix connection process awaits any
+      message for the given number of milliseconds and if no message is received, the process
+      goes into hibernation automatically (by calling `:proc_lib.hibernate/3`). See
+      `t::gen_statem.start_opt/0`. Not present by default.
+
+    * `:spawn_opt` - (options) if present, its value is passed as options to the
+      Redix connection process as in `Process.spawn/4`. See `t::gen_statem.start_opt/0`.
+      Not present by default.
+
+    * `:debug` - (options) if present, the corresponding function in the
+      [`:sys` module](http://www.erlang.org/doc/man/sys.html) is invoked.
+      Not present by default.
+
   ## Examples
 
       iex> Redix.PubSub.start_link()
@@ -306,19 +319,20 @@ defmodule Redix.PubSub do
 
   def start_link(opts) when is_list(opts) do
     opts = StartOptions.sanitize(opts)
+    {gen_statem_opts, opts} = Keyword.split(opts, [:hibernate_after, :debug, :spawn_opt])
 
     case Keyword.fetch(opts, :name) do
       :error ->
-        :gen_statem.start_link(Redix.PubSub.Connection, opts, debug: [])
+        :gen_statem.start_link(Redix.PubSub.Connection, opts, gen_statem_opts)
 
       {:ok, atom} when is_atom(atom) ->
-        :gen_statem.start_link({:local, atom}, Redix.PubSub.Connection, opts, debug: [])
+        :gen_statem.start_link({:local, atom}, Redix.PubSub.Connection, opts, gen_statem_opts)
 
       {:ok, {:global, _term} = tuple} ->
-        :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, [])
+        :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, gen_statem_opts)
 
       {:ok, {:via, via_module, _term} = tuple} when is_atom(via_module) ->
-        :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, [])
+        :gen_statem.start_link(tuple, Redix.PubSub.Connection, opts, gen_statem_opts)
 
       {:ok, other} ->
         raise ArgumentError, """

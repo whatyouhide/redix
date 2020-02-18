@@ -16,6 +16,13 @@ defmodule Redix.PubSubTest do
     {:ok, %{pubsub: pubsub, conn: conn}}
   end
 
+  test "using gen_statem options in start_link/2" do
+    fullsweep_after = Enum.random(0..50000)
+    {:ok, pid} = PubSub.start_link(port: @port, spawn_opt: [fullsweep_after: fullsweep_after])
+    {:garbage_collection, info} = Process.info(pid, :garbage_collection)
+    assert info[:fullsweep_after] == fullsweep_after
+  end
+
   test "subscribe/unsubscribe flow", %{pubsub: pubsub, conn: conn} do
     # First, we subscribe.
     assert {:ok, ref} = PubSub.subscribe(pubsub, ["foo", "bar"], self())

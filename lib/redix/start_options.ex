@@ -18,7 +18,17 @@ defmodule Redix.StartOptions do
     timeout: 5000
   ]
 
-  @allowed_options [:host, :port, :database, :password, :name, :sentinel] ++
+  @allowed_options [
+                     :host,
+                     :port,
+                     :database,
+                     :password,
+                     :name,
+                     :sentinel,
+                     :hibernate_after,
+                     :debug,
+                     :spawn_opt
+                   ] ++
                      Keyword.keys(@default_options)
 
   def sanitize(options) when is_list(options) do

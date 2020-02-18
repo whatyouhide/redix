@@ -23,19 +23,20 @@ defmodule Redix.Connection do
 
   def start_link(opts) when is_list(opts) do
     opts = StartOptions.sanitize(opts)
+    {gen_statem_opts, opts} = Keyword.split(opts, [:hibernate_after, :debug, :spawn_opt])
 
     case Keyword.fetch(opts, :name) do
       :error ->
-        :gen_statem.start_link(__MODULE__, opts, [])
+        :gen_statem.start_link(__MODULE__, opts, gen_statem_opts)
 
       {:ok, atom} when is_atom(atom) ->
-        :gen_statem.start_link({:local, atom}, __MODULE__, opts, [])
+        :gen_statem.start_link({:local, atom}, __MODULE__, opts, gen_statem_opts)
 
       {:ok, {:global, _term} = tuple} ->
-        :gen_statem.start_link(tuple, __MODULE__, opts, [])
+        :gen_statem.start_link(tuple, __MODULE__, opts, gen_statem_opts)
 
       {:ok, {:via, via_module, _term} = tuple} when is_atom(via_module) ->
-        :gen_statem.start_link(tuple, __MODULE__, opts, [])
+        :gen_statem.start_link(tuple, __MODULE__, opts, gen_statem_opts)
 
       {:ok, other} ->
         raise ArgumentError, """

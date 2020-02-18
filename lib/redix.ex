@@ -237,6 +237,19 @@ defmodule Redix do
       `:host` and `:port` option cannot be provided. For the available sentinel options, see the
       "Sentinel options" section below.
 
+    * `:hibernate_after` - (integer) if present, the Redix connection process awaits any
+      message for the given number of milliseconds and if no message is received, the process
+      goes into hibernation automatically (by calling `:proc_lib.hibernate/3`). See
+      `t::gen_statem.start_opt/0`. Not present by default.
+
+    * `:spawn_opt` - (options) if present, its value is passed as options to the
+      Redix connection process as in `Process.spawn/4`. See `t::gen_statem.start_opt/0`.
+      Not present by default.
+
+    * `:debug` - (options) if present, the corresponding function in the
+      [`:sys` module](http://www.erlang.org/doc/man/sys.html) is invoked.
+      Not present by default.
+
   ### Sentinel options
 
   The following options can be used to configure the Redis Sentinel behaviour when connecting.
@@ -290,7 +303,7 @@ defmodule Redix do
 
   """
   @spec start_link(binary() | keyword()) :: :gen_statem.start_ret()
-  def start_link(uri_or_opts \\ [])
+  def gstart_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri), do: start_link(uri, [])
   def start_link(opts) when is_list(opts), do: Redix.Connection.start_link(opts)
