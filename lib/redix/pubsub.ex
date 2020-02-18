@@ -282,7 +282,7 @@ defmodule Redix.PubSub do
       `:socket_opts` option applies to both SSL and TCP, so it can be used for things
       like certificates. See `:ssl.connect/4`. Defaults to `false`.
 
-    * `:sentinels` - (list of options) exactly the same as the `:sentinel` options in
+    * `:sentinel` - (list of options) exactly the same as the `:sentinel` options in
       `Redix.start_link/1`.
 
   ## Examples
