@@ -54,7 +54,7 @@ defmodule Redix.Mixfile do
       {:telemetry, "~> 0.4.0"},
       {:castore, "~> 0.1.0", optional: true},
       {:ex_doc, "~> 0.19", only: :dev},
-      {:dialyxir, "~> 1.0.0-rc.6", only: :dev},
+      {:dialyxir, "~> 1.0.0-rc.6", only: :dev, runtime: false},
       {:stream_data, "~> 0.4", only: [:dev, :test]},
       {:propcheck, "~> 1.1", only: :test}
     ]
