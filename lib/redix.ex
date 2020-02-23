@@ -303,7 +303,7 @@ defmodule Redix do
 
   """
   @spec start_link(binary() | keyword()) :: :gen_statem.start_ret()
-  def gstart_link(uri_or_opts \\ [])
+  def start_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri), do: start_link(uri, [])
   def start_link(opts) when is_list(opts), do: Redix.Connection.start_link(opts)
