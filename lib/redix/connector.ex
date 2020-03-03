@@ -3,7 +3,7 @@ defmodule Redix.Connector do
 
   @socket_opts [:binary, active: false]
   @default_timeout 5000
-  @default_ssl_opts [verify: :verify_peer, depth: 2]
+  @default_ssl_opts [verify: :verify_peer, depth: 3]
 
   alias Redix.ConnectionError
 

@@ -188,7 +188,7 @@ defmodule Redix do
       server. Some socket options (like `:active` or `:binary`) will be
       overridden by Redix so that it functions properly.
 
-      Defaults to `[]` for TCP and `[verify: :verify_peer, depth: 2]` for SSL.
+      Defaults to `[]` for TCP and `[verify: :verify_peer, depth: 3]` for SSL.
       If the `CAStore` dependency is available, the `cacertfile` option is added
       to the SSL options by default as well.
 
