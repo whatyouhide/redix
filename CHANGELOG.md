@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.10.5
+
+  * Fix default option replacement for SSL in OTP 22.2.
+  * Allow `:gen_statem.start_link/3,4` options in `Redix.start_link/2` and `Redix.PubSub.start_link/2`.
+  * Change default SSL depth from 2 to 3 (see [this issue](https://github.com/whatyouhide/redix/issues/162)).
+
 ## v0.10.4
 
 ### Bug fixes and improvements
