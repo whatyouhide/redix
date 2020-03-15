@@ -36,13 +36,12 @@ defmodule Redix.Telemetry do
   `Redix` connections execute the following Telemetry events when commands or
   pipelines of any kind are executed.
 
-    * `[:redix, :pipeline]` - executed when a pipeline (or command, which is a
-      pipeline with just one command) is successfully sent to the server and
-      a reply comes from the server. Measurements are:
+    * `[:redix, :pipeline, :start]` - executed right before a pipeline (or command,
+      which is a pipeline with just one command) gets send to the Redis server.
+      Measurements are:
 
-      * `:elapsed_time` (integer) - the elapsed time that it took to send the
-        pipeline to the server and get a reply. The elapsed time is expressed in
-        the `:native` time unit. See `System.convert_time_unit/3`.
+      * `:system_time` (integer) - the system time (in the `:native` time unit)
+        at the time the event is emitted. See `System.system_time/0`.
 
       Metadata are:
 
@@ -51,20 +50,26 @@ defmodule Redix.Telemetry do
       * `:commands` - the commands sent to the server. This is always a list of
         commands, so even if you do `Redix.command(conn, ["PING"])` than the
         list of commands will be `[["PING"]]`.
-      * `:start_time` - the system time when the pipeline was issued. This could be
-        useful for tracing. The time unit is `:native`, see `System.convert_time_unit/3`.
 
-    * `[:redix, :pipeline, :error]` - executed when there's an error talking to
-      the server. There are no measurements. Metadata are:
+    * `[:redix, :pipeline, :stop]` - executed a response to a pipeline returns
+      from the Redis server, regardless of whether it's an error response or a
+      successful response. Measurements are:
+
+      * `:duration` - the duration (in the `:native` time unit, see `t:System.time_unit/0`)
+        of back-and-forth between client and server.
+
+      Metadata are:
 
       * `:connection` - the connection that emitted the event. If the connection
         was registered with a name, the name is used here, otherwise the PID.
       * `:commands` - the commands sent to the server. This is always a list of
         commands, so even if you do `Redix.command(conn, ["PING"])` than the list
         of commands will be `[["PING"]]`.
-      * `:start_time` - the system time when the pipeline was issued. This could
-        be useful for tracing. The time unit is `:native`, see `System.convert_time_unit/3`.
-      * `:reason` - the error reason.
+
+      If the response is an error, the following metadata will also be present:
+
+      * `:kind` - this is the atom `:error`
+      * `:reason` - the error reason (such as a `Redix.ConnectionError` struct).
 
   More events might be added in the future and that won't be considered a breaking
   change, so if you're writing a handler for Redix events be sure to ignore events
