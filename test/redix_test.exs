@@ -325,6 +325,31 @@ defmodule RedixTest do
       end
     end
 
+    test "emits Telemetry events when starting a pipeline", %{conn: c} do
+      {test_name, _arity} = __ENV__.function
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        if meta.connection == c do
+          assert event == [:redix, :pipeline, :start]
+          assert is_integer(measurements.system_time)
+          assert meta.commands == [["PING"]]
+        end
+
+        send(parent, ref)
+      end
+
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :start], handler, :no_config)
+
+      assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]])
+
+      assert_receive ^ref
+
+      :telemetry.detach(to_string(test_name))
+    end
+
     test "emits Telemetry events on successful pipelines", %{conn: c} do
       {test_name, _arity} = __ENV__.function
 
@@ -333,16 +358,15 @@ defmodule RedixTest do
 
       handler = fn event, measurements, meta, _config ->
         if meta.connection == c do
-          assert event == [:redix, :pipeline]
-          assert is_integer(measurements.elapsed_time) and measurements.elapsed_time > 0
+          assert event == [:redix, :pipeline, :stop]
+          assert is_integer(measurements.duration) and measurements.duration > 0
           assert meta.commands == [["PING"]]
-          assert is_integer(meta.start_time)
         end
 
         send(parent, ref)
       end
 
-      :telemetry.attach(to_string(test_name), [:redix, :pipeline], handler, :no_config)
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
 
       assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]])
 
@@ -359,17 +383,17 @@ defmodule RedixTest do
 
       handler = fn event, measurements, meta, _config ->
         if meta.connection == c do
-          assert event == [:redix, :pipeline, :error]
-          assert measurements == %{}
+          assert event == [:redix, :pipeline, :stop]
+          assert is_integer(measurements.duration)
           assert meta.commands == [["PING"], ["PING"]]
-          assert is_integer(meta.start_time)
+          assert meta.kind == :error
           assert meta.reason == %ConnectionError{reason: :timeout}
         end
 
         send(parent, ref)
       end
 
-      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :error], handler, :no_config)
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
 
       assert {:error, %ConnectionError{reason: :timeout}} =
                Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
