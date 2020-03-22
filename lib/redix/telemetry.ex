@@ -5,6 +5,14 @@ defmodule Redix.Telemetry do
   Redix connections (both `Redix` and `Redix.PubSub`) execute the
   following Telemetry events:
 
+    * `[:redix, :connection]` - executed when the connection to Redis
+      is established successfully. There are no measurements associated with
+      this event. Metadata are:
+
+      * `:address` - the address the connection successfully reconnected to.
+      * `:connection` - the PID or registered name of the Redix connection
+          that emitted the event.
+
     * `[:redix, :disconnection]` - executed when the connection is lost
       with the Redis server. There are no measurements associated with
       this event. Metadata are:
@@ -25,13 +33,16 @@ defmodule Redix.Telemetry do
       * `:connection` - the PID or registered name of the Redix connection
         that emitted the event.
 
-    * `[:redix, :reconnection]` - executed when a Redix connection that had
-      disconnected reconnects to a Redis server. There are no measurements
-      associated with this event. Metadata are:
+    * `[:redix, :connection]` - executed when a Redix connection establishes the
+      connection to Redis. There are no measurements associated with this event.
+      Metadata are:
 
-      * `:address` - the address the connection successfully reconnected to.
+      * `:address` - the address the connection successfully connected to.
       * `:connection` - the PID or registered name of the Redix connection
           that emitted the event.
+      * `:reconnection` - a boolean that specifies whether this was a first
+        connection to Redis or a reconnection after a disconnection. This can
+        be useful for more granular logging.
 
   `Redix` connections execute the following Telemetry events when commands or
   pipelines of any kind are executed.
@@ -91,7 +102,8 @@ defmodule Redix.Telemetry do
 
     * `[:redix, :disconnection]` - logged at the `:error` level
     * `[:redix, :failed_connection]` - logged at the `:error` level
-    * `[:redix, :reconnection]` - logged at the `:info` level
+    * `[:redix, :connection]` - logged at the `:info` level if it's a
+      reconnection, not logged if it's the first connection.
 
   See the module documentation for more information. If you want to
   attach your own handler, look at the [Telemetry page](telemetry.html)
@@ -106,7 +118,7 @@ defmodule Redix.Telemetry do
   def attach_default_handler() do
     events = [
       [:redix, :disconnection],
-      [:redix, :reconnection],
+      [:redix, :connection],
       [:redix, :failed_connection]
     ]
 
@@ -117,37 +129,39 @@ defmodule Redix.Telemetry do
   @doc false
   @spec handle_event([atom()], map(), map(), :no_config) :: :ok
   def handle_event([:redix, event], _measurements, metadata, :no_config)
-      when event in [:failed_connection, :disconnection, :reconnection] do
-    sentinel_address = Map.get(metadata, :sentinel_address)
-
-    case event do
-      :failed_connection when is_binary(sentinel_address) ->
+      when event in [:failed_connection, :disconnection, :connection] do
+    case {event, metadata} do
+      {:failed_connection, %{sentinel_address: sentinel_address}}
+      when is_binary(sentinel_address) ->
         _ =
           Logger.error(fn ->
             "Connection #{inspect(metadata.connection)} failed to connect to sentinel " <>
               "at #{sentinel_address}: #{Exception.message(metadata.reason)}"
           end)
 
-      :failed_connection ->
+      {:failed_connection, _metadata} ->
         _ =
           Logger.error(fn ->
             "Connection #{inspect(metadata.connection)} failed to connect to Redis " <>
               "at #{metadata.address}: #{Exception.message(metadata.reason)}"
           end)
 
-      :disconnection ->
+      {:disconnection, _metadata} ->
         _ =
           Logger.error(fn ->
             "Connection #{inspect(metadata.connection)} disconnected from Redis " <>
               "at #{metadata.address}: #{Exception.message(metadata.reason)}"
           end)
 
-      :reconnection ->
+      {:connection, %{reconnection: true}} ->
         _ =
           Logger.info(fn ->
             "Connection #{inspect(metadata.connection)} reconnected to Redis " <>
               "at #{metadata.address}"
           end)
+
+      {:connection, %{reconnection: false}} ->
+        :ok
     end
   end
 end

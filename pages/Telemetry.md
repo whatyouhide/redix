@@ -22,13 +22,13 @@ If you want control on how Redix events are logged or on what level they're logg
           :disconnection ->
             human_reason = Exception.message(metadata.reason)
             Logger.warn("Disconnected from #{metadata.address}: #{human_reason}")
-            
+
           :failed_connection ->
             human_reason = Exception.message(metadata.reason)
             Logger.warn("Failed to connect to #{metadata.address}: #{human_reason}")
 
-          :reconnection ->
-            Logger.debug("Reconnected to #{metadata.address}")
+          :connection ->
+            Logger.debug("Connected/reconnected to #{metadata.address}")
         end
       end
     end
@@ -38,7 +38,7 @@ Once you have a module like this, you can attach it when your application starts
     events = [
       [:redix, :disconnection],
       [:redix, :failed_connection],
-      [:redix, :reconnection]
+      [:redix, :connection]
     ]
 
     :telemetry.attach_many(

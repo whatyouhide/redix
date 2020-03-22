@@ -101,6 +101,11 @@ defmodule Redix.Connection do
       # connect/3 down the pipe.
       receive do
         {:connected, ^socket_owner, socket, address} ->
+          :telemetry.execute([:redix, :connection], %{}, %{
+            connection: data.opts[:name] || self(),
+            address: address
+          })
+
           {:ok, :connected, %__MODULE__{data | socket: socket, connected_address: address}}
 
         {:stopped, ^socket_owner, reason} ->
@@ -169,12 +174,11 @@ defmodule Redix.Connection do
         {:connected, owner, socket, address},
         %__MODULE__{socket_owner: owner} = data
       ) do
-    if data.backoff_current do
-      :telemetry.execute([:redix, :reconnection], %{}, %{
-        connection: data.opts[:name] || self(),
-        address: address
-      })
-    end
+    :telemetry.execute([:redix, :connection], %{}, %{
+      connection: data.opts[:name] || self(),
+      address: address,
+      reconnection: not is_nil(data.backoff_current)
+    })
 
     data = %{data | socket: socket, backoff_current: nil, connected_address: address}
     {:next_state, :connected, %{data | socket: socket}}

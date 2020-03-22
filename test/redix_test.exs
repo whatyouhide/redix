@@ -324,84 +324,6 @@ defmodule RedixTest do
         Redix.pipeline(c, ["PING"])
       end
     end
-
-    test "emits Telemetry events when starting a pipeline", %{conn: c} do
-      {test_name, _arity} = __ENV__.function
-
-      parent = self()
-      ref = make_ref()
-
-      handler = fn event, measurements, meta, _config ->
-        if meta.connection == c do
-          assert event == [:redix, :pipeline, :start]
-          assert is_integer(measurements.system_time)
-          assert meta.commands == [["PING"]]
-        end
-
-        send(parent, ref)
-      end
-
-      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :start], handler, :no_config)
-
-      assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]])
-
-      assert_receive ^ref
-
-      :telemetry.detach(to_string(test_name))
-    end
-
-    test "emits Telemetry events on successful pipelines", %{conn: c} do
-      {test_name, _arity} = __ENV__.function
-
-      parent = self()
-      ref = make_ref()
-
-      handler = fn event, measurements, meta, _config ->
-        if meta.connection == c do
-          assert event == [:redix, :pipeline, :stop]
-          assert is_integer(measurements.duration) and measurements.duration > 0
-          assert meta.commands == [["PING"]]
-        end
-
-        send(parent, ref)
-      end
-
-      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
-
-      assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]])
-
-      assert_receive ^ref
-
-      :telemetry.detach(to_string(test_name))
-    end
-
-    test "emits Telemetry events on error pipelines", %{conn: c} do
-      {test_name, _arity} = __ENV__.function
-
-      parent = self()
-      ref = make_ref()
-
-      handler = fn event, measurements, meta, _config ->
-        if meta.connection == c do
-          assert event == [:redix, :pipeline, :stop]
-          assert is_integer(measurements.duration)
-          assert meta.commands == [["PING"], ["PING"]]
-          assert meta.kind == :error
-          assert meta.reason == %ConnectionError{reason: :timeout}
-        end
-
-        send(parent, ref)
-      end
-
-      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
-
-      assert {:error, %ConnectionError{reason: :timeout}} =
-               Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
-
-      assert_receive ^ref
-
-      :telemetry.detach(to_string(test_name))
-    end
   end
 
   describe "command!/2" do
@@ -561,6 +483,127 @@ defmodule RedixTest do
       Redix.command!(c, ~w(QUIT))
       assert_receive {:EXIT, ^c, %ConnectionError{reason: :tcp_closed}}
     end)
+  end
+
+  describe "Telemetry" do
+    test "emits events when starting a pipeline with pipeline/3" do
+      {:ok, c} = Redix.start_link()
+      {test_name, _arity} = __ENV__.function
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        if meta.connection == c do
+          assert event == [:redix, :pipeline, :start]
+          assert is_integer(measurements.system_time)
+          assert meta.commands == [["PING"]]
+        end
+
+        send(parent, ref)
+      end
+
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :start], handler, :no_config)
+
+      assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]])
+
+      assert_receive ^ref
+
+      :telemetry.detach(to_string(test_name))
+    end
+
+    test "emits events on successful pipelines with pipeline/3" do
+      {:ok, c} = Redix.start_link()
+      {test_name, _arity} = __ENV__.function
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        if meta.connection == c do
+          assert event == [:redix, :pipeline, :stop]
+          assert is_integer(measurements.duration) and measurements.duration > 0
+          assert meta.commands == [["PING"]]
+        end
+
+        send(parent, ref)
+      end
+
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
+
+      assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]])
+
+      assert_receive ^ref
+
+      :telemetry.detach(to_string(test_name))
+    end
+
+    test "emits events on error pipelines with pipeline/3" do
+      {:ok, c} = Redix.start_link()
+      {test_name, _arity} = __ENV__.function
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        if meta.connection == c do
+          assert event == [:redix, :pipeline, :stop]
+          assert is_integer(measurements.duration)
+          assert meta.commands == [["PING"], ["PING"]]
+          assert meta.kind == :error
+          assert meta.reason == %ConnectionError{reason: :timeout}
+        end
+
+        send(parent, ref)
+      end
+
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
+
+      assert {:error, %ConnectionError{reason: :timeout}} =
+               Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
+
+      assert_receive ^ref
+
+      :telemetry.detach(to_string(test_name))
+    end
+
+    test "emits connection-related events on disconnections and reconnections" do
+      {test_name, _arity} = __ENV__.function
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        # We need to run this test only if was called for this Redix connection so that
+        # we can run in parallel with the pubsub tests.
+        if meta.connection == :redix_telemetry_test do
+          assert measurements == %{}
+
+          case event do
+            [:redix, :connection] -> send(parent, {ref, :connected, meta})
+            [:redix, :disconnection] -> send(parent, {ref, :disconnected, meta})
+          end
+        end
+      end
+
+      events = [[:redix, :connection], [:redix, :disconnection]]
+      :ok = :telemetry.attach_many(to_string(test_name), events, handler, :no_config)
+
+      {:ok, c} = Redix.start_link(name: :redix_telemetry_test)
+
+      assert_receive {^ref, :connected, meta}, 1000
+      assert %{address: "localhost:6379", connection: _, reconnection: false} = meta
+
+      capture_log(fn ->
+        assert {:ok, _} = Redix.command(c, ~w(QUIT))
+
+        assert_receive {^ref, :disconnected, meta}, 1000
+        assert %{address: "localhost:6379", connection: _} = meta
+
+        assert_receive {^ref, :connected, meta}, 1000
+        assert %{address: "localhost:6379", connection: _, reconnection: true} = meta
+      end)
+    end
   end
 
   defp connect(_context) do

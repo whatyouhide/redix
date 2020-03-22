@@ -226,6 +226,48 @@ defmodule Redix.PubSubTest do
                    1000
   end
 
+  test "emits connection-related events on disconnections and reconnections", %{conn: conn} do
+    {test_name, _arity} = __ENV__.function
+
+    parent = self()
+    ref = make_ref()
+
+    handler = fn event, measurements, meta, _config ->
+      # We need to run this test only if was called for this Redix connection so that
+      # we can run in parallel with the other tests.
+      if meta.connection == :redix_pubsub_telemetry_test do
+        assert measurements == %{}
+
+        case event do
+          [:redix, :connection] -> send(parent, {ref, :connected, meta})
+          [:redix, :disconnection] -> send(parent, {ref, :disconnected, meta})
+        end
+      end
+    end
+
+    events = [[:redix, :connection], [:redix, :disconnection]]
+    :ok = :telemetry.attach_many(to_string(test_name), events, handler, :no_config)
+
+    {:ok, pubsub} = PubSub.start_link(port: @port, name: :redix_pubsub_telemetry_test)
+    # Make sure to call subscribe/3 so that Redis considers this a PubSub connection.
+    {:ok, pubsub_ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^pubsub_ref, :subscribed, %{channel: "foo"}}
+
+    assert_receive {^ref, :connected, meta}, 1000
+    assert %{address: "localhost" <> _port, reconnection: false} = meta
+
+    capture_log(fn ->
+      # Assert that we effectively kill one client.
+      assert Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub)) == 1
+
+      assert_receive {^ref, :disconnected, meta}, 1000
+      assert %{address: "localhost" <> _port} = meta
+
+      assert_receive {^ref, :connected, meta}, 1000
+      assert %{address: "localhost" <> _port, reconnection: true} = meta
+    end)
+  end
+
   @tag :capture_log
   test "subscribing while the connection is down", %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
