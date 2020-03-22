@@ -53,9 +53,15 @@ defmodule RedixTest do
     test "when unable to connect to Redis with sync_connect: true" do
       capture_log(fn ->
         Process.flag(:trap_exit, true)
-        error = %Redix.ConnectionError{reason: :nxdomain}
-        assert Redix.start_link(host: "nonexistent", sync_connect: true) == {:error, error}
-        assert_receive {:EXIT, _pid, ^error}, 1000
+
+        assert {:error, %Redix.ConnectionError{reason: reason}} =
+                 Redix.start_link(host: "nonexistent", sync_connect: true)
+
+        assert_receive {:EXIT, _pid, %Redix.ConnectionError{}}, 1000
+
+        # Apparently somewhere the error reason is :nxdomain but some other times it's
+        # :timeout.
+        assert reason in [:nxdomain, :timeout]
       end)
     end
 
