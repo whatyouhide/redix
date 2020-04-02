@@ -808,7 +808,7 @@ defmodule Redix do
           |> Map.put(:kind, :error)
 
         :ok =
-          :telemetry.execute([:redix, :pipeline, :execption], measurements, telemetry_metadata)
+          :telemetry.execute([:redix, :pipeline, :exception], measurements, telemetry_metadata)
 
         {:error, reason}
     end
