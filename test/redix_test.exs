@@ -553,7 +553,7 @@ defmodule RedixTest do
 
       handler = fn event, measurements, meta, _config ->
         if meta.connection == c do
-          assert event == [:redix, :pipeline, :execption]
+          assert event == [:redix, :pipeline, :exception]
           assert is_integer(measurements.duration)
           assert meta.commands == [["PING"], ["PING"]]
           assert meta.kind == :error
