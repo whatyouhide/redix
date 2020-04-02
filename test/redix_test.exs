@@ -565,7 +565,7 @@ defmodule RedixTest do
 
       :telemetry.attach(
         to_string(test_name),
-        [:redix, :pipeline, :execption],
+        [:redix, :pipeline, :exception],
         handler,
         :no_config
       )
