@@ -479,6 +479,8 @@ defmodule Redix.PubSub.Connection do
     {:noop, state}
   end
 
+  defp unsubscribe_pid_from_target(_, _), do: :pop
+
   defp send_unsubscription_confirmation(data, pid, {:channel, channel}) do
     if ref = data.monitors[pid] do
       send(pid, ref, :unsubscribed, %{channel: channel})
@@ -546,7 +548,7 @@ defmodule Redix.PubSub.Connection do
       data
     else
       {monitor_ref, data} = pop_in(data.monitors[pid])
-      Process.demonitor(monitor_ref, [:flush])
+      if monitor_ref, do: Process.demonitor(monitor_ref, [:flush])
       data
     end
   end
