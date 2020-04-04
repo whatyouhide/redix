@@ -553,7 +553,7 @@ defmodule RedixTest do
 
       handler = fn event, measurements, meta, _config ->
         if meta.connection == c do
-          assert event == [:redix, :pipeline, :exception]
+          assert event == [:redix, :pipeline, :stop]
           assert is_integer(measurements.duration)
           assert meta.commands == [["PING"], ["PING"]]
           assert meta.kind == :error
@@ -563,12 +563,7 @@ defmodule RedixTest do
         send(parent, ref)
       end
 
-      :telemetry.attach(
-        to_string(test_name),
-        [:redix, :pipeline, :exception],
-        handler,
-        :no_config
-      )
+      :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
 
       assert {:error, %ConnectionError{reason: :timeout}} =
                Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
