@@ -610,6 +610,36 @@ defmodule RedixTest do
         assert %{address: "localhost:6379", connection: _, reconnection: true} = meta
       end)
     end
+
+    test "metadata can be enriched with the :telemetry_extra option given on startup" do
+      {test_name, _arity} = __ENV__.function
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        # We need to run this test only if was called for this Redix connection so that
+        # we can run in parallel with the pubsub tests.
+        if meta.connection == test_name do
+          assert event == [:redix, :connection]
+          assert measurements == %{}
+          send(parent, {ref, :connected, meta})
+        end
+      end
+
+      :ok = :telemetry.attach(to_string(test_name), [:redix, :connection], handler, :no_config)
+
+      {:ok, _c} = Redix.start_link(name: test_name, telemetry_extra: :some_extra_metadata)
+
+      assert_receive {^ref, :connected, meta}, 1000
+
+      assert meta == %{
+               address: "localhost:6379",
+               connection: test_name,
+               reconnection: false,
+               extra: :some_extra_metadata
+             }
+    end
   end
 
   defp connect(_context) do

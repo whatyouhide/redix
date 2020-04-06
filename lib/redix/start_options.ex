@@ -15,7 +15,8 @@ defmodule Redix.StartOptions do
     backoff_initial: 500,
     backoff_max: 30000,
     exit_on_disconnection: false,
-    timeout: 5000
+    timeout: 5000,
+    telemetry_extra: %{}
   ]
 
   @allowed_options [
