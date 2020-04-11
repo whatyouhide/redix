@@ -285,6 +285,11 @@ defmodule Redix.PubSub do
     * `:sentinel` - (list of options) exactly the same as the `:sentinel` options in
       `Redix.start_link/1`.
 
+    * `:telemetry_extra` - (map) a map of extra metadata. The value of this option is used
+      in connection-specific Telemetry events (like `[:redix, :connection]`). The value of
+      this option is provided under the `:extra` key in the event metadata. See
+      `Redix.Telemetry`.
+
     * `:hibernate_after` - (integer) if present, the Redix connection process awaits any
       message for the given number of milliseconds and if no message is received, the process
       goes into hibernation automatically (by calling `:proc_lib.hibernate/3`). See
