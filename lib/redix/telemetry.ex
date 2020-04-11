@@ -5,13 +5,18 @@ defmodule Redix.Telemetry do
   Redix connections (both `Redix` and `Redix.PubSub`) execute the
   following Telemetry events:
 
-    * `[:redix, :connection]` - executed when the connection to Redis
-      is established successfully. There are no measurements associated with
-      this event. Metadata are:
+    * `[:redix, :connection]` - executed when a Redix connection establishes the
+      connection to Redis. There are no measurements associated with this event.
+      Metadata are:
 
-      * `:address` - the address the connection successfully reconnected to.
+      * `:address` - the address the connection successfully connected to.
       * `:connection` - the PID or registered name of the Redix connection
           that emitted the event.
+      * `:reconnection` - a boolean that specifies whether this was a first
+        connection to Redis or a reconnection after a disconnection. This can
+        be useful for more granular logging.
+      * `:extra` - whatever is passed in `:telemetry_extra` when the connection
+        is started.
 
     * `[:redix, :disconnection]` - executed when the connection is lost
       with the Redis server. There are no measurements associated with
@@ -21,6 +26,8 @@ defmodule Redix.Telemetry do
       * `:address` - the address the connection was connected to.
       * `:connection` - the PID or registered name of the Redix connection
         that emitted the event.
+      * `:extra` - whatever is passed in `:telemetry_extra` when the connection
+        is started.
 
     * `[:redix, :failed_connection]` - executed when Redix can't connect to
       the specified Redis server, either when starting up the connection or
@@ -32,17 +39,8 @@ defmodule Redix.Telemetry do
         to connect to (either a Redis server or a Redis Sentinel instance).
       * `:connection` - the PID or registered name of the Redix connection
         that emitted the event.
-
-    * `[:redix, :connection]` - executed when a Redix connection establishes the
-      connection to Redis. There are no measurements associated with this event.
-      Metadata are:
-
-      * `:address` - the address the connection successfully connected to.
-      * `:connection` - the PID or registered name of the Redix connection
-          that emitted the event.
-      * `:reconnection` - a boolean that specifies whether this was a first
-        connection to Redis or a reconnection after a disconnection. This can
-        be useful for more granular logging.
+      * `:extra` - whatever is passed in `:telemetry_extra` when the connection
+        is started.
 
   `Redix` connections execute the following Telemetry events when commands or
   pipelines of any kind are executed.

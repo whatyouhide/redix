@@ -629,7 +629,7 @@ defmodule RedixTest do
 
       :ok = :telemetry.attach(to_string(test_name), [:redix, :connection], handler, :no_config)
 
-      {:ok, _c} = Redix.start_link(name: test_name, telemetry_extra: :some_extra_metadata)
+      {:ok, _c} = Redix.start_link(name: test_name, telemetry_extra: %{foo: :bar})
 
       assert_receive {^ref, :connected, meta}, 1000
 
@@ -637,7 +637,7 @@ defmodule RedixTest do
                address: "localhost:6379",
                connection: test_name,
                reconnection: false,
-               extra: :some_extra_metadata
+               extra: %{foo: :bar}
              }
     end
   end

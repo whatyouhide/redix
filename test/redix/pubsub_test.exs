@@ -248,23 +248,29 @@ defmodule Redix.PubSubTest do
     events = [[:redix, :connection], [:redix, :disconnection]]
     :ok = :telemetry.attach_many(to_string(test_name), events, handler, :no_config)
 
-    {:ok, pubsub} = PubSub.start_link(port: @port, name: :redix_pubsub_telemetry_test)
+    {:ok, pubsub} =
+      PubSub.start_link(
+        port: @port,
+        name: :redix_pubsub_telemetry_test,
+        telemetry_extra: %{foo: :bar}
+      )
+
     # Make sure to call subscribe/3 so that Redis considers this a PubSub connection.
     {:ok, pubsub_ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^pubsub_ref, :subscribed, %{channel: "foo"}}
 
     assert_receive {^ref, :connected, meta}, 1000
-    assert %{address: "localhost" <> _port, reconnection: false} = meta
+    assert %{address: "localhost" <> _port, reconnection: false, extra: %{foo: :bar}} = meta
 
     capture_log(fn ->
       # Assert that we effectively kill one client.
       assert Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub)) == 1
 
       assert_receive {^ref, :disconnected, meta}, 1000
-      assert %{address: "localhost" <> _port} = meta
+      assert %{address: "localhost" <> _port, extra: %{foo: :bar}} = meta
 
       assert_receive {^ref, :connected, meta}, 1000
-      assert %{address: "localhost" <> _port, reconnection: true} = meta
+      assert %{address: "localhost" <> _port, reconnection: true, extra: %{foo: :bar}} = meta
     end)
   end
 
