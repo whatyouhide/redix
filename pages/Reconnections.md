@@ -27,7 +27,7 @@ isolated_children = [
 isolated_supervisor = %{
   id: MyChildSupervisor,
   type: :supervisor,
-  start: {Supervisor, :start_link, [isolated_children, [strategy: :rest_for_one]]}, 
+  start: {Supervisor, :start_link, [isolated_children, [strategy: :rest_for_one]]},
 }
 
 children = [

@@ -178,7 +178,6 @@
 
   * Extract the Pub/Sub functionality into [a separate project](https://github.com/whatyouhide/redix_pubsub).
 
-
 ## v0.3.6
 
   * Fixed a bug in the integer parsing in `Redix.Protocol`.
