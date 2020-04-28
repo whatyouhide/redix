@@ -588,6 +588,7 @@ defmodule Redix.PubSub.Connection do
 
     data = put_in(data.last_disconnect_reason, %ConnectionError{reason: reason})
     data = put_in(data.socket, nil)
+    data = put_in(data.continuation, nil)
 
     actions = [{{:timeout, :reconnect}, next_backoff, nil}]
 
