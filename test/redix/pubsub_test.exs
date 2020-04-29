@@ -301,6 +301,23 @@ defmodule Redix.PubSubTest do
     end)
   end
 
+  test "continuation gets cleared on reconnection", %{pubsub: pubsub} do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "my_channel", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "my_channel"}}
+
+    # This exposes internals but I couldn't think of a better way to simulate this situation
+    {:connected, state} = :sys.get_state(pubsub)
+    socket = state.socket
+
+    send(pubsub, {:tcp, socket, "*3\r\n$7\r\nmessage\r\n$10\r\nmy_channel\r\n$10\r\nhello"})
+    send(pubsub, {:tcp_closed, socket})
+
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, %{error: _error}}
+
+    assert {:disconnected, new_state} = :sys.get_state(pubsub)
+    refute new_state.continuation
+  end
+
   defp wait_until_passes(timeout, fun) when timeout <= 0 do
     fun.()
   end
