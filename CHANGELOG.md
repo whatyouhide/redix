@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.6
+
+  * Fix a bug that caused a memory leak in some cases for Redix pub/sub connections.
+
 ## v0.10.5
 
   * Fix default option replacement for SSL in OTP 22.2.
