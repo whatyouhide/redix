@@ -1,5 +1,9 @@
 # Changelog
 
+## v0.10.7
+
+  * Fix a crash in `Redix.PubSub` when non-subscribed processes attempted to unsubscribe.
+
 ## v0.10.6
 
   * Fix a bug that caused a memory leak in some cases for Redix pub/sub connections.
