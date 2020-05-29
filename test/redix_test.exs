@@ -40,8 +40,10 @@ defmodule RedixTest do
         Process.flag(:trap_exit, true)
         {:ok, pid} = Redix.start_link(password: "foo")
 
-        error = %Error{message: "ERR Client sent AUTH, but no password is set"}
-        assert_receive {:EXIT, ^pid, ^error}, 500
+        assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
+
+        assert message =~ "ERR Client sent AUTH" or
+                 message =~ "ERR AUTH <password> called without any password"
       end)
     end
 
