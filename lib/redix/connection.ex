@@ -326,11 +326,16 @@ defmodule Redix.Connection do
 
   defp parse_client_reply([part1, part2, part3])
        when is_binary(part1) and is_binary(part2) and is_binary(part3) do
-    case [String.upcase(part1), String.upcase(part2), String.upcase(part3)] do
-      ["CLIENT", "REPLY", "ON"] -> :on
-      ["CLIENT", "REPLY", "OFF"] -> :off
-      ["CLIENT", "REPLY", "SKIP"] -> :skip
-      _other -> nil
+    with "CLIENT" <- String.upcase(part1),
+         "REPLY" <- String.upcase(part2) do
+      case String.upcase(part3) do
+        "ON" -> :on
+        "OFF" -> :off
+        "SKIP" -> :skip
+        _other -> nil
+      end
+    else
+      _ -> nil
     end
   end
 
