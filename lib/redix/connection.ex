@@ -326,8 +326,13 @@ defmodule Redix.Connection do
 
   defp parse_client_reply([part1, part2, part3])
        when is_binary(part1) and is_binary(part2) and is_binary(part3) do
-    with "CLIENT" <- String.upcase(part1),
-         "REPLY" <- String.upcase(part2) do
+    # We need to do this in a "lazy" way: upcase the first string and check, then the second
+    # one, and then the third one. Before, we were upcasing all three parts first and then
+    # checking for a CLIENT REPLY * command. That meant that sometimes we would upcase huge
+    # but completely unrelated commands causing big memory and CPU spikes. See
+    # https://github.com/whatyouhide/redix/issues/177. "if" works here because and/2
+    # short-circuits.
+    if String.upcase(part1) == "CLIENT" and String.upcase(part2) == "REPLY" do
       case String.upcase(part3) do
         "ON" -> :on
         "OFF" -> :off
@@ -335,7 +340,7 @@ defmodule Redix.Connection do
         _other -> nil
       end
     else
-      _ -> nil
+      nil
     end
   end
 
