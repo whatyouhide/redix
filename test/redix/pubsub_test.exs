@@ -268,6 +268,32 @@ defmodule Redix.PubSubTest do
     end)
   end
 
+  test "emits connection-related events on failed connections" do
+    {test_name, _arity} = __ENV__.function
+
+    parent = self()
+    ref = make_ref()
+
+    handler = fn event, measurements, meta, _config ->
+      # We need to run this test only if was called for this Redix connection so that
+      # we can run in parallel with the other tests.
+      if meta.connection == :redix_pubsub_telemetry_failed_conn_test do
+        assert event == [:redix, :failed_connection]
+        assert measurements == %{}
+        send(parent, {ref, :failed_connection, meta})
+      end
+    end
+
+    :telemetry.attach(to_string(test_name), [:redix, :failed_connection], handler, :no_config)
+
+    {:ok, pubsub} = PubSub.start_link(port: 9999, name: :redix_pubsub_telemetry_failed_conn_test)
+    # Make sure to call subscribe/3 so that Redis considers this a PubSub connection.
+    {:ok, _pubsub_ref} = PubSub.subscribe(pubsub, "foo", self())
+
+    assert_receive {^ref, :failed_connection, meta}, 1000
+    assert %{address: "localhost:9999", reason: %ConnectionError{reason: :econnrefused}} = meta
+  end
+
   @tag :capture_log
   test "subscribing while the connection is down", %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
