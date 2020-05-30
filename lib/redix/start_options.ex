@@ -65,14 +65,14 @@ defmodule Redix.StartOptions do
   defp maybe_sanitize_sentinel_opts(options) do
     case Keyword.fetch(options, :sentinel) do
       {:ok, sentinel_opts} ->
-        Keyword.put(options, :sentinel, sanitize_sentinel_opts(sentinel_opts))
+        Keyword.put(options, :sentinel, sanitize_sentinel_opts(options, sentinel_opts))
 
       :error ->
         options
     end
   end
 
-  defp sanitize_sentinel_opts(sentinel_opts) do
+  defp sanitize_sentinel_opts(opts, sentinel_opts) do
     sentinel_opts =
       case Keyword.fetch(sentinel_opts, :sentinels) do
         {:ok, sentinels} when is_list(sentinels) and sentinels != [] ->
@@ -92,7 +92,7 @@ defmodule Redix.StartOptions do
       raise ArgumentError, "the :group option is required inside :sentinel"
     end
 
-    if Keyword.has_key?(sentinel_opts, :host) or Keyword.has_key?(sentinel_opts, :port) do
+    if Keyword.has_key?(opts, :host) or Keyword.has_key?(opts, :port) do
       raise ArgumentError, ":host or :port can't be passed as option if :sentinel is used"
     end
 
