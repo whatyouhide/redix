@@ -32,19 +32,6 @@ defmodule Redix.StartOptions do
                      Keyword.keys(@default_options)
 
   def sanitize(options) when is_list(options) do
-    # TODO: remove support for :log in Redix v0.11+.
-    options =
-      if Keyword.has_key?(options, :log) do
-        IO.warn(
-          "The :log option has been deprecated in favour of using :telemetry. " <>
-            "See https://hexdocs.pm/redix/telemetry.html for more information."
-        )
-
-        Keyword.delete(options, :log)
-      else
-        options
-      end
-
     @default_options
     |> Keyword.merge(options)
     |> assert_only_known_options()
