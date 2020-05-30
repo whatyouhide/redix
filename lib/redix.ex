@@ -314,7 +314,7 @@ defmodule Redix do
   This is the same as `start_link/1`, but the URI and the options get merged. `other_opts` have
   precedence over the things specified in `uri`. Take this code:
 
-      start_link("redis://localhost:6379", port: 6380)
+      Redix.start_link("redis://localhost:6379", port: 6380)
 
   In this example, port `6380` will be used.
   """
@@ -329,7 +329,7 @@ defmodule Redix do
   @doc """
   Returns a child spec to use Redix in supervision trees.
 
-  To use Redix with the default options (same as calling `start_link()`):
+  To use Redix with the default options (same as calling `Redix.start_link()`):
 
       children = [
         Redix,
@@ -467,13 +467,6 @@ defmodule Redix do
 
   This function accepts the same options as `pipeline/3`.
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
-
   ## Examples
 
       iex> Redix.pipeline!(conn, [["INCR", "mykey"], ["INCR", "mykey"], ["DECR", "mykey"]])
@@ -506,14 +499,9 @@ defmodule Redix do
   Redis to not send replies to your commands.
 
   Since no replies are sent back, this function returns `:ok` in case there are no network
-  errors, or `{:error, reason}` otherwise
+  errors, or `{:error, reason}` otherwise.any()
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
+  This function accepts the same options as `pipeline/3`.
 
   ## Examples
 
@@ -567,12 +555,7 @@ defmodule Redix do
   If the given command is an empty command (`[]`), an `ArgumentError`
   exception is raised.
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
+  This function accepts the same options as `pipeline/3`.
 
   ## Examples
 
@@ -614,13 +597,6 @@ defmodule Redix do
 
   This function accepts the same options as `command/3`.
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
-
   ## Examples
 
       iex> Redix.command!(conn, ["SET", "mykey", "foo"])
@@ -653,12 +629,7 @@ defmodule Redix do
   Not receiving a response means saving traffic on the network and memory allocation for the
   response. See also `noreply_pipeline/3`.
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
+  This function accepts the same options as `pipeline/3`.
 
   ## Examples
 
@@ -697,12 +668,7 @@ defmodule Redix do
   queued until `EXEC` is issued. When `EXEC` is issued, all the responses to the queued
   commands are returned in a list.
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
+  This function accepts the same options as `pipeline/3`.
 
   ## Examples
 
@@ -749,12 +715,7 @@ defmodule Redix do
   Same as `transaction_pipeline/3`, but returns the result directly instead of wrapping it
   in an `{:ok, result}` tuple or raises if there's an error.
 
-  ## Options
-
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
+  This function accepts the same options as `pipeline/3`.
 
   ## Examples
 
