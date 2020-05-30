@@ -314,6 +314,12 @@ defmodule RedixTest do
       end
     end
 
+    test "passing CLIENT REPLY commands causes an error", %{conn: c} do
+      assert_raise ArgumentError, ~r{CLIENT REPLY commands are forbidden}, fn ->
+        Redix.pipeline(c, [["CLIENT", "REPLY", "ON"]])
+      end
+    end
+
     test "timeout", %{conn: c} do
       assert {:error, %ConnectionError{reason: :timeout}} =
                Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
@@ -389,11 +395,18 @@ defmodule RedixTest do
     test "non-bang version", %{conn: conn} do
       commands = [~w(SET transaction_pipeline_key 1), ~w(GET transaction_pipeline_key)]
       assert Redix.transaction_pipeline(conn, commands) == {:ok, ["OK", "1"]}
+
+      assert Redix.transaction_pipeline(conn, commands, timeout: 0) ==
+               {:error, %ConnectionError{reason: :timeout}}
     end
 
     test "bang version", %{conn: conn} do
       commands = [~w(SET transaction_pipeline_key 1), ~w(GET transaction_pipeline_key)]
       assert Redix.transaction_pipeline!(conn, commands) == ["OK", "1"]
+
+      assert_raise Redix.ConnectionError, fn ->
+        Redix.transaction_pipeline!(conn, commands, timeout: 0)
+      end
     end
   end
 
@@ -404,11 +417,36 @@ defmodule RedixTest do
       commands = [~w(INCR noreply_pl_mykey), ~w(INCR noreply_pl_mykey)]
       assert Redix.noreply_pipeline(conn, commands) == :ok
       assert Redix.command!(conn, ~w(GET noreply_pl_mykey)) == "2"
+
+      assert Redix.noreply_pipeline(conn, commands, timeout: 0) ==
+               {:error, %ConnectionError{reason: :timeout}}
+    end
+
+    test "noreply_pipeline!/3", %{conn: conn} do
+      commands = [~w(INCR noreply_pl_bang_mykey), ~w(INCR noreply_pl_bang_mykey)]
+      assert Redix.noreply_pipeline!(conn, commands) == :ok
+      assert Redix.command!(conn, ~w(GET noreply_pl_bang_mykey)) == "2"
+
+      assert_raise Redix.ConnectionError, fn ->
+        Redix.noreply_pipeline!(conn, commands, timeout: 0)
+      end
     end
 
     test "noreply_command/3", %{conn: conn} do
       assert Redix.noreply_command(conn, ["SET", "noreply_cmd_mykey", "myvalue"]) == :ok
       assert Redix.command!(conn, ["GET", "noreply_cmd_mykey"]) == "myvalue"
+
+      assert Redix.noreply_command(conn, ["SET", "noreply_cmd_mykey", "myvalue"], timeout: 0) ==
+               {:error, %ConnectionError{reason: :timeout}}
+    end
+
+    test "noreply_command!/3", %{conn: conn} do
+      assert Redix.noreply_command!(conn, ["SET", "noreply_cmd_bang_mykey", "myvalue"]) == :ok
+      assert Redix.command!(conn, ["GET", "noreply_cmd_bang_mykey"]) == "myvalue"
+
+      assert_raise Redix.ConnectionError, fn ->
+        Redix.noreply_command!(conn, ["SET", "noreply_cmd_bang_mykey", "myvalue"], timeout: 0)
+      end
     end
   end
 
