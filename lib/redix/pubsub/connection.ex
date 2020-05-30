@@ -28,7 +28,7 @@ defmodule Redix.PubSub.Connection do
     data = %__MODULE__{opts: opts, transport: transport}
 
     if opts[:sync_connect] do
-      with {:ok, socket, address} <- Connector.connect(data.opts),
+      with {:ok, socket, address} <- Connector.connect(data.opts, _conn_pid = self()),
            :ok <- setopts(data, socket, active: :once) do
         data = %__MODULE__{
           data
@@ -103,7 +103,7 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnected(:internal, :connect, data) do
-    with {:ok, socket, address} <- Connector.connect(data.opts),
+    with {:ok, socket, address} <- Connector.connect(data.opts, _conn_pid = self()),
          :ok <- setopts(data, socket, active: :once) do
       :telemetry.execute([:redix, :connection], %{}, %{
         connection: data.opts[:name] || self(),

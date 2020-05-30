@@ -40,7 +40,7 @@ defmodule Redix.SocketOwner do
   def handle_info(msg, state)
 
   def handle_info(:connect, state) do
-    with {:ok, socket, address} <- Connector.connect(state.opts),
+    with {:ok, socket, address} <- Connector.connect(state.opts, state.conn),
          :ok <- setopts(state, socket, active: :once) do
       send(state.conn, {:connected, self(), socket, address})
       {:noreply, %{state | socket: socket}}

@@ -9,10 +9,11 @@ defmodule Redix.Connector do
 
   require Logger
 
-  @spec connect(keyword()) :: {:ok, socket, connected_address} | {:error, term} | {:stop, term}
+  @spec connect(keyword(), pid()) ::
+          {:ok, socket, connected_address} | {:error, term} | {:stop, term}
         when socket: :gen_tcp.socket() | :ssl.sslsocket(),
              connected_address: String.t()
-  def connect(opts) do
+  def connect(opts, conn_pid) when is_list(opts) and is_pid(conn_pid) do
     case Keyword.pop(opts, :sentinel) do
       {nil, opts} ->
         host = Keyword.fetch!(opts, :host)
@@ -20,7 +21,7 @@ defmodule Redix.Connector do
         connect_directly(host, port, opts)
 
       {sentinel_opts, opts} when is_list(sentinel_opts) ->
-        connect_through_sentinel(opts, sentinel_opts)
+        connect_through_sentinel(opts, sentinel_opts, conn_pid)
     end
   end
 
@@ -60,18 +61,18 @@ defmodule Redix.Connector do
     end
   end
 
-  defp connect_through_sentinel(opts, sentinel_opts) do
+  defp connect_through_sentinel(opts, sentinel_opts, conn_pid) do
     sentinels = Keyword.fetch!(sentinel_opts, :sentinels)
     transport = if sentinel_opts[:ssl], do: :ssl, else: :gen_tcp
 
-    connect_through_sentinel(sentinels, sentinel_opts, opts, transport)
+    connect_through_sentinel(sentinels, sentinel_opts, opts, transport, conn_pid)
   end
 
-  defp connect_through_sentinel([], _sentinel_opts, _opts, _transport) do
+  defp connect_through_sentinel([], _sentinel_opts, _opts, _transport, _conn_pid) do
     {:error, :no_viable_sentinel_connection}
   end
 
-  defp connect_through_sentinel([sentinel | rest], sentinel_opts, opts, transport) do
+  defp connect_through_sentinel([sentinel | rest], sentinel_opts, opts, transport, conn_pid) do
     case connect_to_sentinel(sentinel, sentinel_opts, transport) do
       {:ok, sent_socket} ->
         _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end)
@@ -95,23 +96,23 @@ defmodule Redix.Connector do
         else
           {:error, reason} ->
             :telemetry.execute([:redix, :failed_connection], %{}, %{
-              connection: opts[:name] || self(),
+              connection: opts[:name] || conn_pid,
               reason: %ConnectionError{reason: reason},
               sentinel_address: format_host(sentinel)
             })
 
             :ok = transport.close(sent_socket)
-            connect_through_sentinel(rest, sentinel_opts, opts, transport)
+            connect_through_sentinel(rest, sentinel_opts, opts, transport, conn_pid)
         end
 
       {:error, reason} ->
         :telemetry.execute([:redix, :failed_connection], %{}, %{
-          connection: opts[:name] || self(),
+          connection: opts[:name] || conn_pid,
           reason: %ConnectionError{reason: reason},
           sentinel_address: format_host(sentinel)
         })
 
-        connect_through_sentinel(rest, sentinel_opts, opts, transport)
+        connect_through_sentinel(rest, sentinel_opts, opts, transport, conn_pid)
     end
   end
 

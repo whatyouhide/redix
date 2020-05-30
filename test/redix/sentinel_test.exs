@@ -76,4 +76,37 @@ defmodule Redix.SentinelTest do
 
     assert Redix.command!(pid, ["PING"]) == "PONG"
   end
+
+  test "failed sentinel connection" do
+    assert {:ok, conn} =
+             Redix.start_link(sentinel: [group: "main", sentinels: ["redis://localhost:9999"]])
+
+    {test_name, _arity} = __ENV__.function
+    telemetry_handler_name = to_string(test_name)
+
+    parent = self()
+    ref = make_ref()
+
+    handler = fn event, measurements, meta, _config ->
+      if meta.connection == conn do
+        assert event == [:redix, :failed_connection]
+        send(parent, {:failed_connection, ref, measurements, meta})
+        assert is_integer(measurements.system_time)
+        assert meta.commands == [["PING"]]
+      end
+    end
+
+    :telemetry.attach(telemetry_handler_name, [:redix, :failed_connection], handler, :no_config)
+
+    assert_receive {:failed_connection, ^ref, measurements, meta}
+    assert measurements == %{}
+
+    assert meta == %{
+             connection: conn,
+             reason: %Redix.ConnectionError{reason: :econnrefused},
+             sentinel_address: "localhost:9999"
+           }
+
+    :telemetry.detach(telemetry_handler_name)
+  end
 end
