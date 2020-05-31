@@ -6,7 +6,7 @@ Before version v0.10.0, `Redix.start_link/1` and `Redix.PubSub.start_link/1` sup
 
     Redix.start_link(log: [disconnection: :error, reconnection: :debug])
 
-The `:log` option is now deprecated in favour of either using the default Redix event handler or writing your own.
+The `:log` option is now removed in favour of either using the default Redix event handler or writing your own.
 
 For information on the Telemetry events that Redix emits, see `Redix.Telemetry`.
 

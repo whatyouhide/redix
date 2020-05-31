@@ -214,17 +214,6 @@ defmodule Redix do
       time interval used between reconnection attempts. See the "Reconnections"
       page in the docs for more information.
 
-    * `:log` - (keyword list) a keyword list of `{action, level}` where `level` is
-      the log level to use to log `action`. **This option is deprecated** in favor
-      of Telemetry. See the "Telemetry" section in the module documentation.
-      The possible actions and their default values are:
-        * `:disconnection` (defaults to `:error`) - logged when the connection to
-          Redis is lost
-        * `:failed_connection` (defaults to `:error`) - logged when Redix can't
-          establish a connection to Redis
-        * `:reconnection` (defaults to `:info`) - logged when Redix manages to
-          reconnect to Redis after the connection was lost
-
     * `:name` - Redix is bound to the same registration rules as a `GenServer`. See the
       `GenServer` documentation for more information.
 
