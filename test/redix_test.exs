@@ -326,8 +326,10 @@ defmodule RedixTest do
     end
 
     test "passing CLIENT REPLY commands causes an error", %{conn: c} do
-      assert_raise ArgumentError, ~r{CLIENT REPLY commands are forbidden}, fn ->
-        Redix.pipeline(c, [["CLIENT", "REPLY", "ON"]])
+      for command <- [~w(CLIENT REPLY ON), ~w(CLIENT reply Off), ~w(client reply skip)] do
+        assert_raise ArgumentError, ~r{CLIENT REPLY commands are forbidden}, fn ->
+          Redix.pipeline(c, [command])
+        end
       end
     end
 

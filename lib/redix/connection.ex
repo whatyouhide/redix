@@ -325,7 +325,10 @@ defmodule Redix.Connection do
   defp parse_client_reply(["client", "reply", "skip"]), do: :skip
 
   defp parse_client_reply([part1, part2, part3])
-       when is_binary(part1) and is_binary(part2) and is_binary(part3) do
+       when is_binary(part1) and byte_size(part1) == byte_size("CLIENT") and is_binary(part2) and
+              byte_size(part2) == byte_size("REPLY") and
+              is_binary(part3) and
+              byte_size(part3) in [byte_size("ON"), byte_size("OFF"), byte_size("SKIP")] do
     # We need to do this in a "lazy" way: upcase the first string and check, then the second
     # one, and then the third one. Before, we were upcasing all three parts first and then
     # checking for a CLIENT REPLY * command. That meant that sometimes we would upcase huge
