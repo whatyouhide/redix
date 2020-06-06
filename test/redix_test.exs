@@ -115,10 +115,27 @@ defmodule RedixTest do
       end)
     end
 
-    test "name registration" do
+    test "name registration with atom name" do
       {:ok, pid} = Redix.start_link(name: :redix_server)
       assert Process.whereis(:redix_server) == pid
       assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "name registration with invalid name" do
+      assert_raise ArgumentError, ~r/expected :name option to be one of the following/, fn ->
+        Redix.start_link(name: "not a valid name")
+      end
+    end
+
+    test "name registration with :global name" do
+      {:ok, _pid} = Redix.start_link(name: {:global, :redix_server})
+      assert Redix.command({:global, :redix_server}, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "name registration with :via registry name" do
+      name = {:via, :global, :redix_server_via}
+      {:ok, _pid} = Redix.start_link(name: name)
+      assert Redix.command(name, ["PING"]) == {:ok, "PONG"}
     end
 
     test "passing options along with a Redis URI" do
