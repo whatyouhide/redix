@@ -170,9 +170,13 @@ defmodule Redix do
     * `:port` - (positive integer) the port on which the Redis server is
       running. Defaults to `6379`.
 
-    * `:password` - (string) the password used to connect to Redis. Defaults to
+    * `:password` - (string or MFA) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
-      does is issue an `AUTH` command to Redis in order to authenticate.
+      does is issue an `AUTH` command to Redis in order to authenticate. MFAs are also
+      supported in the form of `{module, function, arguments}`. This can be used
+      to fetch the password dynamically on every reconnection but most importantly to
+      hide the password from crash reports in case the Redix connection crashes for
+      any reason. For example, you can use `password: {System, :fetch_env!, ["REDIX_PASSWORD"]}`.
 
     * `:database` - (non-negative integer or string) the database to connect to.
       Defaults to `nil`, meaning Redix doesn't connect to a specific database (the

@@ -47,9 +47,20 @@ defmodule RedixTest do
       end)
     end
 
-    test "specifying a password when a password is set" do
+    test "specifying a string password when a password is set" do
       {:ok, pid} = Redix.start_link(port: 16379, password: "some-password")
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "specifying a mfa password when a password is set" do
+      System.put_env("REDIX_MFA_PASSWORD", "some-password")
+
+      {:ok, pid} =
+        Redix.start_link(port: 16379, password: {System, :get_env, ["REDIX_MFA_PASSWORD"]})
+
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    after
+      System.delete_env("REDIX_MFA_PASSWORD")
     end
 
     test "when unable to connect to Redis with sync_connect: true" do

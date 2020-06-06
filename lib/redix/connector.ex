@@ -46,7 +46,14 @@ defmodule Redix.Connector do
   end
 
   defp maybe_auth(transport, socket, opts, timeout) do
-    if password = opts[:password] do
+    password =
+      case Keyword.fetch(opts, :password) do
+        {:ok, {mod, fun, args}} -> apply(mod, fun, args)
+        {:ok, password} when is_binary(password) -> password
+        :error -> nil
+      end
+
+    if password do
       with {:ok, "OK"} <- sync_command(transport, socket, ["AUTH", password], timeout), do: :ok
     else
       :ok

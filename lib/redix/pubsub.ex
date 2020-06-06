@@ -228,7 +228,10 @@ defmodule Redix.PubSub do
 
     * `:password` - (string) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
-      does is issue an `AUTH` command to Redis in order to authenticate.
+      does is issue an `AUTH` command to Redis in order to authenticate. This can be used
+      to fetch the password dynamically on every reconnection but most importantly to
+      hide the password from crash reports in case the Redix connection crashes for
+      any reason. For example, you can use `password: {System, :fetch_env!, ["REDIX_PASSWORD"]}`.
 
     * `:database` - (integer or string) the database to connect to. Defaults to
       `nil`, meaning don't connect to any database (Redis connects to database
