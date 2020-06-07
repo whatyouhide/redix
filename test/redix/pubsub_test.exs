@@ -235,7 +235,7 @@ defmodule Redix.PubSubTest do
     handler = fn event, measurements, meta, _config ->
       # We need to run this test only if was called for this Redix connection so that
       # we can run in parallel with the other tests.
-      if meta.connection == :redix_pubsub_telemetry_test do
+      if meta.connection_name == :redix_pubsub_telemetry_test do
         assert measurements == %{}
 
         case event do
@@ -254,17 +254,17 @@ defmodule Redix.PubSubTest do
     assert_receive {:redix_pubsub, ^pubsub, ^pubsub_ref, :subscribed, %{channel: "foo"}}
 
     assert_receive {^ref, :connected, meta}, 1000
-    assert %{address: "localhost" <> _port, reconnection: false} = meta
+    assert %{address: "localhost" <> _port, reconnection: false, connection: ^pubsub} = meta
 
     capture_log(fn ->
       # Assert that we effectively kill one client.
       assert Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub)) == 1
 
       assert_receive {^ref, :disconnected, meta}, 1000
-      assert %{address: "localhost" <> _port} = meta
+      assert %{address: "localhost" <> _port, connection: ^pubsub} = meta
 
       assert_receive {^ref, :connected, meta}, 1000
-      assert %{address: "localhost" <> _port, reconnection: true} = meta
+      assert %{address: "localhost" <> _port, reconnection: true, connection: ^pubsub} = meta
     end)
   end
 
@@ -277,7 +277,7 @@ defmodule Redix.PubSubTest do
     handler = fn event, measurements, meta, _config ->
       # We need to run this test only if was called for this Redix connection so that
       # we can run in parallel with the other tests.
-      if meta.connection == :redix_pubsub_telemetry_failed_conn_test do
+      if meta.connection_name == :redix_pubsub_telemetry_failed_conn_test do
         assert event == [:redix, :failed_connection]
         assert measurements == %{}
         send(parent, {ref, :failed_connection, meta})
@@ -291,7 +291,12 @@ defmodule Redix.PubSubTest do
     {:ok, _pubsub_ref} = PubSub.subscribe(pubsub, "foo", self())
 
     assert_receive {^ref, :failed_connection, meta}, 1000
-    assert %{address: "localhost:9999", reason: %ConnectionError{reason: :econnrefused}} = meta
+
+    assert %{
+             address: "localhost:9999",
+             reason: %ConnectionError{reason: :econnrefused},
+             connection: ^pubsub
+           } = meta
   end
 
   @tag :capture_log

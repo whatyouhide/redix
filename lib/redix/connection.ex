@@ -57,23 +57,60 @@ defmodule Redix.Connection do
   end
 
   def pipeline(conn, commands, timeout) do
-    conn = GenServer.whereis(conn)
+    conn_pid = GenServer.whereis(conn)
 
-    request_id = Process.monitor(conn)
+    request_id = Process.monitor(conn_pid)
+
+    telemetry_metadata = telemetry_pipeline_metadata(conn, conn_pid, commands)
+    start_time = System.monotonic_time()
+    :ok = execute_telemetry_pipeline_start(telemetry_metadata)
 
     # We cast to the connection process knowing that it will reply at some point,
     # either after roughly timeout or when a response is ready.
     cast = {:pipeline, commands, _from = {self(), request_id}, timeout}
-    :ok = :gen_statem.cast(conn, cast)
+    :ok = :gen_statem.cast(conn_pid, cast)
 
     receive do
       {^request_id, resp} ->
         _ = Process.demonitor(request_id, [:flush])
+        :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
         resp
 
       {:DOWN, ^request_id, _, _, reason} ->
         exit(reason)
     end
+  end
+
+  defp telemetry_pipeline_metadata(conn, conn_pid, commands) do
+    name =
+      if is_pid(conn) do
+        nil
+      else
+        conn
+      end
+
+    %{
+      connection: conn_pid,
+      connection_name: name,
+      commands: commands
+    }
+  end
+
+  defp execute_telemetry_pipeline_start(metadata) do
+    measurements = %{system_time: System.system_time()}
+    :ok = :telemetry.execute([:redix, :pipeline, :start], measurements, metadata)
+  end
+
+  defp execute_telemetry_pipeline_stop(metadata, start_time, response) do
+    measurements = %{duration: System.monotonic_time() - start_time}
+
+    metadata =
+      case response do
+        {:ok, _response} -> metadata
+        {:error, reason} -> Map.merge(metadata, %{kind: :error, reason: reason})
+      end
+
+    :ok = :telemetry.execute([:redix, :pipeline, :stop], measurements, metadata)
   end
 
   ## Callbacks
@@ -102,7 +139,8 @@ defmodule Redix.Connection do
       receive do
         {:connected, ^socket_owner, socket, address} ->
           :telemetry.execute([:redix, :connection], %{}, %{
-            connection: data.opts[:name] || self(),
+            connection: self(),
+            connection_name: data.opts[:name],
             address: address
           })
 
@@ -160,7 +198,8 @@ defmodule Redix.Connection do
   # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     :telemetry.execute([:redix, :disconnection], %{}, %{
-      connection: data.opts[:name] || self(),
+      connection: self(),
+      connection_name: data.opts[:name],
       address: data.connected_address,
       reason: %ConnectionError{reason: reason}
     })
@@ -175,7 +214,8 @@ defmodule Redix.Connection do
         %__MODULE__{socket_owner: owner} = data
       ) do
     :telemetry.execute([:redix, :connection], %{}, %{
-      connection: data.opts[:name] || self(),
+      connection: self(),
+      connection_name: data.opts[:name],
       address: address,
       reconnection: not is_nil(data.backoff_current)
     })
@@ -191,7 +231,8 @@ defmodule Redix.Connection do
   def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     # We log this when the socket owner stopped while connecting.
     :telemetry.execute([:redix, :failed_connection], %{}, %{
-      connection: data.opts[:name] || self(),
+      connection: self(),
+      connection_name: data.opts[:name],
       address: format_address(data),
       reason: %ConnectionError{reason: reason}
     })
@@ -236,7 +277,8 @@ defmodule Redix.Connection do
 
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     :telemetry.execute([:redix, :disconnection], %{}, %{
-      connection: data.opts[:name] || self(),
+      connection: self(),
+      connection_name: data.opts[:name],
       address: data.connected_address,
       reason: %ConnectionError{reason: reason}
     })

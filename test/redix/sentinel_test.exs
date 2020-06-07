@@ -103,6 +103,7 @@ defmodule Redix.SentinelTest do
 
     assert meta == %{
              connection: conn,
+             connection_name: nil,
              reason: %Redix.ConnectionError{reason: :econnrefused},
              sentinel_address: "localhost:9999"
            }

@@ -562,8 +562,9 @@ defmodule RedixTest do
   end
 
   describe "Telemetry" do
-    test "emits events when starting a pipeline with pipeline/3" do
-      {:ok, c} = Redix.start_link()
+    setup :connect
+
+    test "emits events when starting a pipeline with pipeline/3", %{conn: c} do
       {test_name, _arity} = __ENV__.function
 
       parent = self()
@@ -574,6 +575,7 @@ defmodule RedixTest do
           assert event == [:redix, :pipeline, :start]
           assert is_integer(measurements.system_time)
           assert meta.commands == [["PING"]]
+          assert is_nil(meta.connection_name)
         end
 
         send(parent, ref)
@@ -588,8 +590,7 @@ defmodule RedixTest do
       :telemetry.detach(to_string(test_name))
     end
 
-    test "emits events on successful pipelines with pipeline/3" do
-      {:ok, c} = Redix.start_link()
+    test "emits events on successful pipelines with pipeline/3", %{conn: c} do
       {test_name, _arity} = __ENV__.function
 
       parent = self()
@@ -600,6 +601,7 @@ defmodule RedixTest do
           assert event == [:redix, :pipeline, :stop]
           assert is_integer(measurements.duration) and measurements.duration > 0
           assert meta.commands == [["PING"]]
+          assert is_nil(meta.connection_name)
         end
 
         send(parent, ref)
@@ -614,8 +616,7 @@ defmodule RedixTest do
       :telemetry.detach(to_string(test_name))
     end
 
-    test "emits events on error pipelines with pipeline/3" do
-      {:ok, c} = Redix.start_link()
+    test "emits events on error pipelines with pipeline/3", %{conn: c} do
       {test_name, _arity} = __ENV__.function
 
       parent = self()
@@ -628,6 +629,7 @@ defmodule RedixTest do
           assert meta.commands == [["PING"], ["PING"]]
           assert meta.kind == :error
           assert meta.reason == %ConnectionError{reason: :timeout}
+          assert is_nil(meta.connection_name)
         end
 
         send(parent, ref)
@@ -652,13 +654,8 @@ defmodule RedixTest do
       handler = fn event, measurements, meta, _config ->
         # We need to run this test only if was called for this Redix connection so that
         # we can run in parallel with the pubsub tests.
-        if meta.connection == :redix_telemetry_test do
-          assert measurements == %{}
-
-          case event do
-            [:redix, :connection] -> send(parent, {ref, :connected, meta})
-            [:redix, :disconnection] -> send(parent, {ref, :disconnected, meta})
-          end
+        if meta.connection_name == :redix_telemetry_test do
+          send(parent, {ref, event, measurements, meta})
         end
       end
 
@@ -667,18 +664,73 @@ defmodule RedixTest do
 
       {:ok, c} = Redix.start_link(name: :redix_telemetry_test)
 
-      assert_receive {^ref, :connected, meta}, 1000
-      assert %{address: "localhost:6379", connection: _, reconnection: false} = meta
+      assert_receive {^ref, [:redix, :connection], measurements, meta}, 1000
+      assert measurements == %{}
+
+      assert %{
+               address: "localhost:6379",
+               connection: ^c,
+               reconnection: false,
+               connection_name: :redix_telemetry_test
+             } = meta
 
       capture_log(fn ->
         assert {:ok, _} = Redix.command(c, ~w(QUIT))
 
-        assert_receive {^ref, :disconnected, meta}, 1000
-        assert %{address: "localhost:6379", connection: _} = meta
+        assert_receive {^ref, [:redix, :disconnection], measurements, meta}, 1000
+        assert measurements == %{}
 
-        assert_receive {^ref, :connected, meta}, 1000
-        assert %{address: "localhost:6379", connection: _, reconnection: true} = meta
+        assert %{
+                 address: "localhost:6379",
+                 connection: ^c,
+                 connection_name: :redix_telemetry_test
+               } = meta
+
+        assert_receive {^ref, [:redix, :connection], measurements, meta}, 5000
+        assert measurements == %{}
+
+        assert %{
+                 address: "localhost:6379",
+                 connection: ^c,
+                 reconnection: true,
+                 connection_name: :redix_telemetry_test
+               } = meta
       end)
+    end
+
+    test "the :connection_name metadata field is filled in when the connection is named" do
+      {test_name, _arity} = __ENV__.function
+      {:ok, c} = Redix.start_link(name: test_name)
+
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        if meta.connection == c do
+          send(parent, {ref, event, measurements, meta})
+        end
+      end
+
+      :telemetry.attach_many(
+        to_string(test_name),
+        [[:redix, :pipeline, :start], [:redix, :pipeline, :stop]],
+        handler,
+        :no_config
+      )
+
+      assert {:ok, ["PONG"]} = Redix.pipeline(test_name, [["PING"]])
+
+      assert_receive {^ref, [:redix, :pipeline, :start], measurements, meta}
+      assert is_integer(measurements.system_time)
+      assert meta.commands == [["PING"]]
+      assert meta.connection_name == test_name
+
+      assert_receive {^ref, [:redix, :pipeline, :stop], measurements, meta}
+      assert is_integer(measurements.duration) and measurements.duration > 0
+      assert meta.commands == [["PING"]]
+      assert meta.connection_name == test_name
+
+      :telemetry.detach(to_string(test_name))
     end
   end
 
