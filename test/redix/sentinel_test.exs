@@ -78,36 +78,36 @@ defmodule Redix.SentinelTest do
   end
 
   test "failed sentinel connection" do
-    assert {:ok, conn} =
-             Redix.start_link(sentinel: [group: "main", sentinels: ["redis://localhost:9999"]])
-
     {test_name, _arity} = __ENV__.function
-    telemetry_handler_name = to_string(test_name)
 
     parent = self()
     ref = make_ref()
 
     handler = fn event, measurements, meta, _config ->
-      if meta.connection == conn do
-        assert event == [:redix, :failed_connection]
-        send(parent, {:failed_connection, ref, measurements, meta})
-        assert is_integer(measurements.system_time)
-        assert meta.commands == [["PING"]]
+      if meta.connection_name == :failed_sentinel_telemetry_test do
+        send(parent, {ref, event, measurements, meta})
       end
     end
 
-    :telemetry.attach(telemetry_handler_name, [:redix, :failed_connection], handler, :no_config)
+    :ok =
+      :telemetry.attach(to_string(test_name), [:redix, :failed_connection], handler, :no_config)
 
-    assert_receive {:failed_connection, ^ref, measurements, meta}
+    assert {:ok, conn} =
+             Redix.start_link(
+               name: :failed_sentinel_telemetry_test,
+               sentinel: [group: "main", sentinels: ["redis://localhost:9999"]]
+             )
+
+    assert_receive {^ref, [:redix, :failed_connection], measurements, meta}
     assert measurements == %{}
 
     assert meta == %{
              connection: conn,
-             connection_name: nil,
+             connection_name: :failed_sentinel_telemetry_test,
              reason: %Redix.ConnectionError{reason: :econnrefused},
              sentinel_address: "localhost:9999"
            }
 
-    :telemetry.detach(telemetry_handler_name)
+    :telemetry.detach(to_string(test_name))
   end
 end
