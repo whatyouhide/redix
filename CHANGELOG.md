@@ -1,14 +1,34 @@
 # Changelog
 
+## v0.11.0
+
+### Breaking changes
+
+  * Use the new Telemetry event conventions for pipeline-related events. The new events are `[:redix, :pipeline, :start]` and `[:redix, :pipeline, :stop]`. They both have new measurements associated with them.
+  * Remove the `[:redix, :reconnection]` Telemetry event in favor or `[:redix, :connection]`, which is emitted anytime there's a successful connection to a Redis server.
+  * Remove support for the deprecated ``:log` start option (which was deprecated on v0.10.0).
+
+### Bug fixes and improvements
+
+  * Add the `:connection_metadata` name to all connection/disconnection-related Telemetry events.
+  * Allow a `{module, function, arguments}` tuple as the value of the `:password` start option. This is useful to avoid password leaks in case of process crashes (and crash reports).
+  * Bump minumum Elixir requirement to Elixir `~> 1.7`.
+
 ## v0.10.7
+
+### Bug fixes and improvements
 
   * Fix a crash in `Redix.PubSub` when non-subscribed processes attempted to unsubscribe.
 
 ## v0.10.6
 
+### Bug fixes and improvements
+
   * Fix a bug that caused a memory leak in some cases for Redix pub/sub connections.
 
 ## v0.10.5
+
+### Bug fixes and improvements
 
   * Fix default option replacement for SSL in OTP 22.2.
   * Allow `:gen_statem.start_link/3,4` options in `Redix.start_link/2` and `Redix.PubSub.start_link/2`.
