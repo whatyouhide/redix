@@ -505,9 +505,7 @@ defmodule Redix do
       {:ok, "2"}
 
   """
-  # TODO: use @doc since directly when we depend on 1.7+.
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
-
+  @doc since: "0.8.0"
   @spec noreply_pipeline(connection(), [command()], keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def noreply_pipeline(conn, commands, opts \\ []) do
@@ -522,8 +520,7 @@ defmodule Redix do
   @doc """
   Same as `noreply_pipeline/3` but raises in case of errors.
   """
-  # TODO: use @doc since directly when we depend on 1.7+.
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+  @doc since: "0.8.0"
   @spec noreply_pipeline!(connection(), [command()], keyword()) :: :ok
   def noreply_pipeline!(conn, commands, opts \\ []) do
     case noreply_pipeline(conn, commands, opts) do
@@ -632,9 +629,7 @@ defmodule Redix do
       {:ok, "1"}
 
   """
-  # TODO: use @doc since directly when we depend on 1.7+.
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
-
+  @doc since: "0.8.0"
   @spec noreply_command(connection(), command(), keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def noreply_command(conn, command, opts \\ []) do
@@ -691,9 +686,7 @@ defmodule Redix do
   above. If you do this, do it in an isolated connection (open a new one if necessary)
   to avoid mixing things up.
   """
-  # TODO: use @doc since directly when we depend on 1.7+.
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
-
+  @doc since: "0.8.0"
   @spec transaction_pipeline(connection(), [command()], keyword()) ::
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
@@ -716,9 +709,7 @@ defmodule Redix do
       ["OK", "foo"]
 
   """
-  # TODO: use @doc since directly when we depend on 1.7+.
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
-
+  @doc since: "0.8.0"
   @spec transaction_pipeline!(connection(), [command()], keyword()) :: [
           Redix.Protocol.redis_value()
         ]
