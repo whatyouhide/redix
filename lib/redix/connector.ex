@@ -50,6 +50,7 @@ defmodule Redix.Connector do
       case Keyword.fetch(opts, :password) do
         {:ok, {mod, fun, args}} -> apply(mod, fun, args)
         {:ok, password} when is_binary(password) -> password
+        {:ok, nil} -> nil
         :error -> nil
       end
 
