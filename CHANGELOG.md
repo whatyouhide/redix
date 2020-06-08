@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.1
+
+### Bug fixes and improvements
+
+  * Allow `nil` as a valid value for the `:password` start option again. v0.11.0 broke this feature.
+
 ## v0.11.0
 
 ### Breaking changes
