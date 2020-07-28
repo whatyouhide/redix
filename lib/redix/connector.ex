@@ -102,7 +102,7 @@ defmodule Redix.Connector do
           :ok = transport.close(sent_socket)
           {:ok, server_socket, "#{server_host}:#{server_port}"}
         else
-          {:error, reason} ->
+          {cause, reason} when cause in [:error, :stop] ->
             :telemetry.execute([:redix, :failed_connection], %{}, %{
               connection: conn_pid,
               connection_name: opts[:name],
