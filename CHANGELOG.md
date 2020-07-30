@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.11.2
+
+### Bug fixes and improvements
+
+  * Fix a connection process crash that would very rarely happen when connecting to sentinel nodes with the wrong password or wrong database would fail to due a TCP/SSL connection issue.
+
 ## v0.11.1
 
 ### Bug fixes and improvements
