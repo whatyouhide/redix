@@ -85,7 +85,7 @@ defmodule Redix do
   passing `verify: :verify_none` in the socket options.
 
   Some Redis servers, notably Amazon ElastiCache, use wildcard certificates that require
-  additional socket options for succesful verification (requires OTP 21.0 or later):
+  additional socket options for successful verification (requires OTP 21.0 or later):
 
       Redix.start_link(
         host: "example.com", port: 9999, ssl: true,
@@ -253,7 +253,7 @@ defmodule Redix do
       of a sentinel to be contacted in order to obtain the address of a primary. The address of
       a sentinel can be passed as a Redis URI (see the "Using a Redis URI" section above) or
       a keyword list with `:host`, `:port`, `:password` options (same as when connecting to a
-      Redis instance direclty). Note that the password can either be passed in the sentinel
+      Redis instance directly). Note that the password can either be passed in the sentinel
       address or globally -- see the `:password` option below. This option is required.
 
     * `:group` - (binary) the name of the group that identifies the primary in the sentinel
@@ -376,7 +376,7 @@ defmodule Redix do
 
   This function is synchronous and blocks until the given Redix connection frees
   all its resources and disconnects from the Redis server. `timeout` can be
-  passed to limit the amout of time allowed for the connection to exit; if it
+  passed to limit the amount of time allowed for the connection to exit; if it
   doesn't exit in the given interval, this call exits.
 
   ## Examples
@@ -488,7 +488,7 @@ defmodule Redix do
 
   This function is useful when you want to issue commands to the Redis server but you don't
   care about the responses. For example, you might want to set a bunch of keys but you don't
-  care for a confirmation that they were set. In these cases, you can save bandwith by asking
+  care for a confirmation that they were set. In these cases, you can save bandwidth by asking
   Redis to not send replies to your commands.
 
   Since no replies are sent back, this function returns `:ok` in case there are no network
