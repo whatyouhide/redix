@@ -36,8 +36,8 @@ defmodule MyApp.Redix do
   def child_spec(_args) do
     # Specs for the Redix connections.
     children =
-      for i <- 0..(@pool_size - 1) do
-        Supervisor.child_spec({Redix, name: :"redix_#{i}"}, id: {Redix, i})
+      for index <- 0..(@pool_size - 1) do
+        Supervisor.child_spec({Redix, name: :"redix_#{index}"}, id: {Redix, index})
       end
 
     # Spec for the supervisor that will supervise the Redix connections.
@@ -53,7 +53,7 @@ defmodule MyApp.Redix do
   end
 
   defp random_index() do
-    rem(System.unique_integer([:positive]), @pool_size)
+    Enum.random(0..@pool_size - 1)
   end
 end
 ```
