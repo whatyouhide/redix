@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.0.0
+
+No bug fixes or improvements. Just enough years passed for this to become 1.0.0!
+
 ## v0.11.2
 
 ### Bug fixes and improvements
