@@ -51,8 +51,8 @@ jobs:
       - name: Install OTP and Elixir
         uses: actions/setup-elixir@v1.5.0
         with:
-          otp-version: ${{matrix.pair.otp}}
-          elixir-version: ${{matrix.pair.elixir}}
+          otp-version: ${{matrix.otp}}
+          elixir-version: ${{matrix.elixir}}
 
       - name: Install dependencies
         run: mix deps.get
