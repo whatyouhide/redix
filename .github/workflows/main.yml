@@ -4,7 +4,7 @@ on: [push, pull_request]
 
 jobs:
   format:
-    name: Format
+    name: Format and compile with warnings as errors
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
@@ -18,8 +18,11 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Check mix format
+      - name: Run "mix format"
         run: mix format --check-formatted
+
+      - name: Compile with --warnings-as-errors
+        run: mix compile --warnings-as-errors
 
   test:
     name: Test (Elixir ${{matrix.elixir}} | Erlang/OTP ${{matrix.erlang}})
@@ -27,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pair:
+        include:
           - erlang: 23.0
             elixir: 1.11.2
           - erlang: 23.0
