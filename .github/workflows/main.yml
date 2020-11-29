@@ -48,6 +48,7 @@ jobs:
             elixir: 1.7.4
     env:
       GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      MIX_ENV: test
     steps:
       - uses: actions/checkout@v1
 
