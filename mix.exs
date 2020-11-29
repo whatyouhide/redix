@@ -16,6 +16,9 @@ defmodule Redix.Mixfile do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
 
+      # Tests
+      test_coverage: [tool: ExCoveralls],
+
       # Hex
       package: package(),
       description: @description,
@@ -57,6 +60,7 @@ defmodule Redix.Mixfile do
       # Dev and test dependencies
       {:dialyxir, "~> 1.0.0-rc.6", only: :dev, runtime: false},
       {:ex_doc, "~> 0.19", only: :dev},
+      {:excoveralls, "~> 0.13.3", only: :test},
       {:propcheck, "~> 1.1", only: :test},
       {:stream_data, "~> 0.4", only: [:dev, :test]}
     ]
