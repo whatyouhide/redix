@@ -65,8 +65,8 @@ jobs:
 
       - name: Run tests
         run: mix test --trace --exclude propcheck
-        if: !matrix.coverage
+        if: ${{!matrix.coverage}}
 
       - name: Run tests with coverage
         run: mix coveralls.github --exclude propcheck
-        if: matrix.coverage
+        if: ${{matrix.coverage}}
