@@ -2,6 +2,7 @@
 
 ![](https://github.com/whatyouhide/redix/workflows/CI/badge.svg)
 [![Hex.pm](https://img.shields.io/hexpm/v/redix.svg)](https://hex.pm/packages/redix)
+[![Coverage Status](https://coveralls.io/repos/github/whatyouhide/redix/badge.svg)](https://coveralls.io/github/whatyouhide/redix)
 
 > Fast, pipelined, resilient Redis client for Elixir.
 

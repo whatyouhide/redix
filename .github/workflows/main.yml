@@ -33,6 +33,7 @@ jobs:
         include:
           - otp: 23.0
             elixir: 1.11.2
+            coverage: true
           - otp: 23.0
             elixir: 1.10.3
           - otp: 22.3
@@ -45,6 +46,9 @@ jobs:
             elixir: 1.7.4
           - otp: 19.3
             elixir: 1.7.4
+    env:
+      GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+      MIX_ENV: test
     steps:
       - uses: actions/checkout@v1
 
@@ -62,3 +66,8 @@ jobs:
 
       - name: Run tests
         run: mix test --trace --exclude propcheck
+        if: ${{!matrix.coverage}}
+
+      - name: Run tests with coverage
+        run: mix coveralls.github --exclude propcheck
+        if: ${{matrix.coverage}}
