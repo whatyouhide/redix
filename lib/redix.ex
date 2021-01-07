@@ -166,8 +166,7 @@ defmodule Redix do
       running. Defaults to `6379`.
 
     * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
-      username is used. Usernames are ignored if the Redis version does not support ACL (below
-      version 6).
+      username is used. Redis version 6 or higher is required to use this option.
 
     * `:password` - (string or MFA) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
