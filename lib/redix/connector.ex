@@ -46,6 +46,8 @@ defmodule Redix.Connector do
   end
 
   defp maybe_auth(transport, socket, opts, timeout) do
+    username = opts[:username]
+
     password =
       case Keyword.fetch(opts, :password) do
         {:ok, {mod, fun, args}} -> apply(mod, fun, args)
@@ -54,10 +56,14 @@ defmodule Redix.Connector do
         :error -> nil
       end
 
-    if password do
-      with {:ok, "OK"} <- sync_command(transport, socket, ["AUTH", password], timeout), do: :ok
-    else
-      :ok
+    auth = fn cmd ->
+      with {:ok, "OK"} <- sync_command(transport, socket, cmd, timeout), do: :ok
+    end
+
+    case {username, password} do
+      {_, nil} -> :ok
+      {nil, password} -> auth.(["AUTH", password])
+      {username, password} -> auth.(["AUTH", username, password])
     end
   end
 

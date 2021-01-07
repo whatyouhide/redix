@@ -27,9 +27,17 @@ defmodule Redix.URITest do
     assert is_nil(opts[:password])
   end
 
+  test "opts_from_uri/1: username and password" do
+    opts = opts_from_uri("redis://user:pass@localhost")
+    assert opts[:host] == "localhost"
+    assert opts[:username] == "user"
+    assert opts[:password] == "pass"
+  end
+
   test "opts_from_uri/1: password" do
     opts = opts_from_uri("redis://:pass@localhost")
     assert opts[:host] == "localhost"
+    assert opts[:username] == nil
     assert opts[:password] == "pass"
 
     # If there's no ":", we error out.

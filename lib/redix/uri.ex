@@ -9,27 +9,33 @@ defmodule Redix.URI do
       raise ArgumentError, "expected scheme to be redis:// or rediss://, got: #{scheme}://"
     end
 
+    {username, password} = username_and_password(uri)
+
     []
     |> put_if_not_nil(:host, host)
     |> put_if_not_nil(:port, port)
-    |> put_if_not_nil(:password, password(uri))
+    |> put_if_not_nil(:username, username)
+    |> put_if_not_nil(:password, password)
     |> put_if_not_nil(:database, database(uri))
     |> enable_ssl_if_secure_scheme(scheme)
   end
 
-  defp password(%URI{userinfo: nil}) do
-    nil
+  defp username_and_password(%URI{userinfo: nil}) do
+    {nil, nil}
   end
 
-  defp password(%URI{userinfo: userinfo}) do
+  defp username_and_password(%URI{userinfo: userinfo}) do
     case String.split(userinfo, ":", parts: 2) do
-      [_, password] ->
-        password
+      ["", password] ->
+        {nil, password}
+
+      [username, password] ->
+        {username, password}
 
       _other ->
         raise ArgumentError,
               "expected password in the Redis URI to be given as redis://:PASSWORD@HOST or " <>
-                "redis://DISCARDED_USER:PASSWORD@HOST"
+                "redis://USERNAME:PASSWORD@HOST"
     end
   end
 

@@ -22,6 +22,7 @@ defmodule Redix.StartOptions do
                      :host,
                      :port,
                      :database,
+                     :username,
                      :password,
                      :name,
                      :sentinel,
