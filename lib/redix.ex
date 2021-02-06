@@ -474,8 +474,7 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec pipeline!(connection(), [command()], keyword()) ::
-          [Redix.Protocol.redis_value()] | no_return()
+  @spec pipeline!(connection(), [command()], keyword()) :: [Redix.Protocol.redis_value()]
   def pipeline!(conn, commands, opts \\ []) do
     case pipeline(conn, commands, opts) do
       {:ok, response} -> response
@@ -601,7 +600,7 @@ defmodule Redix do
       ** (Redix.ConnectionError) :closed
 
   """
-  @spec command!(connection(), command(), keyword()) :: Redix.Protocol.redis_value() | no_return()
+  @spec command!(connection(), command(), keyword()) :: Redix.Protocol.redis_value()
   def command!(conn, command, opts \\ []) do
     case command(conn, command, opts) do
       {:ok, response} -> response
