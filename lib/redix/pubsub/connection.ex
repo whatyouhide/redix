@@ -544,6 +544,7 @@ defmodule Redix.PubSub.Connection do
         {_target, {:subscribing, subscribes, _unsubscribes}} -> pid in subscribes
         {_target, {:subscribed, subscribers}} -> pid in subscribers
         {_target, {:unsubscribing, resubscribers}} -> pid in resubscribers
+        {_target, {:disconnected, subscribers}} -> pid in subscribers
       end)
 
     if still_subscribed_to_something? do
