@@ -47,10 +47,14 @@ defmodule Redix.URITest do
     assert opts[:host] == "localhost"
     assert is_nil(opts[:database])
 
-    message = "expected database to be an integer, got: \"/2/namespace\""
+    opts = opts_from_uri("redis://localhost/2/namespace")
+    assert opts[:host] == "localhost"
+    assert opts[:database] == 2
+
+    message = "expected database to be an integer, got: \"/peanuts\""
 
     assert_raise ArgumentError, message, fn ->
-      opts_from_uri("redis://localhost/2/namespace")
+      opts_from_uri("redis://localhost/peanuts")
     end
   end
 
