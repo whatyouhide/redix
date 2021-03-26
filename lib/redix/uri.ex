@@ -38,10 +38,8 @@ defmodule Redix.URI do
   end
 
   defp database(%URI{path: "/" <> path = full_path}) do
-    path = path |> String.split("/") |> hd()
-
     case Integer.parse(path) do
-      {db, ""} ->
+      {db, rest} when rest == "" or binary_part(rest, 0, 1) == "/" ->
         db
 
       _other ->

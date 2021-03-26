@@ -56,6 +56,12 @@ defmodule Redix.URITest do
     assert_raise ArgumentError, message, fn ->
       opts_from_uri("redis://localhost/peanuts")
     end
+
+    message = "expected database to be an integer, got: \"/0tacos\""
+
+    assert_raise ArgumentError, message, fn ->
+      opts_from_uri("redis://localhost/0tacos")
+    end
   end
 
   test "opts_from_uri/1: accepts rediss scheme" do
