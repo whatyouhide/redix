@@ -39,7 +39,7 @@ defmodule Redix.URI do
 
   defp database(%URI{path: "/" <> path = full_path}) do
     case Integer.parse(path) do
-      {db, ""} ->
+      {db, rest} when rest == "" or binary_part(rest, 0, 1) == "/" ->
         db
 
       _other ->
