@@ -146,11 +146,14 @@ defmodule Redix do
 
     * `redis://localhost`
     * `redis://:secret@localhost:6397`
-    * `redis://user:secret@localhost:6397`
+    * `redis://username:secret@localhost:6397`
     * `redis://example.com:6380/1`
 
   The only mandatory thing when using URIs is the host. All other elements are optional
   and their default value can be found in the "Options" section below.
+
+  In earlier versions of Redix, the username in the URI was ignored. Redis 6 introduced [ACL
+  support](https://redis.io/topics/acl). Now, Redix supports usernames as well.
 
   ## Options
 
@@ -166,7 +169,8 @@ defmodule Redix do
       running. Defaults to `6379`.
 
     * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
-      username is used. Redis version 6 or higher is required to use this option.
+      username is used. Redis supports usernames only since Redis 6 (see the [ACL
+      documentation](https://redis.io/topics/acl)).
 
     * `:password` - (string or MFA) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
