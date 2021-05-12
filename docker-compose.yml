@@ -23,6 +23,13 @@ services:
     sysctls:
       net.core.somaxconn: 1024
 
+  base_with_acl:
+    build: ./test/docker/base_with_acl
+    ports:
+      - "6385:6379"
+    sysctls:
+      net.core.somaxconn: 1024
+
   sentinel:
     build: ./test/docker/sentinel
     ports:

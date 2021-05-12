@@ -8,6 +8,9 @@ defmodule RedixTest do
     Error
   }
 
+  @with_auth_port 16379
+  @with_acl_port 6385
+
   setup_all do
     {:ok, conn} = Redix.start_link()
     Redix.command!(conn, ["FLUSHALL"])
@@ -47,8 +50,51 @@ defmodule RedixTest do
       end)
     end
 
+    test "specifying an invalid user/password when ACL is set" do
+      capture_log(fn ->
+        Process.flag(:trap_exit, true)
+
+        {:ok, pid} =
+          Redix.start_link(port: @with_acl_port, username: "nonexistent", password: "foo")
+
+        assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
+
+        assert message =~ "WRONGPASS invalid username-password pair"
+      end)
+    end
+
+    test "specifying a valid user/password when ACL is set" do
+      capture_log(fn ->
+        Process.flag(:trap_exit, true)
+
+        # Readonly user
+        {:ok, c} =
+          Redix.start_link(port: @with_acl_port, username: "readonly", password: "ropass")
+
+        assert {:error, %Error{message: message}} = Redix.command(c, ~w(SET abc my_value))
+        assert message =~ "NOPERM this user has no permissions to run the 'set' command"
+        assert Redix.command(c, ~w(GET abc)) == {:ok, nil}
+
+        # Superuser
+        {:ok, c} =
+          Redix.start_link(port: @with_acl_port, username: "superuser", password: "superpass")
+
+        assert Redix.command(c, ~w(SET def my_value)) == {:ok, "OK"}
+        assert Redix.command(c, ~w(GET def)) == {:ok, "my_value"}
+      end)
+    end
+
     test "specifying a string password when a password is set" do
-      {:ok, pid} = Redix.start_link(port: 16379, password: "some-password")
+      {:ok, pid} = Redix.start_link(port: @with_auth_port, password: "some-password")
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "overriding username when a URI is used" do
+      {:ok, pid} =
+        Redix.start_link("redis://ignored:some-password@localhost:#{@with_auth_port}",
+          username: nil
+        )
+
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
@@ -56,7 +102,10 @@ defmodule RedixTest do
       System.put_env("REDIX_MFA_PASSWORD", "some-password")
 
       {:ok, pid} =
-        Redix.start_link(port: 16379, password: {System, :get_env, ["REDIX_MFA_PASSWORD"]})
+        Redix.start_link(
+          port: @with_auth_port,
+          password: {System, :get_env, ["REDIX_MFA_PASSWORD"]}
+        )
 
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     after

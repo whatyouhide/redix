@@ -140,22 +140,20 @@ defmodule Redix do
 
   In case `uri_or_opts` is a Redis URI, it must be in the form:
 
-      redis://[:password@]host[:port][/db]
+      redis://[username:password@]host[:port][/db]
 
   Here are some examples of valid URIs:
 
     * `redis://localhost`
     * `redis://:secret@localhost:6397`
+    * `redis://username:secret@localhost:6397`
     * `redis://example.com:6380/1`
-
-  Usernames before the password are ignored, so the these two URIs are
-  equivalent:
-
-      redis://:secret@localhost
-      redis://myuser:secret@localhost
 
   The only mandatory thing when using URIs is the host. All other elements are optional
   and their default value can be found in the "Options" section below.
+
+  In earlier versions of Redix, the username in the URI was ignored. Redis 6 introduced [ACL
+  support](https://redis.io/topics/acl). Now, Redix supports usernames as well.
 
   ## Options
 
@@ -169,6 +167,10 @@ defmodule Redix do
 
     * `:port` - (positive integer) the port on which the Redis server is
       running. Defaults to `6379`.
+
+    * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
+      username is used. Redis supports usernames only since Redis 6 (see the [ACL
+      documentation](https://redis.io/topics/acl)).
 
     * `:password` - (string or MFA) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
