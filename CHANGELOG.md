@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.1.0
+
+### Big fixes and improvements
+
+  * Improve handling of databases in URIs.
+  * Add support for [ACL](https://redis.io/topics/acl), introduced in Redis 6.
+
 ## v1.0.0
 
 No bug fixes or improvements. Just enough years passed for this to become 1.0.0!
