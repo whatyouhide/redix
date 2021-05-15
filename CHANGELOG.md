@@ -1,8 +1,14 @@
 # Changelog
 
+## v1.1.1
+
+### Bug fixes and improvements
+
+  * Version v1.1.0 started using ACLs and issuing `AUTH <username> <password>` when a username was provided (either via options or via URI). This broke previous documented behavior, where Redix used to ignore usernames. With this bug fix, Redix now falls back to `AUTH <password>` if `AUTH <username> <password>` fails because of the wrong number of arguments, which indicates a version of Redis earlier than verison 6 (when ACLs were introduced).
+
 ## v1.1.0
 
-### Big fixes and improvements
+### Bug fixes and improvements
 
   * Improve handling of databases in URIs.
   * Add support for [ACL](https://redis.io/topics/acl), introduced in Redis 6.
