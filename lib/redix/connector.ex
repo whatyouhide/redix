@@ -57,16 +57,46 @@ defmodule Redix.Connector do
 
     cond do
       username && password ->
-        with {:ok, "OK"} <-
-               sync_command(transport, socket, ["AUTH", username, password], timeout),
-             do: :ok
+        auth_with_username_and_password(transport, socket, username, password, timeout)
 
       password ->
-        with {:ok, "OK"} <- sync_command(transport, socket, ["AUTH", password], timeout), do: :ok
+        auth_with_password(transport, socket, password, timeout)
 
       true ->
         :ok
     end
+  end
+
+  defp auth_with_username_and_password(transport, socket, username, password, timeout) do
+    case sync_command(transport, socket, ["AUTH", username, password], timeout) do
+      {:ok, "OK"} ->
+        :ok
+
+      # An alternative to this hacky code would be to use the INFO command and check the Redis
+      # version to see if it's >= 6.0.0 (when ACL was introduced). However, if you're not
+      # authenticated, you cannot run INFO (or any other command), so that doesn't work. This
+      # solution is a bit fragile since it relies on the exact error message, but that's the best
+      # Redis gives use. The only alternative left would be to provide an explicit :use_username
+      # option but that feels very orced on the user.
+      {:error, %Redix.Error{message: "ERR wrong number of arguments for 'auth' command"}} ->
+        IO.warn("""
+        a username was provided to connect to Redis (either via options or via a URI). However, \
+        the Redis server version for this connection seems to not support ACLs, which are only \
+        supported from Redis version 6.0.0 (https://redis.io/topics/acl). Earlier versions of \
+        Redix used to ignore the username if provided, so Redix is now falling back to that \
+        behavior. Future Redix versions will raise an error in this particular case, so either \
+        remove the username or upgrade Redis to support ACLs.\
+        """)
+
+        auth_with_password(transport, socket, password, timeout)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp auth_with_password(transport, socket, password, timeout) do
+    with {:ok, "OK"} <- sync_command(transport, socket, ["AUTH", password], timeout), do: :ok
   end
 
   defp maybe_select(transport, socket, opts, timeout) do

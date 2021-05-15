@@ -170,7 +170,10 @@ defmodule Redix do
 
     * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
       username is used. Redis supports usernames only since Redis 6 (see the [ACL
-      documentation](https://redis.io/topics/acl)).
+      documentation](https://redis.io/topics/acl)). If a username is provided (either via
+      options or via URIs) and the Redis version used doesn't support ACL, then Redix falls
+      back to using just the password and emits a warning. In future Redix versions, Redix
+      will raise if a username is passed and the Redis version used doesn't support ACL.
 
     * `:password` - (string or MFA) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix

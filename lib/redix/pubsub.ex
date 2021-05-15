@@ -203,17 +203,14 @@ defmodule Redix.PubSub do
 
       redis://localhost
       redis://:secret@localhost:6397
+      redis://username:secret@localhost:6397
       redis://example.com:6380/1
 
-  Usernames before the password are ignored, so the these two URIs are
-  equivalent:
+  The only mandatory thing when using URIs is the host. All other elements are optional
+  and their default value can be found in the "Options" section below.
 
-      redis://:secret@localhost
-      redis://myuser:secret@localhost
-
-  The only mandatory thing when using URIs is the host. All other elements
-  (password, port, database) are optional and their default value can be found
-  in the "Options" section below.
+  In earlier versions of Redix, the username in the URI was ignored. Redis 6 introduced [ACL
+  support](https://redis.io/topics/acl). Now, Redix supports usernames as well.
 
   ## Options
 
@@ -225,6 +222,13 @@ defmodule Redix.PubSub do
 
     * `:port` - (integer) the port on which the Redis server is
       running. Defaults to `6379`.
+
+    * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
+      username is used. Redis supports usernames only since Redis 6 (see the [ACL
+      documentation](https://redis.io/topics/acl)). If a username is provided (either via
+      options or via URIs) and the Redis version used doesn't support ACL, then Redix falls
+      back to using just the password and emits a warning. In future Redix versions, Redix
+      will raise if a username is passed and the Redis version used doesn't support ACL.
 
     * `:password` - (string) the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix

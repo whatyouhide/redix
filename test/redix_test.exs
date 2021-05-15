@@ -1,7 +1,7 @@
 defmodule RedixTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.CaptureLog
+  import ExUnit.{CaptureIO, CaptureLog}
 
   alias Redix.{
     ConnectionError,
@@ -12,9 +12,9 @@ defmodule RedixTest do
   @with_acl_port 6385
 
   setup_all do
-    {:ok, conn} = Redix.start_link()
+    {:ok, conn} = Redix.start_link(sync_connect: true)
     Redix.command!(conn, ["FLUSHALL"])
-    Redix.stop(conn)
+    :ok = Redix.stop(conn)
     :ok
   end
 
@@ -28,7 +28,7 @@ defmodule RedixTest do
       assert Redix.command(c, ~w(GET my_key)) == {:ok, nil}
     end
 
-    test "specifying a non existing database" do
+    test "specifying a non-existing database" do
       capture_log(fn ->
         Process.flag(:trap_exit, true)
         {:ok, pid} = Redix.start_link(database: 1000)
@@ -96,6 +96,24 @@ defmodule RedixTest do
         )
 
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "specifying a user/password when Redis version is < 6.0.0 (no ACL support)" do
+      output =
+        capture_io(:stderr, fn ->
+          # We warn but fall back to ignoring the username.
+          {:ok, pid} =
+            Redix.start_link(
+              port: @with_auth_port,
+              username: "discarded",
+              password: "some-password",
+              sync_connect: true
+            )
+
+          assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+        end)
+
+      assert output =~ "a username was provided to connect to Redis"
     end
 
     test "specifying a mfa password when a password is set" do
