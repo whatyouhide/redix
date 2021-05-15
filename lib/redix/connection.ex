@@ -65,9 +65,7 @@ defmodule Redix.Connection do
     start_time = System.monotonic_time()
     :ok = execute_telemetry_pipeline_start(telemetry_metadata)
 
-    # We cast to the connection process knowing that it will reply at some point,
-    # either after roughly timeout or when a response is ready.
-    cast = {:pipeline, commands, _from = {self(), request_id_and_alias}, timeout}
+    cast = {:pipeline, commands, _from = {self(), request_id_and_alias}}
     :ok = :gen_statem.cast(conn_pid, cast)
 
     receive do
@@ -77,18 +75,19 @@ defmodule Redix.Connection do
 
       {:DOWN, ^request_id_and_alias, _, _, reason} ->
         exit(reason)
-        # after
-        #   timeout ->
-        #     Process.demonitor(request_id_and_alias, [:flush])
+    after
+      timeout ->
+        :erlang.unalias(request_id_and_alias)
+        Process.demonitor(request_id_and_alias, [:flush])
 
-        #     receive do
-        #       {^request_id_and_alias, resp} ->
-        #         :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
-        #         resp
-        #     after
-        #       0 ->
-        #         {:error, :timeout}
-        #     end
+        receive do
+          {^request_id_and_alias, resp} ->
+            :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
+            resp
+        after
+          0 ->
+            {:error, %Redix.ConnectionError{reason: :timeout}}
+        end
     end
   end
 
@@ -184,13 +183,9 @@ defmodule Redix.Connection do
     {:next_state, :connecting, new_data}
   end
 
-  def disconnected({:timeout, {:client_timed_out, _counter}}, _from, _data) do
-    :keep_state_and_data
-  end
-
   def disconnected(:internal, {:notify_of_disconnection, _reason}, %__MODULE__{table: table}) do
-    fun = fn {_counter, from, _ncommands, timed_out?}, _acc ->
-      if not timed_out?, do: reply(from, {:error, %ConnectionError{reason: :disconnected}})
+    fun = fn {_counter, from, _ncommands}, _acc ->
+      reply(from, {:error, %ConnectionError{reason: :disconnected}})
     end
 
     :ets.foldl(fun, nil, table)
@@ -199,7 +194,7 @@ defmodule Redix.Connection do
     :keep_state_and_data
   end
 
-  def disconnected(:cast, {:pipeline, _commands, from, _timeout}, _data) do
+  def disconnected(:cast, {:pipeline, _commands, from}, _data) do
     reply(from, {:error, %ConnectionError{reason: :closed}})
     :keep_state_and_data
   end
@@ -235,7 +230,7 @@ defmodule Redix.Connection do
     {:next_state, :connected, %{data | socket: socket}}
   end
 
-  def connecting(:cast, {:pipeline, _commands, _from, _timeout}, _data) do
+  def connecting(:cast, {:pipeline, _commands, _from}, _data) do
     {:keep_state_and_data, :postpone}
   end
 
@@ -251,28 +246,18 @@ defmodule Redix.Connection do
     disconnect(data, reason)
   end
 
-  def connecting({:timeout, {:client_timed_out, _counter}}, _from, _data) do
-    :keep_state_and_data
-  end
-
-  def connected(:cast, {:pipeline, commands, from, timeout}, data) do
+  def connected(:cast, {:pipeline, commands, from}, data) do
     {ncommands, data} = get_client_reply(data, commands)
 
     if ncommands > 0 do
       {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
 
-      row = {counter, from, ncommands, _timed_out? = false}
+      row = {counter, from, ncommands}
       :ets.insert(data.table, row)
 
       case data.transport.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
         :ok ->
-          actions =
-            case timeout do
-              :infinity -> []
-              _other -> [{{:timeout, {:client_timed_out, counter}}, timeout, from}]
-            end
-
-          {:keep_state, data, actions}
+          {:keep_state, data}
 
         {:error, _reason} ->
           # The socket owner will get a closed message at some point, so we just move to the
@@ -296,14 +281,6 @@ defmodule Redix.Connection do
 
     data = %{data | connected_address: nil}
     disconnect(data, reason)
-  end
-
-  def connected({:timeout, {:client_timed_out, counter}}, from, %__MODULE__{} = data) do
-    if _found? = :ets.update_element(data.table, counter, {4, _timed_out? = true}) do
-      reply(from, {:error, %ConnectionError{reason: :timeout}})
-    end
-
-    :keep_state_and_data
   end
 
   ## Helpers
