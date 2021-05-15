@@ -59,7 +59,7 @@ defmodule Redix.Connection do
   def pipeline(conn, commands, timeout) do
     conn_pid = GenServer.whereis(conn)
 
-    request_id = Process.monitor(conn_pid)
+    request_id_and_alias = :erlang.monitor(:process, conn_pid, alias: :reply_demonitor)
 
     telemetry_metadata = telemetry_pipeline_metadata(conn, conn_pid, commands)
     start_time = System.monotonic_time()
@@ -67,17 +67,28 @@ defmodule Redix.Connection do
 
     # We cast to the connection process knowing that it will reply at some point,
     # either after roughly timeout or when a response is ready.
-    cast = {:pipeline, commands, _from = {self(), request_id}, timeout}
+    cast = {:pipeline, commands, _from = {self(), request_id_and_alias}, timeout}
     :ok = :gen_statem.cast(conn_pid, cast)
 
     receive do
-      {^request_id, resp} ->
-        _ = Process.demonitor(request_id, [:flush])
+      {^request_id_and_alias, resp} ->
         :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
         resp
 
-      {:DOWN, ^request_id, _, _, reason} ->
+      {:DOWN, ^request_id_and_alias, _, _, reason} ->
         exit(reason)
+        # after
+        #   timeout ->
+        #     Process.demonitor(request_id_and_alias, [:flush])
+
+        #     receive do
+        #       {^request_id_and_alias, resp} ->
+        #         :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
+        #         resp
+        #     after
+        #       0 ->
+        #         {:error, :timeout}
+        #     end
     end
   end
 
@@ -297,8 +308,8 @@ defmodule Redix.Connection do
 
   ## Helpers
 
-  defp reply({pid, request_id} = _from, reply) do
-    send(pid, {request_id, reply})
+  defp reply({_pid, request_id_and_alias} = _from, reply) do
+    send(request_id_and_alias, {request_id_and_alias, reply})
   end
 
   defp disconnect(_data, %Redix.Error{} = error) do
