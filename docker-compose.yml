@@ -38,6 +38,14 @@ services:
       - "26379:26379"
       - "26380:26380"
       - "26381:26381"
+    # expose:
+    #   - "6381"
+    #   - "6382"
+    #   - "26379"
+    #   - "26380"
+    #   - "26381"
+    environment:
+      - ALLOW_EMPTY_PASSWORD=yes
     sysctls:
       net.core.somaxconn: 1024
 
