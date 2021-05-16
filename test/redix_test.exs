@@ -551,6 +551,9 @@ defmodule RedixTest do
 
     test "timeouts", %{conn: c} do
       assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~w(PING), timeout: 0)
+      Process.sleep(50)
+
+      IO.inspect(Process.info(self(), :messages), label: "Mailbox in tests")
 
       # Let's check that the Redix connection doesn't reply anyways, even if the
       # timeout happened.
@@ -582,6 +585,8 @@ defmodule RedixTest do
             fn ->
               error = %ConnectionError{reason: :timeout}
               assert Redix.command(conn, ~w(BLPOP my_list 0), timeout: 0) == {:error, error}
+
+              IO.inspect(Process.info(self(), :messages), label: "Mailbox in tests")
 
               # The fact that we timed out should be respected here, even if the
               # connection is killed (no {:error, :disconnected} message should

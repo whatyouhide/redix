@@ -95,11 +95,8 @@ defmodule Redix.SocketOwner do
   defp new_data(%{continuation: continuation} = state, data) do
     case continuation.(data) do
       {:ok, resp, rest} ->
-        {_counter, {_pid, request_id_and_alias}, _ncommands} =
-          take_first_in_queue(state.queue_table)
-
+        {_counter, request_id_and_alias, _ncommands} = take_first_in_queue(state.queue_table)
         send(request_id_and_alias, {request_id_and_alias, {:ok, resp}})
-
         new_data(%{state | continuation: nil}, rest)
 
       {:continuation, cont} ->

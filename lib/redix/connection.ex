@@ -59,14 +59,13 @@ defmodule Redix.Connection do
   def pipeline(conn, commands, timeout) do
     conn_pid = GenServer.whereis(conn)
 
-    request_id_and_alias = :erlang.monitor(:process, conn_pid, alias: :reply_demonitor)
+    request_id_and_alias = :erlang.monitor(:process, conn_pid, [{:alias, :reply_demonitor}])
 
     telemetry_metadata = telemetry_pipeline_metadata(conn, conn_pid, commands)
     start_time = System.monotonic_time()
     :ok = execute_telemetry_pipeline_start(telemetry_metadata)
 
-    cast = {:pipeline, commands, _from = {self(), request_id_and_alias}}
-    :ok = :gen_statem.cast(conn_pid, cast)
+    :ok = :gen_statem.cast(conn_pid, {:pipeline, commands, request_id_and_alias})
 
     receive do
       {^request_id_and_alias, resp} ->
@@ -77,16 +76,19 @@ defmodule Redix.Connection do
         exit(reason)
     after
       timeout ->
+        :erlang.demonitor(request_id_and_alias, [:flush])
         :erlang.unalias(request_id_and_alias)
-        Process.demonitor(request_id_and_alias, [:flush])
 
+        # We manually "flush" the mailbox in case the response arrived before we could unalias.
         receive do
           {^request_id_and_alias, resp} ->
             :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
             resp
         after
           0 ->
-            {:error, %Redix.ConnectionError{reason: :timeout}}
+            resp = {:error, %Redix.ConnectionError{reason: :timeout}}
+            :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
+            resp
         end
     end
   end
@@ -184,8 +186,8 @@ defmodule Redix.Connection do
   end
 
   def disconnected(:internal, {:notify_of_disconnection, _reason}, %__MODULE__{table: table}) do
-    fun = fn {_counter, from, _ncommands}, _acc ->
-      reply(from, {:error, %ConnectionError{reason: :disconnected}})
+    fun = fn {_counter, request_id_and_alias, _ncommands}, _acc ->
+      reply(request_id_and_alias, {:error, %ConnectionError{reason: :disconnected}})
     end
 
     :ets.foldl(fun, nil, table)
@@ -194,8 +196,8 @@ defmodule Redix.Connection do
     :keep_state_and_data
   end
 
-  def disconnected(:cast, {:pipeline, _commands, from}, _data) do
-    reply(from, {:error, %ConnectionError{reason: :closed}})
+  def disconnected(:cast, {:pipeline, _commands, request_id_and_alias}, _data) do
+    reply(request_id_and_alias, {:error, %ConnectionError{reason: :closed}})
     :keep_state_and_data
   end
 
@@ -230,7 +232,7 @@ defmodule Redix.Connection do
     {:next_state, :connected, %{data | socket: socket}}
   end
 
-  def connecting(:cast, {:pipeline, _commands, _from}, _data) do
+  def connecting(:cast, {:pipeline, _commands, _request_id_and_alias}, _data) do
     {:keep_state_and_data, :postpone}
   end
 
@@ -246,13 +248,13 @@ defmodule Redix.Connection do
     disconnect(data, reason)
   end
 
-  def connected(:cast, {:pipeline, commands, from}, data) do
+  def connected(:cast, {:pipeline, commands, request_id_and_alias}, data) do
     {ncommands, data} = get_client_reply(data, commands)
 
     if ncommands > 0 do
       {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
 
-      row = {counter, from, ncommands}
+      row = {counter, request_id_and_alias, ncommands}
       :ets.insert(data.table, row)
 
       case data.transport.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
@@ -266,7 +268,7 @@ defmodule Redix.Connection do
           {:next_state, :disconnected, data}
       end
     else
-      reply(from, {:ok, []})
+      reply(request_id_and_alias, {:ok, []})
       {:keep_state, data}
     end
   end
@@ -285,7 +287,7 @@ defmodule Redix.Connection do
 
   ## Helpers
 
-  defp reply({_pid, request_id_and_alias} = _from, reply) do
+  defp reply(request_id_and_alias, reply) do
     send(request_id_and_alias, {request_id_and_alias, reply})
   end
 
