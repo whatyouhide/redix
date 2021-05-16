@@ -124,7 +124,6 @@ defmodule Redix.Connector do
         _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end)
 
         with :ok <- maybe_auth(transport, sent_socket, sentinel, sentinel_opts[:timeout]),
-             _ = Logger.debug("Authenticated to sentinel #{inspect(sentinel)}"),
              {:ok, {server_host, server_port}} <-
                ask_sentinel_for_server(transport, sent_socket, sentinel_opts),
              _ =
@@ -137,10 +136,6 @@ defmodule Redix.Connector do
                  String.to_integer(server_port),
                  opts
                ),
-             _ =
-               Logger.debug(fn ->
-                 "Established connection to #{sentinel_opts[:role]} #{server_host}:#{server_port}"
-               end),
              :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
           :ok = transport.close(sent_socket)
           {:ok, server_socket, "#{server_host}:#{server_port}"}
@@ -153,21 +148,11 @@ defmodule Redix.Connector do
               sentinel_address: format_host(sentinel)
             })
 
-            _ =
-              Logger.debug(fn ->
-                "Failed to negotiate with sentinel #{inspect(sentinel)}: #{inspect(reason)}"
-              end)
-
             :ok = transport.close(sent_socket)
             connect_through_sentinel(rest, sentinel_opts, opts, transport, conn_pid)
         end
 
       {:error, reason} ->
-        _ =
-          Logger.debug(fn ->
-            "Failed to connect to sentinel #{inspect(sentinel)}: #{inspect(reason)}"
-          end)
-
         :telemetry.execute([:redix, :failed_connection], %{}, %{
           connection: conn_pid,
           connection_name: opts[:name],

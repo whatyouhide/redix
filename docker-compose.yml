@@ -1,34 +1,34 @@
 version: '3'
 
 services:
-  # base:
-  #   image: "redis:alpine"
-  #   ports:
-  #     - "6379:6379"
-  #   sysctls:
-  #     net.core.somaxconn: 1024
+  base:
+    image: "redis:alpine"
+    ports:
+      - "6379:6379"
+    sysctls:
+      net.core.somaxconn: 1024
 
-  # pubsub:
-  #   image: "redis:alpine"
-  #   ports:
-  #     - "6380:6379"
-  #   sysctls:
-  #     net.core.somaxconn: 1024
+  pubsub:
+    image: "redis:alpine"
+    ports:
+      - "6380:6379"
+    sysctls:
+      net.core.somaxconn: 1024
 
-  # base_with_auth:
-  #   image: "redis:5-alpine"
-  #   command: redis-server --requirepass some-password
-  #   ports:
-  #     - "16379:6379"
-  #   sysctls:
-  #     net.core.somaxconn: 1024
+  base_with_auth:
+    image: "redis:5-alpine"
+    command: redis-server --requirepass some-password
+    ports:
+      - "16379:6379"
+    sysctls:
+      net.core.somaxconn: 1024
 
-  # base_with_acl:
-  #   build: ./test/docker/base_with_acl
-  #   ports:
-  #     - "6385:6379"
-  #   sysctls:
-  #     net.core.somaxconn: 1024
+  base_with_acl:
+    build: ./test/docker/base_with_acl
+    ports:
+      - "6385:6379"
+    sysctls:
+      net.core.somaxconn: 1024
 
   sentinel:
     build: ./test/docker/sentinel
@@ -38,32 +38,26 @@ services:
       - "26379:26379"
       - "26380:26380"
       - "26381:26381"
-    expose:
-      - "6381"
-      - "6382"
-      - "26379"
-      - "26380"
-      - "26381"
     sysctls:
       net.core.somaxconn: 1024
 
-  # sentinel_with_auth:
-  #   build: ./test/docker/sentinel_with_auth
-  #   ports:
-  #     - "6383:6383"
-  #     - "26383:26383"
-  #   sysctls:
-  #     net.core.somaxconn: 1024
+  sentinel_with_auth:
+    build: ./test/docker/sentinel_with_auth
+    ports:
+      - "6383:6383"
+      - "26383:26383"
+    sysctls:
+      net.core.somaxconn: 1024
 
-  # base_with_stunnel:
-  #   image: dweomer/stunnel
-  #   environment:
-  #     - STUNNEL_SERVICE=base
-  #     - STUNNEL_ACCEPT=6384
-  #     - STUNNEL_CONNECT=base:6379
-  #   links:
-  #     - base
-  #   ports:
-  #     - 6384:6384
-  #   sysctls:
-  #     net.core.somaxconn: 1024
+  base_with_stunnel:
+    image: dweomer/stunnel
+    environment:
+      - STUNNEL_SERVICE=base
+      - STUNNEL_ACCEPT=6384
+      - STUNNEL_CONNECT=base:6379
+    links:
+      - base
+    ports:
+      - 6384:6384
+    sysctls:
+      net.core.somaxconn: 1024
