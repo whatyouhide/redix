@@ -60,6 +60,7 @@ defmodule Redix.SentinelTest do
     assert %Redix.ConnectionError{reason: :no_viable_sentinel_connection} = error
   end
 
+  @tag :skip
   test "sentinel supports password", %{sentinel_config: sentinel_config} do
     sentinel_config =
       Keyword.merge(sentinel_config,
