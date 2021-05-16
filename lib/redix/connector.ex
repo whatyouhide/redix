@@ -124,6 +124,7 @@ defmodule Redix.Connector do
         _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end)
 
         with :ok <- maybe_auth(transport, sent_socket, sentinel, sentinel_opts[:timeout]),
+             _ = Logger.debug("Authenticated to sentinel #{inspect(sentinel)}"),
              {:ok, {server_host, server_port}} <-
                ask_sentinel_for_server(transport, sent_socket, sentinel_opts),
              _ =
@@ -136,6 +137,10 @@ defmodule Redix.Connector do
                  String.to_integer(server_port),
                  opts
                ),
+             _ =
+               Logger.debug(fn ->
+                 "Established connection to #{sentinel_opts[:role]} #{server_host}:#{server_port}"
+               end),
              :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
           :ok = transport.close(sent_socket)
           {:ok, server_socket, "#{server_host}:#{server_port}"}
