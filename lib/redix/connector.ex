@@ -148,6 +148,11 @@ defmodule Redix.Connector do
               sentinel_address: format_host(sentinel)
             })
 
+            _ =
+              Logger.debug(fn ->
+                "Failed to connect to sentinel #{inspect(sentinel)}: #{inspect(reason)}"
+              end)
+
             :ok = transport.close(sent_socket)
             connect_through_sentinel(rest, sentinel_opts, opts, transport, conn_pid)
         end
