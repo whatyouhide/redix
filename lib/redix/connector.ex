@@ -150,7 +150,7 @@ defmodule Redix.Connector do
 
             _ =
               Logger.debug(fn ->
-                "Failed to connect to sentinel #{inspect(sentinel)}: #{inspect(reason)}"
+                "Failed to negotiate with sentinel #{inspect(sentinel)}: #{inspect(reason)}"
               end)
 
             :ok = transport.close(sent_socket)
@@ -158,6 +158,11 @@ defmodule Redix.Connector do
         end
 
       {:error, reason} ->
+        _ =
+          Logger.debug(fn ->
+            "Failed to connect to sentinel #{inspect(sentinel)}: #{inspect(reason)}"
+          end)
+
         :telemetry.execute([:redix, :failed_connection], %{}, %{
           connection: conn_pid,
           connection_name: opts[:name],
