@@ -66,3 +66,7 @@ jobs:
       - name: Run tests with coverage
         run: mix coveralls.github
         if: ${{matrix.coverage}}
+
+      - name: Dump Docker logs on failure
+        uses: jwalton/gh-docker-logs@v1
+        if: failure()

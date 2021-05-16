@@ -1,4 +1,4 @@
-FROM redis:alpine
+FROM redis:5.0.1-alpine
 
 COPY ./sentinel.conf sentinel1.conf
 COPY ./sentinel.conf sentinel2.conf
