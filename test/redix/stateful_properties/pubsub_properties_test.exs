@@ -10,12 +10,13 @@ defmodule Redix.PubSubPropertiesTest do
   defstruct [:channels, :ref]
 
   defmodule PubSub do
-    @opts [
-      name: __MODULE__,
-      backoff_initial: 0
-    ]
-
-    def start_link(), do: Redix.PubSub.start_link(@opts)
+    def start_link() do
+      Redix.PubSub.start_link(
+        name: __MODULE__,
+        backoff_initial: 0,
+        sync_connect: true
+      )
+    end
 
     def subscribe(channel) do
       {:ok, ref} = Redix.PubSub.subscribe(__MODULE__, channel, self())
@@ -28,7 +29,7 @@ defmodule Redix.PubSubPropertiesTest do
   end
 
   defmodule ControlConn do
-    def start_link(), do: Redix.start_link(name: __MODULE__)
+    def start_link(), do: Redix.start_link(name: __MODULE__, sync_connect: true)
 
     def subscribed_channels(), do: MapSet.new(Redix.command!(__MODULE__, ["PUBSUB", "CHANNELS"]))
 
@@ -41,7 +42,7 @@ defmodule Redix.PubSubPropertiesTest do
 
   property "subscribing and unsubscribing from channels", [:verbose] do
     numtests(
-      200,
+      50,
       forall cmds <- commands(__MODULE__) do
         trap_exit do
           {:ok, _} = PubSub.start_link()
@@ -109,7 +110,14 @@ defmodule Redix.PubSubPropertiesTest do
 
     assert_receive {:redix_pubsub, _pid, ^ref, :unsubscribed, %{channel: ^channel}}
     assert result == :ok
-    MapSet.delete(state.channels, channel) == ControlConn.subscribed_channels()
+
+    # Redix.PubSub sends the confirmation message to the caller process *before* it sends
+    # the UNSUBSCRIBE command to Redis, because it will eventually unsubscribe anyways.
+    # If we call ControlConn.subscribed_channels() (which calls to Redis) right away,
+    # the channel will still be in there. That's why we wait for a bit until this passes.
+    wait_for_true(_timeout = 200, fn ->
+      MapSet.delete(state.channels, channel) == ControlConn.subscribed_channels()
+    end)
   end
 
   def postcondition(state, {:call, ControlConn, :publish, [channel, message]}, _result) do
@@ -153,5 +161,19 @@ defmodule Redix.PubSubPropertiesTest do
 
   defp channel do
     oneof(["foo", "bar", "baz"])
+  end
+
+  defp wait_for_true(timeout, fun) do
+    cond do
+      timeout < 0 ->
+        fun.()
+
+      fun.() ->
+        true
+
+      true ->
+        Process.sleep(10)
+        wait_for_true(timeout - 10, fun)
+    end
   end
 end

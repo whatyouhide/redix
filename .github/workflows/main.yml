@@ -60,9 +60,9 @@ jobs:
         run: docker-compose up --detach
 
       - name: Run tests
-        run: mix test --trace --exclude propcheck
+        run: mix test --trace
         if: ${{!matrix.coverage}}
 
       - name: Run tests with coverage
-        run: mix coveralls.github --exclude propcheck
+        run: mix coveralls.github
         if: ${{matrix.coverage}}
