@@ -1,6 +1,6 @@
 ExUnit.start(assert_receive_timeout: 500)
 
-Logger.configure(level: :info)
+Logger.configure(level: :debug)
 
 case :gen_tcp.connect('localhost', 6379, []) do
   {:ok, socket} ->
