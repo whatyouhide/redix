@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.2
+
+Version v1.1.1 was accidentally published with local code (from the maintainer's machine) in it instead of the code from the main Git branch. We're all humans! Version v1.1.1 has been retired.
+
 ## v1.1.1
 
 ### Bug fixes and improvements
