@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.3
+
+### Bug fixes and improvements
+
+  * The `.formatter.exs` file included in this repo had some filesystem permission problems. This version fixes those.
+
 ## v1.1.2
 
 Version v1.1.1 was accidentally published with local code (from the maintainer's machine) in it instead of the code from the main Git branch. We're all humans! Version v1.1.1 has been retired.
