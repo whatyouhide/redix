@@ -28,7 +28,7 @@ Add the `:redix` dependency to your `mix.exs` file. If you plan on connecting to
 ```elixir
 defp deps() do
   [
-    {:redix, ">= 0.0.0"},
+    {:redix, "~> 1.1"},
     {:castore, ">= 0.0.0"}
   ]
 end
