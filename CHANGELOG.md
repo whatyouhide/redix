@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.1.4
+
+### Bug fixes and improvements
+
+  * Support version 1.0 and over for the Telemetry dependency.
+
 ## v1.1.3
 
 ### Bug fixes and improvements
