@@ -54,7 +54,7 @@ defmodule Redix.Mixfile do
 
   defp deps() do
     [
-      {:telemetry, "~> 0.4.0"},
+      {:telemetry, "~> 0.4.0 or ~> 1.0"},
       {:castore, "~> 0.1.0", optional: true},
 
       # Dev and test dependencies
