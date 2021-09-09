@@ -1,6 +1,7 @@
 ExUnit.start(assert_receive_timeout: 500)
 
 Logger.configure(level: :info)
+:logger.set_application_level(:telemetry, :none)
 
 case :gen_tcp.connect('localhost', 6379, []) do
   {:ok, socket} ->
