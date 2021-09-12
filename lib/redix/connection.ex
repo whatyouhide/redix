@@ -395,7 +395,10 @@ defmodule Redix.Connection do
     if opts[:sentinel] do
       "sentinel"
     else
-      "#{opts[:host]}:#{opts[:port]}"
+      case opts[:host] do
+        {:local, path} -> path
+        host -> "#{host}:#{opts[:port]}"
+      end
     end
   end
 end
