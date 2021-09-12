@@ -33,7 +33,10 @@ defmodule Redix.Connector do
     with {:ok, socket} <- transport.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(transport, socket) do
       case auth_and_select(transport, socket, opts, timeout) do
-        :ok -> {:ok, socket, "#{host}:#{port}"}
+        :ok -> case host do
+          {:local, unix_socket_path} -> {:ok, socket, unix_socket_path}
+          host -> {:ok, socket, "#{host}:#{port}"}
+        end
         {:error, reason} -> {:stop, reason}
       end
     end
