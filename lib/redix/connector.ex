@@ -5,7 +5,7 @@ defmodule Redix.Connector do
   @default_timeout 5000
   @default_ssl_opts [verify: :verify_peer, depth: 3]
 
-  alias Redix.ConnectionError
+  alias Redix.{ConnectionError, Format}
 
   require Logger
 
@@ -33,7 +33,7 @@ defmodule Redix.Connector do
     with {:ok, socket} <- transport.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(transport, socket) do
       case auth_and_select(transport, socket, opts, timeout) do
-        :ok -> {:ok, socket, "#{host}:#{port}"}
+        :ok -> {:ok, socket, Format.format_host_and_port(host, port)}
         {:error, reason} -> {:stop, reason}
       end
     end
@@ -145,7 +145,7 @@ defmodule Redix.Connector do
               connection: conn_pid,
               connection_name: opts[:name],
               reason: %ConnectionError{reason: reason},
-              sentinel_address: format_host(sentinel)
+              sentinel_address: Format.format_host_and_port(sentinel[:host], sentinel[:port])
             })
 
             :ok = transport.close(sent_socket)
@@ -157,7 +157,7 @@ defmodule Redix.Connector do
           connection: conn_pid,
           connection_name: opts[:name],
           reason: %ConnectionError{reason: reason},
-          sentinel_address: format_host(sentinel)
+          sentinel_address: Format.format_host_and_port(sentinel[:host], sentinel[:port])
         })
 
         connect_through_sentinel(rest, sentinel_opts, opts, transport, conn_pid)
@@ -217,12 +217,6 @@ defmodule Redix.Connector do
       {:ok, [role | _]} -> {:error, {:wrong_role, role}}
       {:error, _reason_or_redis_error} = error -> error
     end
-  end
-
-  defp format_host(opts) when is_list(opts) do
-    host = Keyword.fetch!(opts, :host)
-    port = Keyword.fetch!(opts, :port)
-    "#{host}:#{port}"
   end
 
   defp build_socket_opts(:gen_tcp, user_socket_opts) do
