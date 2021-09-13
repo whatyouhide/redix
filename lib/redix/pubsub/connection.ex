@@ -3,7 +3,7 @@ defmodule Redix.PubSub.Connection do
 
   @behaviour :gen_statem
 
-  alias Redix.{ConnectionError, Connector, Protocol}
+  alias Redix.{ConnectionError, Connector, Format, Protocol}
 
   defstruct [
     :opts,
@@ -615,7 +615,7 @@ defmodule Redix.PubSub.Connection do
     if opts[:sentinel] do
       "sentinel"
     else
-      "#{opts[:host]}:#{opts[:port]}"
+      Format.format_host_and_port(opts[:host], opts[:port])
     end
   end
 end

@@ -1,7 +1,7 @@
 defmodule Redix.Connection do
   @moduledoc false
 
-  alias Redix.{ConnectionError, Protocol, SocketOwner, StartOptions}
+  alias Redix.{ConnectionError, Format, Protocol, SocketOwner, StartOptions}
 
   @behaviour :gen_statem
 
@@ -395,7 +395,7 @@ defmodule Redix.Connection do
     if opts[:sentinel] do
       "sentinel"
     else
-      "#{opts[:host]}:#{opts[:port]}"
+      Format.format_host_and_port(opts[:host], opts[:port])
     end
   end
 end
