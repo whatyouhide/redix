@@ -1,7 +1,7 @@
 defmodule RedixTest do
   use ExUnit.Case, async: true
 
-  import ExUnit.{CaptureIO, CaptureLog}
+  import ExUnit.CaptureLog
 
   alias Redix.{
     ConnectionError,
@@ -99,8 +99,8 @@ defmodule RedixTest do
     end
 
     test "specifying a user/password when Redis version is < 6.0.0 (no ACL support)" do
-      output =
-        capture_io(:stderr, fn ->
+      log_output =
+        capture_log(fn ->
           # We warn but fall back to ignoring the username.
           {:ok, pid} =
             Redix.start_link(
@@ -113,7 +113,7 @@ defmodule RedixTest do
           assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
         end)
 
-      assert output =~ "a username was provided to connect to Redis"
+      assert log_output =~ "a username was provided to connect to Redis"
     end
 
     test "specifying a mfa password when a password is set" do
