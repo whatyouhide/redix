@@ -118,9 +118,14 @@ defmodule Redix.StartOptions do
     else
       {host, port} =
         case {Keyword.get(options, :host, "localhost"), Keyword.fetch(options, :port)} do
-          {{:local, _unix_socket_path}, {:ok, port}} when port != 0 ->
+          {{:local, _unix_socket_path} = host, {:ok, 0}} ->
+            {host, 0}
+
+          {{:local, _unix_socket_path}, {:ok, non_zero_port}} ->
             raise ArgumentError,
-                  "when using Unix domain sockets, the port must be 0, got: #{inspect(port)}"
+                  "when using Unix domain sockets, the port must be 0, got: #{
+                    inspect(non_zero_port)
+                  }"
 
           {{:local, _unix_socket_path} = host, :error} ->
             {host, 0}
