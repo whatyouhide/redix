@@ -122,6 +122,9 @@ defmodule Redix.StartOptions do
             raise ArgumentError,
                   "when using Unix domain sockets, the port must be 0, got: #{inspect(port)}"
 
+          {{:local, _unix_socket_path} = host, {:ok, 0}} ->
+            {host, 0}
+
           {{:local, _unix_socket_path} = host, :error} ->
             {host, 0}
 

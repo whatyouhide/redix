@@ -34,6 +34,9 @@ defmodule Redix.StartOptionsTest do
       opts = StartOptions.sanitize(host: {:local, "some_path"})
       assert opts[:port] == 0
 
+      opts = StartOptions.sanitize(host: {:local, "some_path"}, port: 0)
+      assert opts[:port] == 0
+
       assert_raise ArgumentError, ~r/when using Unix domain sockets, the port must be 0/, fn ->
         StartOptions.sanitize(host: {:local, "some_path"}, port: 1)
       end
