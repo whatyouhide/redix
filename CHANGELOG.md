@@ -20,7 +20,7 @@ Version v1.1.1 was accidentally published with local code (from the maintainer's
 
 ### Bug fixes and improvements
 
-  * Version v1.1.0 started using ACLs and issuing `AUTH <username> <password>` when a username was provided (either via options or via URI). This broke previous documented behavior, where Redix used to ignore usernames. With this bug fix, Redix now falls back to `AUTH <password>` if `AUTH <username> <password>` fails because of the wrong number of arguments, which indicates a version of Redis earlier than verison 6 (when ACLs were introduced).
+  * Version v1.1.0 started using ACLs and issuing `AUTH <username> <password>` when a username was provided (either via options or via URI). This broke previous documented behavior, where Redix used to ignore usernames. With this bug fix, Redix now falls back to `AUTH <password>` if `AUTH <username> <password>` fails because of the wrong number of arguments, which indicates a version of Redis earlier than version 6 (when ACLs were introduced).
 
 ## v1.1.0
 
@@ -57,7 +57,7 @@ No bug fixes or improvements. Just enough years passed for this to become 1.0.0!
 
   * Add the `:connection_metadata` name to all connection/disconnection-related Telemetry events.
   * Allow a `{module, function, arguments}` tuple as the value of the `:password` start option. This is useful to avoid password leaks in case of process crashes (and crash reports).
-  * Bump minumum Elixir requirement to Elixir `~> 1.7`.
+  * Bump minimum Elixir requirement to Elixir `~> 1.7`.
 
 ## v0.10.7
 
@@ -144,7 +144,7 @@ No bug fixes or improvements. Just enough years passed for this to become 1.0.0!
 
   * Add support for Redis Sentinel.
 
-  * Don't raise `Redix.Error` errors on non-bang variants of functions. This means that for example `Redix.command/3` won't raise a `Redix.Error` exception in case of Redis errors (like wront typing) and will return that error instead. In general, if you're pattern matching on `{:error, _}` to handle **connection errors** (for example, to retry after a while), now specifically match on `{:error, %Redix.ConnectionError{}}`. If you want to handle all possible errors the same way, keep matching on `{:error, _}`.
+  * Don't raise `Redix.Error` errors on non-bang variants of functions. This means that for example `Redix.command/3` won't raise a `Redix.Error` exception in case of Redis errors (like wrong typing) and will return that error instead. In general, if you're pattern matching on `{:error, _}` to handle **connection errors** (for example, to retry after a while), now specifically match on `{:error, %Redix.ConnectionError{}}`. If you want to handle all possible errors the same way, keep matching on `{:error, _}`.
 
 ### Bug fixes and improvements
 
@@ -277,7 +277,7 @@ No bug fixes or improvements. Just enough years passed for this to become 1.0.0!
 
 ## v0.3.1
 
-  * Restructure the Redix architecture to use two Elixir processes per connection instead of one (a process that packs commands and sends them on the socket and a process that listens from the socket and replies to waiting clients); this should speed up Redix when it comes to multiple clients concurrently issueing requests to Redis.
+  * Restructure the Redix architecture to use two Elixir processes per connection instead of one (a process that packs commands and sends them on the socket and a process that listens from the socket and replies to waiting clients); this should speed up Redix when it comes to multiple clients concurrently issuing requests to Redis.
 
 ## v0.3.0
 

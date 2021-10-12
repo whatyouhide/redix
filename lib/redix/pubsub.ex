@@ -11,7 +11,7 @@ defmodule Redix.PubSub do
 
   ## Usage
 
-  Each `Redix.PubSub` process is able to subcribe to/unsubscribe from multiple
+  Each `Redix.PubSub` process is able to subscribe to/unsubscribe from multiple
   Redis channels/patterns, and is able to handle multiple Elixir processes subscribing
   each to different channels/patterns.
 
