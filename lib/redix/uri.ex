@@ -39,7 +39,7 @@ defmodule Redix.URI do
     end
   end
 
-  defp database(%URI{path: path}) when path in [nil, "/"] do
+  defp database(%URI{path: path}) when path in [nil, "", "/"] do
     nil
   end
 
