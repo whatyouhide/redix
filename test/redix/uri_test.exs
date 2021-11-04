@@ -55,6 +55,11 @@ defmodule Redix.URITest do
     assert opts[:host] == "localhost"
     assert is_nil(opts[:database])
 
+    # test without a trailing slash
+    opts = opts_from_uri("redis://localhost")
+    assert opts[:host] == "localhost"
+    assert is_nil(opts[:database])
+
     opts = opts_from_uri("redis://localhost/2/namespace")
     assert opts[:host] == "localhost"
     assert opts[:database] == 2
