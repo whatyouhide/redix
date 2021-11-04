@@ -123,9 +123,7 @@ defmodule Redix.StartOptions do
 
           {{:local, _unix_socket_path}, {:ok, non_zero_port}} ->
             raise ArgumentError,
-                  "when using Unix domain sockets, the port must be 0, got: #{
-                    inspect(non_zero_port)
-                  }"
+                  "when using Unix domain sockets, the port must be 0, got: #{inspect(non_zero_port)}"
 
           {{:local, _unix_socket_path} = host, :error} ->
             {host, 0}
