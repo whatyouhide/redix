@@ -1,5 +1,14 @@
 # Changelog
 
+## v1.1.5
+
+### Bug fixes and improvements
+
+  * Fix formatting of Unix domain sockets when logging
+  * Use `Logger` instead of `IO.warn/2` when warning about ACLs, so that it can be silenced more easily.
+  * Allow the `:port` option to be set explicitly to `0` when using Unix domain sockets
+  * Support empty string as database when using Redis URIs due to changes to how URIs are handled in Elixir
+
 ## v1.1.4
 
 ### Bug fixes and improvements
