@@ -800,7 +800,7 @@ defmodule RedixTest do
       :telemetry.detach(to_string(test_name))
     end
 
-    test "supports the :extra_telemetry_metadata option", %{conn: c} do
+    test "supports the :telemetry_options option", %{conn: c} do
       {test_name, _arity} = __ENV__.function
 
       parent = self()
@@ -819,18 +819,17 @@ defmodule RedixTest do
         :no_config
       )
 
-      assert {:ok, ["PONG"]} =
-               Redix.pipeline(c, [["PING"]], extra_telemetry_metadata: %{extra: 42})
+      assert {:ok, ["PONG"]} = Redix.pipeline(c, [["PING"]], telemetry_options: %{extra: 42})
 
       assert_receive {^ref, [:redix, :pipeline, :start], measurements, meta}
       assert is_integer(measurements.system_time)
       assert meta.commands == [["PING"]]
-      assert meta.extra == 42
+      assert meta.options == %{extra: 42}
 
       assert_receive {^ref, [:redix, :pipeline, :stop], measurements, meta}
       assert is_integer(measurements.duration) and measurements.duration > 0
       assert meta.commands == [["PING"]]
-      assert meta.extra == 42
+      assert meta.options == %{extra: 42}
 
       :telemetry.detach(to_string(test_name))
     end

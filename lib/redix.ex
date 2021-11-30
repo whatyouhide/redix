@@ -425,7 +425,7 @@ defmodule Redix do
       milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
       doesn't reply within this timeout, `{:error,
       %Redix.ConnectionError{reason: :timeout}}` is returned.
-    * `:extra_telemetry_metadata` - (map) extra metadata to add to the
+    * `:telemetry_options` - (map) extra metadata to add to the
       `[:redix, :pipeline, :start | :stop]` telemetry events
 
   ## Examples
@@ -731,7 +731,7 @@ defmodule Redix do
       conn,
       commands,
       opts[:timeout] || @default_timeout,
-      opts[:extra_telemetry_metadata] || %{}
+      opts[:telemetry_options]
     )
   end
 

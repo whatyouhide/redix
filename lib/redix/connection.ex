@@ -56,13 +56,12 @@ defmodule Redix.Connection do
     :gen_statem.stop(conn, :normal, timeout)
   end
 
-  def pipeline(conn, commands, timeout, extra_metadata \\ %{}) do
+  def pipeline(conn, commands, timeout, telemetry_options \\ nil) do
     conn_pid = GenServer.whereis(conn)
 
     request_id = Process.monitor(conn_pid)
 
-    telemetry_metadata =
-      telemetry_pipeline_metadata(conn, conn_pid, commands) |> Map.merge(extra_metadata)
+    telemetry_metadata = telemetry_pipeline_metadata(conn, conn_pid, commands, telemetry_options)
 
     start_time = System.monotonic_time()
     :ok = execute_telemetry_pipeline_start(telemetry_metadata)
@@ -83,7 +82,7 @@ defmodule Redix.Connection do
     end
   end
 
-  defp telemetry_pipeline_metadata(conn, conn_pid, commands) do
+  defp telemetry_pipeline_metadata(conn, conn_pid, commands, telemetry_options) do
     name =
       if is_pid(conn) do
         nil
@@ -94,7 +93,8 @@ defmodule Redix.Connection do
     %{
       connection: conn_pid,
       connection_name: name,
-      commands: commands
+      commands: commands,
+      options: telemetry_options
     }
   end
 
