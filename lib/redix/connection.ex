@@ -94,7 +94,7 @@ defmodule Redix.Connection do
       connection: conn_pid,
       connection_name: name,
       commands: commands,
-      options: telemetry_metadata
+      extra_metadata: telemetry_metadata
     }
   end
 

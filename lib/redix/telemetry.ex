@@ -62,6 +62,8 @@ defmodule Redix.Telemetry do
       * `:commands` - the commands sent to the server. This is always a list of
         commands, so even if you do `Redix.command(conn, ["PING"])` then the
         list of commands will be `[["PING"]]`.
+      * `:extra_metadata` - any term set by users via the `:telemetry_metadata` option
+        in `Redix.pipeline/3` and other functions.
 
     * `[:redix, :pipeline, :stop]` - executed a response to a pipeline returns
       from the Redis server, regardless of whether it's an error response or a
@@ -80,6 +82,8 @@ defmodule Redix.Telemetry do
       * `:commands` - the commands sent to the server. This is always a list of
         commands, so even if you do `Redix.command(conn, ["PING"])` then the
         list of commands will be `[["PING"]]`.
+      * `:extra_metadata` - any term set by users via the `:telemetry_metadata` option
+        in `Redix.pipeline/3` and other functions.
 
       If the response is an error, the following metadata will also be present:
 

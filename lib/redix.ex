@@ -426,7 +426,8 @@ defmodule Redix do
       doesn't reply within this timeout, `{:error,
       %Redix.ConnectionError{reason: :timeout}}` is returned.
     * `:telemetry_metadata` - (map) extra metadata to add to the
-      `[:redix, :pipeline, :start | :stop]` telemetry events in `metadata[:options]`.
+      `[:redix, :pipeline, *]` Telemetry events. These end up in the `:extra_metadata`
+      metadata key of these events. See `Redix.Telemetry`.
 
   ## Examples
 
@@ -441,6 +442,10 @@ defmodule Redix do
       iex> {:error, error} = Redix.pipeline(conn, [["SET", "mykey", "foo"], ["GET", "mykey"]])
       iex> error.reason
       :closed
+
+  Extra Telemetry metadata:
+
+      iex> Redix.pipeline(conn, [["PING"]], telemetry_metadata: %{connection: "My conn"})
 
   """
   @spec pipeline(connection(), [command()], keyword()) ::
@@ -727,12 +732,29 @@ defmodule Redix do
   end
 
   defp pipeline_without_checks(conn, commands, opts) do
-    Redix.Connection.pipeline(
-      conn,
-      commands,
-      opts[:timeout] || @default_timeout,
-      opts[:telemetry_metadata] || %{}
-    )
+    timeout =
+      case Keyword.get(opts, :timeout, @default_timeout) do
+        int when is_integer(int) ->
+          int
+
+        :infinity ->
+          :infinity
+
+        other ->
+          raise ArgumentError,
+                "expected :timeout to be an integer of :infinity, got: #{inspect(other)}"
+      end
+
+    telemetry_metadata =
+      case Keyword.get(opts, :telemetry_metadata, %{}) do
+        %{} = map ->
+          map
+
+        other ->
+          raise ArgumentError, "expected :telemetry_metadata to be a map, got: #{inspect(other)}"
+      end
+
+    Redix.Connection.pipeline(conn, commands, timeout, telemetry_metadata)
   end
 
   defp assert_valid_pipeline_commands([] = _commands) do

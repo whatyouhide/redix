@@ -824,12 +824,12 @@ defmodule RedixTest do
       assert_receive {^ref, [:redix, :pipeline, :start], measurements, meta}
       assert is_integer(measurements.system_time)
       assert meta.commands == [["PING"]]
-      assert meta.options == %{extra: 42}
+      assert meta.extra_metadata == %{extra: 42}
 
       assert_receive {^ref, [:redix, :pipeline, :stop], measurements, meta}
       assert is_integer(measurements.duration) and measurements.duration > 0
       assert meta.commands == [["PING"]]
-      assert meta.options == %{extra: 42}
+      assert meta.extra_metadata == %{extra: 42}
 
       :telemetry.detach(to_string(test_name))
     end
