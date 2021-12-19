@@ -400,7 +400,8 @@ defmodule Redix.PubSub do
 
   """
   @spec subscribe(connection(), String.t() | [String.t()], subscriber) :: {:ok, reference()}
-  def subscribe(conn, channels, subscriber \\ self()) do
+  def subscribe(conn, channels, subscriber \\ self())
+      when is_binary(channels) or is_list(channels) do
     :gen_statem.call(conn, {:subscribe, List.wrap(channels), subscriber})
   end
 
@@ -428,7 +429,8 @@ defmodule Redix.PubSub do
 
   """
   @spec psubscribe(connection(), String.t() | [String.t()], subscriber) :: {:ok, reference}
-  def psubscribe(conn, patterns, subscriber \\ self()) do
+  def psubscribe(conn, patterns, subscriber \\ self())
+      when is_binary(patterns) or is_list(patterns) do
     :gen_statem.call(conn, {:psubscribe, List.wrap(patterns), subscriber})
   end
 
@@ -457,7 +459,8 @@ defmodule Redix.PubSub do
 
   """
   @spec unsubscribe(connection(), String.t() | [String.t()], subscriber) :: :ok
-  def unsubscribe(conn, channels, subscriber \\ self()) do
+  def unsubscribe(conn, channels, subscriber \\ self())
+      when is_binary(channels) or is_list(channels) do
     :gen_statem.call(conn, {:unsubscribe, List.wrap(channels), subscriber})
   end
 
@@ -485,7 +488,8 @@ defmodule Redix.PubSub do
 
   """
   @spec punsubscribe(connection(), String.t() | [String.t()], subscriber) :: :ok
-  def punsubscribe(conn, patterns, subscriber \\ self()) do
+  def punsubscribe(conn, patterns, subscriber \\ self())
+      when is_binary(patterns) or is_list(patterns) do
     :gen_statem.call(conn, {:punsubscribe, List.wrap(patterns), subscriber})
   end
 end

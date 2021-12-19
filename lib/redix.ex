@@ -451,7 +451,7 @@ defmodule Redix do
   @spec pipeline(connection(), [command()], keyword()) ::
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def pipeline(conn, commands, opts \\ []) do
+  def pipeline(conn, commands, opts \\ []) when is_list(opts) do
     assert_valid_pipeline_commands(commands)
     pipeline_without_checks(conn, commands, opts)
   end
@@ -519,7 +519,7 @@ defmodule Redix do
   @doc since: "0.8.0"
   @spec noreply_pipeline(connection(), [command()], keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def noreply_pipeline(conn, commands, opts \\ []) do
+  def noreply_pipeline(conn, commands, opts \\ []) when is_list(opts) do
     assert_valid_pipeline_commands(commands)
     commands = [["CLIENT", "REPLY", "OFF"]] ++ commands ++ [["CLIENT", "REPLY", "ON"]]
 
@@ -578,7 +578,7 @@ defmodule Redix do
   @spec command(connection(), command(), keyword()) ::
           {:ok, Redix.Protocol.redis_value()}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def command(conn, command, opts \\ []) do
+  def command(conn, command, opts \\ []) when is_list(opts) do
     case pipeline(conn, [command], opts) do
       {:ok, [%Redix.Error{} = error]} -> {:error, error}
       {:ok, [response]} -> {:ok, response}
@@ -643,7 +643,7 @@ defmodule Redix do
   @doc since: "0.8.0"
   @spec noreply_command(connection(), command(), keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def noreply_command(conn, command, opts \\ []) do
+  def noreply_command(conn, command, opts \\ []) when is_list(opts) do
     noreply_pipeline(conn, [command], opts)
   end
 
@@ -701,7 +701,7 @@ defmodule Redix do
   @spec transaction_pipeline(connection(), [command()], keyword()) ::
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def transaction_pipeline(conn, [_ | _] = commands, options \\ []) when is_list(commands) do
+  def transaction_pipeline(conn, [_ | _] = commands, options \\ []) when is_list(options) do
     with {:ok, responses} <- Redix.pipeline(conn, [["MULTI"]] ++ commands ++ [["EXEC"]], options),
          do: {:ok, List.last(responses)}
   end
