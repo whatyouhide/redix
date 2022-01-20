@@ -1,6 +1,7 @@
 # Redix
 
-[![Package on hex.pm](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/redix)
+[![hex.pm badge](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/redix)
+[![Documentation badge](https://img.shields.io/badge/Documentation-ff69b4)][docs]
 ![CI badge](https://github.com/whatyouhide/redix/workflows/CI/badge.svg)
 [![Coverage Status](https://coveralls.io/repos/github/whatyouhide/redix/badge.svg?branch=main)](https://coveralls.io/github/whatyouhide/redix?branch=main)
 
@@ -10,7 +11,7 @@
 
 Redix is a [Redis][redis] client written in pure Elixir with focus on speed, correctness, and resiliency (that is, being able to automatically reconnect to Redis in case of network errors).
 
-This README refers to the `master` branch of Redix, not the latest released version on Hex. Make sure to check [the documentation](http://hexdocs.pm/redix) for the version you're using.
+This README refers to the main branch of Redix, not the latest released version on Hex. Make sure to check [the documentation][docs] for the version you're using.
 
 ## Features
 
@@ -142,10 +143,9 @@ Now, you're ready to run tests with the `$ mix test` command.
 
 Redix is released under the MIT license. See the [license file](LICENSE.txt).
 
-
+[docs]: http://hexdocs.pm/redix
 [redis]: http://redis.io
 [redis-sentinel]: https://redis.io/topics/sentinel
-[redix-pubsub]: https://github.com/whatyouhide/redix_pubsub
 [castore]: https://github.com/ericmj/castore
 [docs-ssl]: https://hexdocs.pm/redix/Redix.html#module-ssl
 [docs-reconnections]: http://hexdocs.pm/redix/reconnections.html
