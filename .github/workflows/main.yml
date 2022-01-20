@@ -25,8 +25,13 @@ jobs:
     env:
       GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
       MIX_ENV: test
+
     steps:
-      - uses: actions/checkout@v2
+      - name: Clone the repository
+        uses: actions/checkout@v2
+
+      - name: Start Docker
+        run: docker-compose up --detach
 
       - name: Install OTP and Elixir
         uses: erlef/setup-elixir@v1
@@ -34,34 +39,40 @@ jobs:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
 
-      - name: Install dependencies
-        run: mix deps.get --only test
+      - name: Cache dependencies
+        id: cache-deps
+        uses: actions/cache@v2
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
 
-      - name: Run "mix format"
+      - name: Install and compile dependencies
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: |
+          mix deps.get --only test
+          mix deps.compile
+
+      - name: Check formatting
         run: mix format --check-formatted
-        if: ${{matrix.lint}}
+        if: ${{ matrix.lint }}
 
       - name: Check no unused dependencies
         run: mix deps.get && mix deps.unlock --check-unused
-        if: ${{matrix.lint}}
-
-      - name: Compile dependencies
-        run: mix deps.compile
+        if: ${{ matrix.lint }} && steps.cache-deps.outputs.cache-hit != 'true'
 
       - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
-        if: ${{matrix.lint}}
-
-      - name: Start Docker
-        run: docker-compose up --detach
+        if: ${{ matrix.lint }}
 
       - name: Run tests
-        run: mix test --trace
-        if: ${{!matrix.coverage}}
+        run: mix test --trace --exclude propcheck
+        if: ${{ !matrix.coverage }}
 
       - name: Run tests with coverage
         run: mix coveralls.github
-        if: ${{matrix.coverage}}
+        if: ${{ matrix.coverage }}
 
       - name: Dump Docker logs on failure
         uses: jwalton/gh-docker-logs@v1
