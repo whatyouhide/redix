@@ -60,7 +60,7 @@ jobs:
 
       - name: Check no unused dependencies
         run: mix deps.get && mix deps.unlock --check-unused
-        if: ${{ matrix.lint }} == 'true' && steps.cache-deps.outputs.cache-hit != 'true'
+        if: ${{ matrix.lint == 'true' && steps.cache-deps.outputs.cache-hit != 'true' }}
 
       - name: Compile with --warnings-as-errors
         run: mix compile --warnings-as-errors
