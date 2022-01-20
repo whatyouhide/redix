@@ -1,8 +1,8 @@
 # Redix
 
-![](https://github.com/whatyouhide/redix/workflows/CI/badge.svg)
+[![Package on hex.pm](https://img.shields.io/badge/Package%20on%20hex.pm-informational)](https://hex.pm/packages/redix)
+![CI badge](https://github.com/whatyouhide/redix/workflows/CI/badge.svg)
 [![Coverage Status](https://coveralls.io/repos/github/whatyouhide/redix/badge.svg?branch=main)](https://coveralls.io/github/whatyouhide/redix?branch=main)
-[![Hex.pm](https://img.shields.io/hexpm/v/redix.svg)](https://hex.pm/packages/redix)
 
 > Fast, pipelined, resilient Redis client for Elixir.
 
