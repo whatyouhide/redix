@@ -29,9 +29,6 @@ defmodule Redix do
 
   ## Sentinel
 
-  **Note**: support for Redis Sentinel **is still experimental**. It works, but the API might
-  change a little bit and the design might be revisited.
-
   Redix supports [Redis Sentinel](https://redis.io/topics/sentinel) by passing a `:sentinel`
   option to `start_link/1` (or `start_link/2`) instead of `:host` and `:port`. In `:sentinel`,
   you'll specify a list of sentinel nodes to try when connecting and the name of a primary group
