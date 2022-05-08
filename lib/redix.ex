@@ -73,9 +73,11 @@ defmodule Redix do
   Skipping replies is useful to improve performance when you want to issue many commands
   but are not interested in the responses to those commands.
 
-  > ⚠️ Some servers may block `CLIENT` commands.
-  > For example, Google Memorystorage is [known to do so](https://cloud.google.com/memorystore/docs/redis/product-constraints).
-  > If this is the case, functions mentioned above won't work.
+  > ### Blocked `CLIENT` commands {: .warning}
+  >
+  > Some servers may block `CLIENT` commands. For example, Google Memorystorage is [does
+  > this](https://cloud.google.com/memorystore/docs/redis/product-constraints).
+  > If this is the case, the `noreply_*` functions mentioned above won't work.
 
   ## SSL
 

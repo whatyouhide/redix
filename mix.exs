@@ -66,7 +66,7 @@ defmodule Redix.Mixfile do
 
       # Dev and test dependencies
       {:dialyxir, "~> 1.0.0-rc.6", only: :dev, runtime: false},
-      {:ex_doc, "~> 0.19", only: :dev},
+      {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.14", only: :test},
       {:stream_data, "~> 0.4", only: [:dev, :test]}
     ] ++ maybe_propcheck
