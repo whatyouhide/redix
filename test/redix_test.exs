@@ -545,6 +545,36 @@ defmodule RedixTest do
         Redix.noreply_command!(conn, ["SET", "noreply_cmd_bang_mykey", "myvalue"], timeout: 0)
       end
     end
+
+    # Regression for https://github.com/whatyouhide/redix/issues/192
+    @tag :capture_log
+    test "throw a human-readable error when the server disabled CLIENT commands and users " <>
+           "of Redix ignore function results" do
+      {:ok, conn} = Redix.start_link(port: 6386)
+      Process.flag(:trap_exit, true)
+      key = Base.encode16(:crypto.strong_rand_bytes(6))
+
+      # Here we send a command with noreply. Redis returns an error here since CLIENT commands
+      # (issued under the hood) are disabled, but we are simulating a user ignoring the results
+      # of the noreply_command/2 calls. When issuing more normal commands, Redix has trouble
+      # finding the command in the ETS queue when popping the response and used to fail
+      # with a hard-to-understand error (see the issue linked above).
+      _ = Redix.noreply_command(conn, ["INCR", key])
+
+      assert {%RuntimeError{} = error, _stacktrace} = catch_exit(Redix.command!(conn, ["PING"]))
+
+      assert Exception.message(error) =~
+               "failed to find an original command in the commands queue"
+    end
+
+    # Regression for https://github.com/whatyouhide/redix/issues/192
+    test "return an error when the server disabled CLIENT commands" do
+      {:ok, conn} = Redix.start_link(port: 6386)
+      key = Base.encode16(:crypto.strong_rand_bytes(6))
+
+      assert {:error, %Redix.Error{} = error} = Redix.noreply_command(conn, ["INCR", key])
+      assert error.message =~ "unknown command `CLIENT`"
+    end
   end
 
   describe "timeouts and network errors" do

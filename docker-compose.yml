@@ -61,3 +61,10 @@ services:
       - 6384:6384
     sysctls:
       net.core.somaxconn: 1024
+
+  base_with_disallowed_client_command:
+    build: ./test/docker/base_with_disallowed_client_command
+    ports:
+      - "6386:6379"
+    sysctls:
+      net.core.somaxconn: 1024

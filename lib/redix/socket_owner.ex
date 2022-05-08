@@ -110,8 +110,21 @@ defmodule Redix.SocketOwner do
   end
 
   defp peek_element_in_queue(queue_table, index) do
-    first_key = :ets.first(queue_table)
-    :ets.lookup_element(queue_table, first_key, index)
+    case :ets.first(queue_table) do
+      :"$end_of_table" ->
+        # We can blow up here because there is nothing we can do.
+        # See https://github.com/whatyouhide/redix/issues/192
+        raise """
+        failed to find an original command in the commands queue. This can happen, for example, \
+        when the Redis server you are using does not support CLIENT commands. Redix issues \
+        CLIENT commands under the hood when you use noreply_pipeline/3 and other noreply_* \
+        functions. If that's not what you are doing, you might have found a bug in Redix: \
+        please open an issue! https://github.com/whatyouhide/redix/issues
+        """
+
+      first_key ->
+        :ets.lookup_element(queue_table, first_key, index)
+    end
   end
 
   defp take_first_in_queue(queue_table) do

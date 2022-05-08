@@ -523,9 +523,15 @@ defmodule Redix do
     assert_valid_pipeline_commands(commands)
     commands = [["CLIENT", "REPLY", "OFF"]] ++ commands ++ [["CLIENT", "REPLY", "ON"]]
 
-    # The "OK" response comes from the last "CLIENT REPLY ON".
-    with {:ok, ["OK"]} <- pipeline_without_checks(conn, commands, opts),
-         do: :ok
+    case pipeline_without_checks(conn, commands, opts) do
+      # The "OK" response comes from the last "CLIENT REPLY ON".
+      {:ok, ["OK"]} -> :ok
+      # This can happen if there's an error with the first "CLIENT REPLY OFF" command, like
+      # when the Redis server disabled CLIENT commands.
+      {:ok, [%Redix.Error{} = error]} -> {:error, error}
+      # Connection errors and such are bubbled up.
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @doc """
