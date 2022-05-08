@@ -7,7 +7,7 @@ defmodule Redix.TelemetryTest do
     test "attaches an handler that logs disconnections and reconnections" do
       Redix.Telemetry.attach_default_handler()
 
-      {:ok, conn} = Redix.start_link()
+      conn = start_supervised!(Redix)
 
       client_id = Redix.command!(conn, ["CLIENT", "ID"])
 
@@ -37,9 +37,9 @@ defmodule Redix.TelemetryTest do
 
       log =
         capture_log(fn ->
-          {:ok, _conn} = Redix.start_link("redis://localhost:9999")
+          start_supervised!({Redix, "redis://localhost:9999"})
           # Sleep just a bit to let it log the first failed connection message.
-          Process.sleep(50)
+          Process.sleep(100)
         end)
 
       assert log =~ ~r/Connection .* failed to connect to Redis at localhost:9999/
@@ -50,11 +50,12 @@ defmodule Redix.TelemetryTest do
 
       log =
         capture_log(fn ->
-          {:ok, _conn} =
-            Redix.start_link(sentinel: [sentinels: ["redis://localhost:9999"], group: "main"])
+          start_supervised!(
+            {Redix, sentinel: [sentinels: ["redis://localhost:9999"], group: "main"]}
+          )
 
           # Sleep just a bit to let it log the first failed connection message.
-          Process.sleep(50)
+          Process.sleep(100)
         end)
 
       assert log =~ ~r/Connection .* failed to connect to sentinel at localhost:9999/

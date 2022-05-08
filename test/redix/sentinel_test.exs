@@ -18,7 +18,7 @@ defmodule Redix.SentinelTest do
   end
 
   test "connection can select primary", %{sentinel_config: sentinel_config} do
-    {:ok, primary} = Redix.start_link(sentinel: sentinel_config, sync_connect: true)
+    primary = start_supervised!({Redix, sentinel: sentinel_config, sync_connect: true})
 
     assert Redix.command!(primary, ["PING"]) == "PONG"
     assert Redix.command!(primary, ["CONFIG", "GET", "port"]) == ["port", "6381"]
@@ -27,7 +27,9 @@ defmodule Redix.SentinelTest do
 
   test "connection can select replica", %{sentinel_config: sentinel_config} do
     sentinel_config = Keyword.put(sentinel_config, :role, :replica)
-    {:ok, replica} = Redix.start_link(sentinel: sentinel_config, sync_connect: true, timeout: 500)
+
+    replica =
+      start_supervised!({Redix, sentinel: sentinel_config, sync_connect: true, timeout: 500})
 
     assert Redix.command!(replica, ["PING"]) == "PONG"
     assert Redix.command!(replica, ["CONFIG", "GET", "port"]) == ["port", "6382"]
@@ -35,7 +37,7 @@ defmodule Redix.SentinelTest do
   end
 
   test "Redix.PubSub supports sentinel as well", %{sentinel_config: sentinel_config} do
-    {:ok, primary} = Redix.start_link(sentinel: sentinel_config, sync_connect: true)
+    primary = start_supervised!({Redix, sentinel: sentinel_config, sync_connect: true})
     {:ok, pubsub} = Redix.PubSub.start_link(sentinel: sentinel_config, sync_connect: true)
 
     {:ok, ref} = Redix.PubSub.subscribe(pubsub, "foo", self())
@@ -67,12 +69,10 @@ defmodule Redix.SentinelTest do
         sentinels: ["redis://localhost:26383"]
       )
 
-    assert {:ok, pid} =
-             Redix.start_link(
-               sentinel: sentinel_config,
-               password: "main-password",
-               sync_connect: true
-             )
+    pid =
+      start_supervised!(
+        {Redix, sentinel: sentinel_config, password: "main-password", sync_connect: true}
+      )
 
     assert Redix.command!(pid, ["PING"]) == "PONG"
   end
@@ -92,11 +92,12 @@ defmodule Redix.SentinelTest do
     :ok =
       :telemetry.attach(to_string(test_name), [:redix, :failed_connection], handler, :no_config)
 
-    assert {:ok, conn} =
-             Redix.start_link(
-               name: :failed_sentinel_telemetry_test,
-               sentinel: [group: "main", sentinels: ["redis://localhost:9999"]]
-             )
+    conn =
+      start_supervised!(
+        {Redix,
+         name: :failed_sentinel_telemetry_test,
+         sentinel: [group: "main", sentinels: ["redis://localhost:9999"]]}
+      )
 
     assert_receive {^ref, [:redix, :failed_connection], measurements, meta}
     assert measurements == %{}

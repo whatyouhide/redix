@@ -324,7 +324,10 @@ defmodule RedixTest do
       assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~W(PING), timeout: 0)
     end
 
-    test "Redix process crashes while waiting", %{conn: conn} do
+    test "Redix process crashes while waiting" do
+      # We manually start a connection without start_supervised/1 here.
+      {:ok, conn} = Redix.start_link()
+
       Process.flag(:trap_exit, true)
 
       pid =
@@ -550,7 +553,7 @@ defmodule RedixTest do
     @tag :capture_log
     test "throw a human-readable error when the server disabled CLIENT commands and users " <>
            "of Redix ignore function results" do
-      {:ok, conn} = Redix.start_link(port: 6386)
+      conn = start_supervised!({Redix, port: 6386})
       Process.flag(:trap_exit, true)
       key = Base.encode16(:crypto.strong_rand_bytes(6))
 
@@ -569,7 +572,7 @@ defmodule RedixTest do
 
     # Regression for https://github.com/whatyouhide/redix/issues/192
     test "return an error when the server disabled CLIENT commands" do
-      {:ok, conn} = Redix.start_link(port: 6386)
+      conn = start_supervised!({Redix, port: 6386})
       key = Base.encode16(:crypto.strong_rand_bytes(6))
 
       assert {:error, %Redix.Error{} = error} = Redix.noreply_command(conn, ["INCR", key])
@@ -865,8 +868,8 @@ defmodule RedixTest do
     end
   end
 
-  defp connect(_context) do
-    {:ok, conn} = Redix.start_link()
+  defp connect(context) do
+    conn = start_supervised!(Supervisor.child_spec(Redix, id: context.test))
     {:ok, %{conn: conn}}
   end
 end
