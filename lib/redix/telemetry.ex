@@ -130,7 +130,12 @@ defmodule Redix.Telemetry do
       [:redix, :failed_connection]
     ]
 
-    :telemetry.attach_many("redix-default-telemetry-handler", events, &handle_event/4, :no_config)
+    :telemetry.attach_many(
+      "redix-default-telemetry-handler",
+      events,
+      &__MODULE__.handle_event/4,
+      :no_config
+    )
   end
 
   # This function handles only log-related events (disconnections, reconnections, and so on).
