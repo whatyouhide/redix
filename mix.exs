@@ -46,7 +46,7 @@ defmodule Redix.Mixfile do
 
   defp package() do
     [
-      maintainers: ["Andrea Leopardi", "Aleksei Magusev"],
+      maintainers: ["Andrea Leopardi"],
       licenses: ["MIT"],
       links: %{"GitHub" => @repo_url}
     ]
