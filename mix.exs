@@ -65,7 +65,7 @@ defmodule Redix.Mixfile do
       {:castore, "~> 0.1.0", optional: true},
 
       # Dev and test dependencies
-      {:dialyxir, "~> 1.0.0-rc.6", only: :dev, runtime: false},
+      {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.14", only: :test},
       {:stream_data, "~> 0.4", only: [:dev, :test]}
