@@ -112,8 +112,6 @@ defmodule Redix do
   @type command() :: [String.Chars.t()]
   @type connection() :: GenServer.server()
 
-  @dialyzer {:nowarn_type}
-
   @default_timeout 5000
 
   @doc """
