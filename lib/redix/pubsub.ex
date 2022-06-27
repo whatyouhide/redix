@@ -178,7 +178,7 @@ defmodule Redix.PubSub do
   """
 
   @type subscriber() :: pid() | port() | atom() | {atom(), node()}
-  @type connection() :: :gen_statem.server_ref()
+  @type connection() :: GenServer.server()
 
   alias Redix.StartOptions
 
