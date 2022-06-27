@@ -112,6 +112,8 @@ defmodule Redix do
   @type command() :: [String.Chars.t()]
   @type connection() :: GenServer.server()
 
+  @dialyzer {:nowarn_type}
+
   @default_timeout 5000
 
   @doc """
@@ -303,7 +305,7 @@ defmodule Redix do
       {:ok, #PID<...>}
 
   """
-  @spec start_link(binary() | keyword()) :: :gen_statem.start_ret()
+  @spec start_link(binary() | keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri), do: start_link(uri, [])
@@ -319,7 +321,7 @@ defmodule Redix do
 
   In this example, port `6380` will be used.
   """
-  @spec start_link(binary(), keyword()) :: :gen_statem.start_ret()
+  @spec start_link(binary(), keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(uri, other_opts)
 
   def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do

@@ -306,7 +306,7 @@ defmodule Redix.PubSub do
       {:ok, #PID<...>}
 
   """
-  @spec start_link(String.t() | keyword()) :: :gen_statem.start_ret()
+  @spec start_link(String.t() | keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri) do
@@ -351,7 +351,7 @@ defmodule Redix.PubSub do
   For example, if `uri` is `redix://example1.com` but `opts` is `[host: "example2.com"]`, then
   `example2.com` will be used as the host when connecting.
   """
-  @spec start_link(String.t(), keyword()) :: :gen_statem.start_ret()
+  @spec start_link(String.t(), keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(uri, opts) when is_binary(uri) and is_list(opts) do
     uri |> Redix.URI.opts_from_uri() |> Keyword.merge(opts) |> start_link()
   end
