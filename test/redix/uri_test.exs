@@ -1,6 +1,8 @@
 defmodule Redix.URITest do
   use ExUnit.Case, async: true
 
+  doctest Redix.URI
+
   import Redix.URI
 
   test "opts_from_uri/1: invalid scheme" do
