@@ -1,6 +1,22 @@
 defmodule Redix.URI do
-  @moduledoc false
+  @moduledoc """
+  This module provides functions to work with a Redis URI.
+  """
 
+  @doc """
+  Returns opts from a Redis URI in the form:
+
+      redis://[username:password@]host[:port][/db]
+
+  ## Examples
+
+      iex> Redix.URI.opts_from_uri("redis://example.com")
+      [host: "example.com"]
+
+      iex> Redix.URI.opts_from_uri("rediss://username:password@example.com:5000/3")
+      [ssl: true, database: 3, password: "password", username: "username", port: 5000, host: "example.com"]
+
+  """
   @spec opts_from_uri(binary) :: Keyword.t()
   def opts_from_uri(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
