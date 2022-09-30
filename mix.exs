@@ -11,7 +11,7 @@ defmodule Redix.Mixfile do
     [
       app: :redix,
       version: @version,
-      elixir: "~> 1.8",
+      elixir: "~> 1.11",
       build_embedded: Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -53,13 +53,6 @@ defmodule Redix.Mixfile do
   end
 
   defp deps() do
-    maybe_propcheck =
-      if Version.match?(System.version(), "~> 1.11") do
-        [{:propcheck, "~> 1.1", only: :test}]
-      else
-        []
-      end
-
     [
       {:telemetry, "~> 0.4.0 or ~> 1.0"},
       {:castore, "~> 0.1.0", optional: true},
@@ -68,7 +61,8 @@ defmodule Redix.Mixfile do
       {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.14", only: :test},
+      {:propcheck, "~> 1.1", only: :test},
       {:stream_data, "~> 0.4", only: [:dev, :test]}
-    ] ++ maybe_propcheck
+    ]
   end
 end
