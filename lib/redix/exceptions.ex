@@ -61,7 +61,7 @@ defmodule Redix.ConnectionError do
 
   defp format_reason(reason) do
     case :inet.format_error(reason) do
-      'unknown POSIX error' -> inspect(reason)
+      ~c"unknown POSIX error" -> inspect(reason)
       message -> List.to_string(message)
     end
   end

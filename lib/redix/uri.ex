@@ -1,24 +1,29 @@
 defmodule Redix.URI do
   @moduledoc """
   This module provides functions to work with a Redis URI.
+
+  This is generally intended for library developers using Redix under the hood.
   """
 
   @doc """
-  Returns opts from a Redis URI in the form:
+  Returns start options from a Redis URI.
+
+  A **Redis URI** looks like this:
 
       redis://[username:password@]host[:port][/db]
 
   ## Examples
 
-      iex> Redix.URI.opts_from_uri("redis://example.com")
+      iex> Redix.URI.to_start_options("redis://example.com")
       [host: "example.com"]
 
-      iex> Redix.URI.opts_from_uri("rediss://username:password@example.com:5000/3")
+      iex> Redix.URI.to_start_options("rediss://username:password@example.com:5000/3")
       [ssl: true, database: 3, password: "password", username: "username", port: 5000, host: "example.com"]
 
   """
-  @spec opts_from_uri(binary) :: Keyword.t()
-  def opts_from_uri(uri) when is_binary(uri) do
+  @doc since: "1.2.0"
+  @spec to_start_options(binary()) :: Keyword.t()
+  def to_start_options(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
     unless scheme in ["redis", "rediss"] do

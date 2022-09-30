@@ -88,7 +88,7 @@ defmodule Redix.StartOptions do
   end
 
   defp normalize_sentinel_address(sentinel_uri, sentinel_opts) when is_binary(sentinel_uri) do
-    sentinel_uri |> Redix.URI.opts_from_uri() |> normalize_sentinel_address(sentinel_opts)
+    sentinel_uri |> Redix.URI.to_start_options() |> normalize_sentinel_address(sentinel_opts)
   end
 
   defp normalize_sentinel_address(opts, sentinel_opts) when is_list(opts) do
