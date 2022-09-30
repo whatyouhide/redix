@@ -310,7 +310,7 @@ defmodule Redix.PubSub do
   def start_link(uri_or_opts \\ [])
 
   def start_link(uri) when is_binary(uri) do
-    uri |> Redix.URI.opts_from_uri() |> start_link()
+    uri |> Redix.URI.to_start_options() |> start_link()
   end
 
   def start_link(opts) when is_list(opts) do
@@ -353,7 +353,7 @@ defmodule Redix.PubSub do
   """
   @spec start_link(String.t(), keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
   def start_link(uri, opts) when is_binary(uri) and is_list(opts) do
-    uri |> Redix.URI.opts_from_uri() |> Keyword.merge(opts) |> start_link()
+    uri |> Redix.URI.to_start_options() |> Keyword.merge(opts) |> start_link()
   end
 
   @doc """

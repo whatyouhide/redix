@@ -323,7 +323,7 @@ defmodule Redix do
   def start_link(uri, other_opts)
 
   def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
-    opts = Redix.URI.opts_from_uri(uri)
+    opts = Redix.URI.to_start_options(uri)
     start_link(Keyword.merge(opts, other_opts))
   end
 

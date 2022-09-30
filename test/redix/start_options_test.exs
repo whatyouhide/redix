@@ -7,7 +7,7 @@ defmodule Redix.StartOptionsTest do
     test "fills in defaults" do
       opts = StartOptions.sanitize(host: "foo.com", backoff_max: 0, sync_connect: true)
 
-      assert opts[:host] == 'foo.com'
+      assert opts[:host] == ~c"foo.com"
       assert opts[:backoff_max] == 0
       assert opts[:sync_connect] == true
     end
@@ -28,7 +28,7 @@ defmodule Redix.StartOptionsTest do
 
     test "host and port are filled in based on Unix sockets" do
       opts = StartOptions.sanitize([])
-      assert opts[:host] == 'localhost'
+      assert opts[:host] == ~c"localhost"
       assert opts[:port] == 6379
 
       opts = StartOptions.sanitize(host: {:local, "some_path"})
@@ -47,7 +47,7 @@ defmodule Redix.StartOptionsTest do
         StartOptions.sanitize(sentinel: [sentinels: ["redis://localhost:26379"], group: "foo"])
 
       assert [sentinel] = opts[:sentinel][:sentinels]
-      assert sentinel[:host] == 'localhost'
+      assert sentinel[:host] == ~c"localhost"
       assert sentinel[:port] == 26379
 
       assert opts[:sentinel][:group] == "foo"
