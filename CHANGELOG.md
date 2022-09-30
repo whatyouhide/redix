@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.2.0
+
+### New features
+
+  * Add `:telemetry_metadata` option to Redis calls. This can be used to provide custom metadata for Telemetry events.
+  * Mark **Redis sentinel** support as *not*-experimental anymore.
+  * Make `Redix.URI` part of the public API.
+
+### Bug fixes and improvements
+
+  * Handle Redis servers that disable the `CLIENT` command.
+  * Bump Elixir requirement to 1.11+.
+
 ## v1.1.5
 
 ### Bug fixes and improvements
