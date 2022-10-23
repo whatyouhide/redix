@@ -48,7 +48,7 @@ defmodule Redix.Mixfile do
     [
       maintainers: ["Andrea Leopardi"],
       licenses: ["MIT"],
-      links: %{"GitHub" => @repo_url}
+      links: %{"GitHub" => @repo_url, "Sponsor" => "https://github.com/sponsors/whatyouhide"}
     ]
   end
 
