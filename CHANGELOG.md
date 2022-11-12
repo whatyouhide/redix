@@ -12,6 +12,7 @@
 
   * Handle Redis servers that disable the `CLIENT` command.
   * Bump Elixir requirement to 1.11+.
+  * Raise an error if the `:timeout` option (supported by many of the function in the `Redix` module) is something other than a non-negative integer or `:infinity`. Before, `timeout: nil` was accidentally supported (but not documented) and would use a default timeout.
 
 ## v1.1.5
 
