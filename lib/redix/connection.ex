@@ -143,7 +143,8 @@ defmodule Redix.Connection do
           :telemetry.execute([:redix, :connection], %{}, %{
             connection: self(),
             connection_name: data.opts[:name],
-            address: address
+            address: address,
+            reconnection: false
           })
 
           {:ok, :connected, %__MODULE__{data | socket: socket, connected_address: address}}
