@@ -7,7 +7,7 @@
 
 > Fast, pipelined, resilient Redis client for Elixir.
 
-![Cover image](http://i.imgur.com/ZG2RXsb.png)
+![dalle](https://user-images.githubusercontent.com/3890250/208236010-a89acc2a-ac79-44ca-9413-c1fa7c664ffe.jpg)
 
 Redix is a [Redis][redis] client written in pure Elixir with focus on speed, correctness, and resiliency (that is, being able to automatically reconnect to Redis in case of network errors).
 
