@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.1
+
+### Bug fixes and improvements
+
+  * Relaxed the version requirement for the `:castore` dependency to support `~> 1.0`.
+
 ## v1.2.0
 
 ### New features
