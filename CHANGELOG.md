@@ -80,7 +80,7 @@ No bug fixes or improvements. Just enough years passed for this to become 1.0.0!
 
   * Use the new Telemetry event conventions for pipeline-related events. The new events are `[:redix, :pipeline, :start]` and `[:redix, :pipeline, :stop]`. They both have new measurements associated with them.
   * Remove the `[:redix, :reconnection]` Telemetry event in favor or `[:redix, :connection]`, which is emitted anytime there's a successful connection to a Redis server.
-  * Remove support for the deprecated ``:log` start option (which was deprecated on v0.10.0).
+  * Remove support for the deprecated `:log` start option (which was deprecated on v0.10.0).
 
 ### Bug fixes and improvements
 
