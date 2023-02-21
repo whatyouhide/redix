@@ -3,6 +3,8 @@ defmodule Redix.Connection do
 
   alias Redix.{ConnectionError, Format, Protocol, SocketOwner, StartOptions}
 
+  require Logger
+
   @behaviour :gen_statem
 
   defstruct [
@@ -305,6 +307,7 @@ defmodule Redix.Connection do
   end
 
   defp disconnect(_data, %Redix.Error{} = error) do
+    Logger.error("Disconnected from Redis due to error: #{Exception.message(error)}")
     {:stop, error}
   end
 

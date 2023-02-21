@@ -39,15 +39,19 @@ defmodule RedixTest do
     end
 
     test "specifying a password when no password is set" do
-      capture_log(fn ->
-        Process.flag(:trap_exit, true)
-        {:ok, pid} = Redix.start_link(password: "foo")
+      log =
+        capture_log(fn ->
+          Process.flag(:trap_exit, true)
+          {:ok, pid} = Redix.start_link(password: "foo")
 
-        assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
+          assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
 
-        assert message =~ "ERR Client sent AUTH" or
-                 message =~ "ERR AUTH <password> called without any password"
-      end)
+          assert message =~ "ERR Client sent AUTH" or
+                   message =~ "ERR AUTH <password> called without any password"
+        end)
+
+      assert log =~ "ERR Client sent AUTH" or
+               log =~ "ERR AUTH <password> called without any password"
     end
 
     test "specifying an invalid user/password when ACL is set" do
