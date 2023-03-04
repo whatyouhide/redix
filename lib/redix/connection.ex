@@ -58,6 +58,8 @@ defmodule Redix.Connection do
     :gen_statem.stop(conn, :normal, timeout)
   end
 
+  # TODO: Once we depend on Elixir 1.15+ (which requires OTP 24+, which introduces process
+  # aliases), we can get rid of the extra work to support timeouts.
   def pipeline(conn, commands, timeout, telemetry_metadata) do
     conn_pid = GenServer.whereis(conn)
 
