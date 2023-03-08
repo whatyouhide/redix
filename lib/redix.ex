@@ -103,7 +103,6 @@ defmodule Redix do
 
   Redix uses Telemetry for instrumentation and logging. See `Redix.Telemetry`.
   """
-  alias Redix.StartOptions
 
   # This module is only a "wrapper" module that exposes the public API alongside
   # documentation for it. The real work is done in Redix.Connection and every
@@ -182,7 +181,7 @@ defmodule Redix do
 
   The following options can be used to specify the connection:
 
-  #{StartOptions.options_docs()}
+  #{Redix.StartOptions.options_docs()}
 
   ## Examples
 

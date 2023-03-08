@@ -277,10 +277,6 @@ defmodule Redix.StartOptions do
           {{:local, _unix_socket_path} = host, :error} ->
             {host, 0}
 
-          {_host, {:ok, port}} when not is_integer(port) ->
-            raise ArgumentError,
-                  "expected an integer as the value of the :port option, got: #{inspect(port)}"
-
           {host, {:ok, port}} when is_binary(host) ->
             {String.to_charlist(host), port}
 
