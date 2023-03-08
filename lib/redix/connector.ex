@@ -28,7 +28,7 @@ defmodule Redix.Connector do
   defp connect_directly(host, port, opts) do
     transport = if opts[:ssl], do: :ssl, else: :gen_tcp
     socket_opts = build_socket_opts(transport, opts[:socket_opts])
-    timeout = opts[:timeout] || @default_timeout
+    timeout = Keyword.fetch!(opts, :timeout)
 
     with {:ok, socket} <- transport.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(transport, socket) do

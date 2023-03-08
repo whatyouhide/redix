@@ -214,85 +214,9 @@ defmodule Redix.PubSub do
 
   ## Options
 
-  The following options can be used to specify the parameters used to connect to
-  Redis (instead of a URI as described above):
+  The following options can be used to specify the connection:
 
-    * `:host` - (string) the host where the Redis server is running. Defaults to
-      `"localhost"`.
-
-    * `:port` - (integer) the port on which the Redis server is
-      running. Defaults to `6379`.
-
-    * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
-      username is used. Redis supports usernames only since Redis 6 (see the [ACL
-      documentation](https://redis.io/topics/acl)). If a username is provided (either via
-      options or via URIs) and the Redis version used doesn't support ACL, then Redix falls
-      back to using just the password and emits a warning. In future Redix versions, Redix
-      will raise if a username is passed and the Redis version used doesn't support ACL.
-
-    * `:password` - (string) the password used to connect to Redis. Defaults to
-      `nil`, meaning no password is used. When this option is provided, all Redix
-      does is issue an `AUTH` command to Redis in order to authenticate. This can be used
-      to fetch the password dynamically on every reconnection but most importantly to
-      hide the password from crash reports in case the Redix connection crashes for
-      any reason. For example, you can use `password: {System, :fetch_env!, ["REDIX_PASSWORD"]}`.
-
-    * `:database` - (integer or string) the database to connect to. Defaults to
-      `nil`, meaning don't connect to any database (Redis connects to database
-      `0` by default). When this option is provided, all Redix does is issue a
-      `SELECT` command to Redis in order to select the given database.
-
-    * `:socket_opts` - (list of options) this option specifies a list of options
-      that are passed to `:gen_tcp.connect/4` when connecting to the Redis
-      server. Some socket options (like `:active` or `:binary`) will be
-      overridden by `Redix.PubSub` so that it functions properly. Defaults to
-      `[]`.
-
-    * `:sync_connect` - (boolean) decides whether Redix should initiate the TCP
-      connection to the Redis server *before* or *after* returning from
-      `start_link/2`. This option also changes some reconnection semantics; read
-      the ["Reconnections" page](http://hexdocs.pm/redix/reconnections.html) in
-      the docs for `Redix` for more information.
-
-    * `:backoff_initial` - (integer) the initial backoff time (in milliseconds),
-      which is the time that will be waited by the `Redix.PubSub` process before
-      attempting to reconnect to Redis after a disconnection or failed first
-      connection. See the ["Reconnections"
-      page](http://hexdocs.pm/redix/reconnections.html) in the docs for `Redix`
-      for more information.
-
-    * `:backoff_max` - (integer) the maximum length (in milliseconds) of the
-      time interval used between reconnection attempts. See the ["Reconnections"
-      page](http://hexdocs.pm/redix/reconnections.html) in the docs for `Redix`
-      for more information.
-
-    * `:exit_on_disconnection` - (boolean) if `true`, the Redix server will exit
-      if it fails to connect or disconnects from Redis. Note that setting this
-      option to `true` means that the `:backoff_initial` and `:backoff_max` options
-      will be ignored. Defaults to `false`.
-
-    * `:name` - Redix is bound to the same registration rules as a `GenServer`. See the
-      `GenServer` documentation for more information.
-
-    * `:ssl` - (boolean) if `true`, connect through SSL, otherwise through TCP. The
-      `:socket_opts` option applies to both SSL and TCP, so it can be used for things
-      like certificates. See `:ssl.connect/4`. Defaults to `false`.
-
-    * `:sentinel` - (list of options) exactly the same as the `:sentinel` options in
-      `Redix.start_link/1`.
-
-    * `:hibernate_after` - (integer) if present, the Redix connection process awaits any
-      message for the given number of milliseconds and if no message is received, the process
-      goes into hibernation automatically (by calling `:proc_lib.hibernate/3`). See
-      `t::gen_statem.start_opt/0`. Not present by default.
-
-    * `:spawn_opt` - (options) if present, its value is passed as options to the
-      Redix connection process as in `Process.spawn/4`. See `t::gen_statem.start_opt/0`.
-      Not present by default.
-
-    * `:debug` - (options) if present, the corresponding function in the
-      [`:sys` module](http://www.erlang.org/doc/man/sys.html) is invoked.
-      Not present by default.
+  #{StartOptions.options_docs()}
 
   ## Examples
 

@@ -32,6 +32,11 @@ defmodule Redix.ProtocolTest do
   describe "parse/1" do
     import Redix.Protocol, only: [parse: 1]
 
+    test "empty strings" do
+      assert {:continuation, fun} = parse("")
+      assert is_function(fun, 1)
+    end
+
     property "simple strings" do
       check all string <- string(:alphanumeric),
                 split_command <- random_splits("+#{string}\r\n"),
