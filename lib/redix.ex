@@ -103,6 +103,7 @@ defmodule Redix do
 
   Redix uses Telemetry for instrumentation and logging. See `Redix.Telemetry`.
   """
+  alias Redix.StartOptions
 
   # This module is only a "wrapper" module that exposes the public API alongside
   # documentation for it. The real work is done in Redix.Connection and every
@@ -160,136 +161,9 @@ defmodule Redix do
 
   ## Options
 
-  ### Redis options
+  The following options can be used to specify the connection:
 
-  The following options can be used to specify the parameters used to connect to
-  Redis (instead of a URI as described above):
-
-    * `:host` - (string) the host where the Redis server is running. Defaults to
-      `"localhost"`.
-
-    * `:port` - (positive integer) the port on which the Redis server is
-      running. Defaults to `6379`.
-
-    * `:username` - (string) the username to connect to Redis. Defaults to `nil`, meaning no
-      username is used. Redis supports usernames only since Redis 6 (see the [ACL
-      documentation](https://redis.io/topics/acl)). If a username is provided (either via
-      options or via URIs) and the Redis version used doesn't support ACL, then Redix falls
-      back to using just the password and emits a warning. In future Redix versions, Redix
-      will raise if a username is passed and the Redis version used doesn't support ACL.
-
-    * `:password` - (string or MFA) the password used to connect to Redis. Defaults to
-      `nil`, meaning no password is used. When this option is provided, all Redix
-      does is issue an `AUTH` command to Redis in order to authenticate. MFAs are also
-      supported in the form of `{module, function, arguments}`. This can be used
-      to fetch the password dynamically on every reconnection but most importantly to
-      hide the password from crash reports in case the Redix connection crashes for
-      any reason. For example, you can use `password: {System, :fetch_env!, ["REDIX_PASSWORD"]}`.
-
-    * `:database` - (non-negative integer or string) the database to connect to.
-      Defaults to `nil`, meaning Redix doesn't connect to a specific database (the
-      default in this case is database `0`). When this option is provided, all Redix
-      does is issue a `SELECT` command to Redis in order to select the given database.
-
-  ### Connection options
-
-  The following options can be used to tweak how the Redix connection behaves.
-
-    * `:socket_opts` - (list of options) this option specifies a list of options
-      that are passed to the network layer when connecting to the Redis
-      server. Some socket options (like `:active` or `:binary`) will be
-      overridden by Redix so that it functions properly.
-
-      Defaults to `[]` for TCP and `[verify: :verify_peer, depth: 3]` for SSL.
-      If the `CAStore` dependency is available, the `cacertfile` option is added
-      to the SSL options by default as well.
-
-    * `:timeout` - (integer) connection timeout (in milliseconds) also directly
-      passed to the network layer. Defaults to `5000`.
-
-    * `:sync_connect` - (boolean) decides whether Redix should initiate the TCP
-      connection to the Redis server *before* or *after* returning from
-      `start_link/1`. This option also changes some reconnection semantics; read
-      the "Reconnections" page in the docs.
-
-    * `:exit_on_disconnection` - (boolean) if `true`, the Redix server will exit
-      if it fails to connect or disconnects from Redis. Note that setting this
-      option to `true` means that the `:backoff_initial` and `:backoff_max` options
-      will be ignored. Defaults to `false`.
-
-    * `:backoff_initial` - (non-negative integer) the initial backoff time (in milliseconds),
-      which is the time that the Redix process will wait before
-      attempting to reconnect to Redis after a disconnection or failed first
-      connection. See the "Reconnections" page in the docs for more information.
-
-    * `:backoff_max` - (positive integer) the maximum length (in milliseconds) of the
-      time interval used between reconnection attempts. See the "Reconnections"
-      page in the docs for more information.
-
-    * `:name` - Redix is bound to the same registration rules as a `GenServer`. See the
-      `GenServer` documentation for more information.
-
-    * `:ssl` - (boolean) if `true`, connect through SSL, otherwise through TCP. The
-      `:socket_opts` option applies to both SSL and TCP, so it can be used for things
-      like certificates. See `:ssl.connect/4`. Defaults to `false`.
-
-    * `:sentinel` - (keyword list) options for using
-      [Redis Sentinel](https://redis.io/topics/sentinel). If this option is provided, then the
-      `:host` and `:port` option cannot be provided. For the available sentinel options, see the
-      "Sentinel options" section below.
-
-    * `:hibernate_after` - (integer) if present, the Redix connection process awaits any
-      message for the given number of milliseconds and if no message is received, the process
-      goes into hibernation automatically (by calling `:proc_lib.hibernate/3`). See
-      `t::gen_statem.start_opt/0`. Not present by default.
-
-    * `:spawn_opt` - (options) if present, its value is passed as options to the
-      Redix connection process as in `Process.spawn/4`. See `t::gen_statem.start_opt/0`.
-      Not present by default.
-
-    * `:debug` - (options) if present, the corresponding function in the
-      [`:sys` module](http://www.erlang.org/doc/man/sys.html) is invoked.
-      Not present by default.
-
-  ### Sentinel options
-
-  The following options can be used to configure the Redis Sentinel behaviour when connecting.
-  These options should be passed in the `:sentinel` key in the connection options. For more
-  information on support for Redis sentinel, see the `Redix` module documentation.
-
-    * `:sentinels` - (list) a list of sentinel addresses. Each element in this list is the address
-      of a sentinel to be contacted in order to obtain the address of a primary. The address of
-      a sentinel can be passed as a Redis URI (see the "Using a Redis URI" section above) or
-      a keyword list with `:host`, `:port`, `:password` options (same as when connecting to a
-      Redis instance directly). Note that the password can either be passed in the sentinel
-      address or globally -- see the `:password` option below. This option is required.
-
-    * `:group` - (binary) the name of the group that identifies the primary in the sentinel
-      configuration. This option is required.
-
-    * `:role` - (`:primary` or `:replica`) if `:primary`, the connection will be established
-      with the primary for the given group. If `:replica`, Redix will ask the sentinel for all
-      the available replicas for the given group and try to connect to one of them **at random**.
-      Defaults to `:primary`.
-
-    * `:socket_opts` - (list of options) the socket options that will be used when connecting to
-      the sentinels. Defaults to `[]`.
-
-    * `:ssl` - (boolean) if `true`, connect to the sentinels via through SSL, otherwise through
-      TCP. The `:socket_opts` applies to both TCP and SSL, so it can be used for things like
-      certificates. See `:ssl.connect/4`. Defaults to `false`.
-
-    * `:timeout` - (timeout) the timeout (in milliseconds or `:infinity`) that will be used to
-      interact with the sentinels. This timeout will be used as the timeout when connecting to
-      each sentinel and when asking sentinels for a primary. The Redis documentation suggests
-      to keep this timeout short so that connection to Redis can happen quickly.
-
-    * `:password` - (string) if you don't want to specify a password for each sentinel you
-      list, you can use this option to specify a password that will be used to authenticate
-      on sentinels if they don't specify a password. This option is recommended over passing
-      a password for each sentinel because in the future we might do sentinel auto-discovery,
-      which means authentication can only be done through a global password that works for all
-      sentinels.
+  #{StartOptions.options_docs()}
 
   ## Examples
 

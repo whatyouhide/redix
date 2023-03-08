@@ -57,6 +57,7 @@ defmodule Redix.Mixfile do
     [
       {:telemetry, "~> 0.4.0 or ~> 1.0"},
       {:castore, "~> 0.1.0 or ~> 1.0", optional: true},
+      {:nimble_options, "~> 0.5.0"},
 
       # Dev and test dependencies
       {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
