@@ -113,7 +113,26 @@ defmodule Redix do
   @type command() :: [String.Chars.t()]
   @type connection() :: GenServer.server()
 
-  @default_timeout 5000
+  pipeline_opts_schema = [
+    timeout: [
+      type: :timeout,
+      default: 5_000,
+      doc: """
+      request timeout (in milliseconds). If the Redis server doesn't reply within this timeout,
+      `{:error, %Redix.ConnectionError{reason: :timeout}}` is returned.
+      """
+    ],
+    telemetry_metadata: [
+      type: {:map, :any, :any},
+      default: %{},
+      doc: """
+      extra metadata to add to the `[:redix, :pipeline, *]` Telemetry events.
+      These end up in the `:extra_metadata` metadata key of these events. See `Redix.Telemetry`.
+      """
+    ]
+  ]
+
+  @pipeline_opts_schema NimbleOptions.new!(pipeline_opts_schema)
 
   @doc """
   Starts a connection to Redis.
@@ -298,13 +317,7 @@ defmodule Redix do
 
   ## Options
 
-    * `:timeout` - (integer or `:infinity`) request timeout (in
-      milliseconds). Defaults to `#{@default_timeout}`. If the Redis server
-      doesn't reply within this timeout, `{:error,
-      %Redix.ConnectionError{reason: :timeout}}` is returned.
-    * `:telemetry_metadata` - (map) extra metadata to add to the
-      `[:redix, :pipeline, *]` Telemetry events. These end up in the `:extra_metadata`
-      metadata key of these events. See `Redix.Telemetry`.
+  #{NimbleOptions.docs(@pipeline_opts_schema)}
 
   ## Examples
 
@@ -615,28 +628,9 @@ defmodule Redix do
   end
 
   defp pipeline_without_checks(conn, commands, opts) do
-    timeout =
-      case Keyword.get(opts, :timeout, @default_timeout) do
-        int when is_integer(int) ->
-          int
-
-        :infinity ->
-          :infinity
-
-        other ->
-          raise ArgumentError,
-                "expected :timeout to be an integer of :infinity, got: #{inspect(other)}"
-      end
-
-    telemetry_metadata =
-      case Keyword.get(opts, :telemetry_metadata, %{}) do
-        %{} = map ->
-          map
-
-        other ->
-          raise ArgumentError, "expected :telemetry_metadata to be a map, got: #{inspect(other)}"
-      end
-
+    opts = NimbleOptions.validate!(opts, @pipeline_opts_schema)
+    timeout = Keyword.fetch!(opts, :timeout)
+    telemetry_metadata = Keyword.fetch!(opts, :telemetry_metadata)
     Redix.Connection.pipeline(conn, commands, timeout, telemetry_metadata)
   end
 
