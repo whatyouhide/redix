@@ -36,7 +36,7 @@ defmodule Redix.Protocol do
       "*3\r\n$3\r\nSET\r\n$5\r\nmykey\r\n$1\r\n1\r\n"
 
   """
-  @spec pack([binary]) :: iodata
+  @spec pack([String.Chars.t()]) :: iodata
   def pack(items) when is_list(items) do
     pack(items, [], 0)
   end
