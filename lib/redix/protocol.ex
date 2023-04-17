@@ -141,13 +141,7 @@ defmodule Redix.Protocol do
 
   defp parse_integer_without_sign(<<digit, _::binary>> = bin) when digit in ?0..?9 do
     resolve_cont(parse_integer_digits(bin, 0), fn i, rest ->
-      resolve_cont(until_crlf(rest), fn
-        "", rest ->
-          {:ok, i, rest}
-
-        <<char, _::binary>>, _rest ->
-          raise ParseError, message: "expected CRLF, found: #{inspect(<<char>>)}"
-      end)
+      resolve_cont(crlf(rest), fn :no_value, rest -> {:ok, i, rest} end)
     end)
   end
 
@@ -167,17 +161,19 @@ defmodule Redix.Protocol do
         {:ok, nil, rest}
 
       size, rest ->
-        parse_string_of_known_size(rest, size)
+        parse_string_of_known_size(rest, _acc = [], _size_left = size)
     end)
   end
 
-  defp parse_string_of_known_size(data, size) do
+  defp parse_string_of_known_size(data, acc, size_left) do
     case data do
-      <<str::bytes-size(size), @crlf, rest::binary>> ->
-        {:ok, str, rest}
+      str when byte_size(str) < size_left ->
+        {:continuation, &parse_string_of_known_size(&1, [acc | str], size_left - byte_size(str))}
 
-      _ ->
-        {:continuation, &parse_string_of_known_size(data <> &1, size)}
+      <<str::bytes-size(size_left), rest::binary>> ->
+        resolve_cont(crlf(rest), fn :no_value, rest ->
+          {:ok, IO.iodata_to_binary([acc | str]), rest}
+        end)
     end
   end
 
@@ -197,6 +193,13 @@ defmodule Redix.Protocol do
   defp until_crlf(<<>>, acc), do: {:continuation, &until_crlf(&1, acc)}
   defp until_crlf(<<?\r>>, acc), do: {:continuation, &until_crlf(<<?\r, &1::binary>>, acc)}
   defp until_crlf(<<byte, rest::binary>>, acc), do: until_crlf(rest, <<acc::binary, byte>>)
+
+  defp crlf(<<@crlf, rest::binary>>), do: {:ok, :no_value, rest}
+  defp crlf(<<?\r>>), do: {:continuation, &crlf(<<?\r, &1::binary>>)}
+  defp crlf(<<>>), do: {:continuation, &crlf/1}
+
+  defp crlf(<<byte, _::binary>>),
+    do: raise(ParseError, message: "expected CRLF, found: #{inspect(<<byte>>)}")
 
   defp take_elems(data, 0, acc) do
     {:ok, Enum.reverse(acc), data}
