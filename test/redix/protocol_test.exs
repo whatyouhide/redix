@@ -86,6 +86,11 @@ defmodule Redix.ProtocolTest do
         assert parse_with_continuations(split_command) == {:ok, nil, ""}
         assert parse_with_continuations(split_command_with_rest) == {:ok, nil, "rest"}
       end
+
+      # No CRLF after bulk string contents
+      assert_raise ParseError, "expected CRLF, found: \"n\"", fn ->
+        parse("$3\r\nfoonocrlf")
+      end
     end
 
     property "arrays" do
