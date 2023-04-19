@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.2
+
+### Bug fixes and improvements
+
+  * Make parsing large bulk strings *a lot* faster. See [the pull request](https://github.com/whatyouhide/redix/pull/247) for benchmarks. This causes no functional changes, just a speed improvement.
+
 ## v1.2.1
 
 ### Bug fixes and improvements
