@@ -50,7 +50,7 @@ services:
       net.core.somaxconn: 1024
 
   base_with_stunnel:
-    image: dweomer/stunnel
+    image: dweomer/stunnel@sha256:2d8fc61859475e7fef470c8a45219acea5b636c284339d811873819e532209e7
     environment:
       - STUNNEL_SERVICE=base
       - STUNNEL_ACCEPT=6384
