@@ -168,11 +168,11 @@ defmodule Redix.Protocol do
   defp parse_string_of_known_size(data, acc, size_left) do
     case data do
       str when byte_size(str) < size_left ->
-        {:continuation, &parse_string_of_known_size(&1, [acc | str], size_left - byte_size(str))}
+        {:continuation, &parse_string_of_known_size(&1, [acc, str], size_left - byte_size(str))}
 
       <<str::bytes-size(size_left), rest::binary>> ->
         resolve_cont(crlf(rest), fn :no_value, rest ->
-          {:ok, IO.iodata_to_binary([acc | str]), rest}
+          {:ok, IO.iodata_to_binary([acc, str]), rest}
         end)
     end
   end
