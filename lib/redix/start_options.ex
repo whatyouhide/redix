@@ -109,7 +109,7 @@ defmodule Redix.StartOptions do
       """
     ],
     socket_opts: [
-      type: :keyword_list,
+      type: {:list, :any},
       default: [],
       doc: """
       specifies a list of options that are passed to the network layer when connecting to

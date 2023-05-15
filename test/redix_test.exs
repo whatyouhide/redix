@@ -186,6 +186,16 @@ defmodule RedixTest do
       end)
     end
 
+    test "with IPv6" do
+      {:ok, pid} =
+        Redix.start_link("redis://[::1]:6379",
+          socket_opts: [:inet6],
+          sync_connect: true
+        )
+
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
     test "name registration with atom name" do
       {:ok, pid} = Redix.start_link(name: :redix_server)
       assert Process.whereis(:redix_server) == pid
