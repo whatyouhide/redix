@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.3
+
+### Bug fixes and improvements
+
+  * Fix a bug with validating the `:socket_opts` option, which required a keyword list and thus wouldn't support *valid* options such as `:inet6`.
+
 ## v1.2.2
 
 ### Bug fixes and improvements
