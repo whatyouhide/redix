@@ -135,18 +135,20 @@ defmodule RedixTest do
     end
 
     test "when unable to connect to Redis with sync_connect: true" do
-      capture_log(fn ->
-        Process.flag(:trap_exit, true)
+      Process.flag(:trap_exit, true)
 
-        assert {:error, %Redix.ConnectionError{reason: reason}} =
-                 Redix.start_link(host: "nonexistent", sync_connect: true)
+      assert {:error, %Redix.ConnectionError{reason: reason}} =
+               Redix.start_link(host: "nonexistent", sync_connect: true)
 
+      # Apparently somewhere the error reason is :nxdomain but some other times it's
+      # :timeout.
+      assert reason in [:nxdomain, :timeout]
+
+      # TODO: Remove this when we require OTP 26+. In OTP 26, exits in gen_server:init/1
+      # get caught by proc_lib: https://github.com/erlang/otp/pull/6843
+      if System.otp_release() < "26" do
         assert_receive {:EXIT, _pid, %Redix.ConnectionError{}}, 1000
-
-        # Apparently somewhere the error reason is :nxdomain but some other times it's
-        # :timeout.
-        assert reason in [:nxdomain, :timeout]
-      end)
+      end
     end
 
     test "when unable to connect to Redis with sync_connect: false" do
@@ -171,19 +173,23 @@ defmodule RedixTest do
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
+    @tag :capture_log
     test "using a rediss:// url, unknown certificate" do
-      capture_log(fn ->
-        Process.flag(:trap_exit, true)
+      Process.flag(:trap_exit, true)
 
-        assert {:error, error} =
-                 Redix.start_link("rediss://localhost:6384/3",
-                   socket_opts: [reuse_sessions: false],
-                   sync_connect: true
-                 )
+      assert {:error, error} =
+               Redix.start_link("rediss://localhost:6384/3",
+                 socket_opts: [reuse_sessions: false],
+                 sync_connect: true
+               )
 
-        assert %Redix.ConnectionError{reason: {:tls_alert, _}} = error
+      assert %Redix.ConnectionError{reason: {:tls_alert, _}} = error
+
+      # TODO: Remove this when we require OTP 26+. In OTP 26, exits in gen_server:init/1
+      # get caught by proc_lib: https://github.com/erlang/otp/pull/6843
+      if System.otp_release() < "26" do
         assert_receive {:EXIT, _pid, ^error}, 1000
-      end)
+      end
     end
 
     test "with IPv6" do
@@ -476,7 +482,7 @@ defmodule RedixTest do
     end
 
     test "connection errors", %{conn: c} do
-      assert_raise Redix.ConnectionError, ":timeout", fn ->
+      assert_raise Redix.ConnectionError, "unknown POSIX error: timeout", fn ->
         Redix.command!(c, ["PING"], timeout: 0)
       end
     end
@@ -497,7 +503,7 @@ defmodule RedixTest do
     end
 
     test "connection errors", %{conn: c} do
-      assert_raise Redix.ConnectionError, ":timeout", fn ->
+      assert_raise Redix.ConnectionError, "unknown POSIX error: timeout", fn ->
         Redix.pipeline!(c, [["PING"]], timeout: 0)
       end
     end

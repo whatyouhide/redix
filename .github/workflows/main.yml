@@ -14,10 +14,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - otp: "26.0"
+            elixir: "1.15.0-rc.2"
+
           - otp: "25.3"
             elixir: "1.14.3"
             coverage: true
             lint: true
+
           - otp: "23.0"
             elixir: "1.11.2"
 
@@ -27,7 +31,7 @@ jobs:
 
     steps:
       - name: Clone the repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Start Docker
         run: docker-compose up --detach
