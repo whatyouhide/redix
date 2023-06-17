@@ -64,7 +64,10 @@ defmodule Redix.Mixfile do
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.14", only: :test},
       {:propcheck, "~> 1.1", only: :test},
-      {:stream_data, "~> 0.4", only: [:dev, :test]}
+      {:stream_data, "~> 0.4", only: [:dev, :test]},
+
+      # https://github.com/elixir-lang/elixir/issues/12653
+      {:ssl_verify_fun, ">= 0.0.0", manager: :rebar3, only: :test, override: true}
     ]
   end
 end

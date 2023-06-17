@@ -14,12 +14,19 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - otp: "26.0"
+            elixir: "1.15.0-rc.2"
+            version-type: strict
+
           - otp: "25.3"
             elixir: "1.14.3"
             coverage: true
             lint: true
+            version-type: loose
+
           - otp: "23.0"
             elixir: "1.11.2"
+            version-type: loose
 
     env:
       GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
@@ -27,7 +34,7 @@ jobs:
 
     steps:
       - name: Clone the repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Start Docker
         run: docker-compose up --detach
@@ -37,6 +44,7 @@ jobs:
         with:
           otp-version: ${{matrix.otp}}
           elixir-version: ${{matrix.elixir}}
+          version-type: ${{matrix.version-type}}
 
       - name: Cache dependencies
         id: cache-deps

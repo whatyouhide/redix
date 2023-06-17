@@ -45,6 +45,7 @@ defmodule Redix.ConnectionError do
 
   defexception [:reason]
 
+  @impl true
   def message(%__MODULE__{reason: reason}) do
     format_reason(reason)
   end
@@ -55,14 +56,17 @@ defmodule Redix.ConnectionError do
 
   # Manually returned by us when the connection is closed and someone tries to
   # send a command to Redis.
-  defp format_reason(:closed) do
-    "the connection to Redis is closed"
-  end
+  defp format_reason(:closed), do: "the connection to Redis is closed"
 
-  defp format_reason(reason) do
-    case :inet.format_error(reason) do
-      ~c"unknown POSIX error" -> inspect(reason)
-      message -> List.to_string(message)
+  if System.otp_release() >= "26" do
+    defp format_reason(reason), do: reason |> :inet.format_error() |> List.to_string()
+  else
+    defp format_reason(reason) do
+      case :inet.format_error(reason) do
+        ~c"unknown POSIX error" = message when is_atom(reason) -> "#{message}: #{reason}"
+        ~c"unknown POSIX error" -> inspect(reason)
+        message -> List.to_string(message)
+      end
     end
   end
 end
