@@ -6,3 +6,5 @@ erl_crash.dump
 /bench/graphs/index.html
 /cover
 /doc
+/priv/plts/*.plt
+/priv/plts/*.plt.hash

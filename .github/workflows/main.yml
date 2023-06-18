@@ -80,7 +80,7 @@ jobs:
         if: ${{ matrix.lint }}
 
       - name: Check no unused dependencies
-        run: mix deps.get && mix deps.unlock --check-unused
+        run: mix do deps.get, deps.unlock --check-unused
         if: ${{ matrix.lint == 'true' && steps.cache-deps.outputs.cache-hit != 'true' }}
 
       - name: Compile with --warnings-as-errors
@@ -96,7 +96,7 @@ jobs:
         if: ${{ matrix.coverage }}
 
       - name: Run dialyzer
-        run: mix dialyzer
+        run: mix dialyzer --format github
 
       - name: Dump Docker logs on failure
         uses: jwalton/gh-docker-logs@v1

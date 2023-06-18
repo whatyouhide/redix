@@ -19,6 +19,12 @@ defmodule Redix.Mixfile do
       # Tests
       test_coverage: [tool: ExCoveralls],
 
+      # Dialyzer
+      dialyzer: [
+        plt_file: {:no_warn, "priv/plts/redix.plt"},
+        plt_core_path: "priv/plts/core.plt"
+      ],
+
       # Hex
       package: package(),
       description: @description,
