@@ -73,7 +73,6 @@ jobs:
           restore-keys: |
             plt-${{ runner.os }}-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}-
 
-
       # Create PLTs if no cache was found
       - name: Create PLTs
         if: steps.cache-plt.outputs.cache-hit != 'true'

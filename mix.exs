@@ -21,8 +21,8 @@ defmodule Redix.Mixfile do
 
       # Dialyzer
       dialyzer: [
-        plt_file: {:no_warn, "priv/plts/redix.plt"},
-        plt_core_path: "priv/plts/core.plt"
+        plt_local_path: "priv/plts",
+        plt_core_path: "priv/plts"
       ],
 
       # Hex
