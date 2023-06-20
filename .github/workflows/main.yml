@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - otp: "26.0"
-            elixir: "1.15.0-rc.2"
+          - otp: "26.0.1"
+            elixir: "1.15.0"
             version-type: strict
 
           - otp: "25.3"
@@ -57,9 +57,7 @@ jobs:
 
       - name: Install and compile dependencies
         if: steps.cache-deps.outputs.cache-hit != 'true'
-        run: |
-          mix deps.get --only test
-          mix deps.compile
+        run: mix do deps.get --only test, deps.compile
 
       # Don't cache PLTs based on mix.lock hash, as Dialyzer can incrementally update even old ones
       # Cache key based on Elixir & Erlang version (also useful when running in matrix)
