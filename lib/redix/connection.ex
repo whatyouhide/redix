@@ -82,7 +82,8 @@ defmodule Redix.Connection do
         resp
 
       {:DOWN, ^request_id, _, _, reason} ->
-        exit(reason)
+        exit({:redix_exited_during_call, reason})
+
     end
   end
 
