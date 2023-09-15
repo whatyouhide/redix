@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - otp: "26.0.1"
-            elixir: "1.15.0"
+          - otp: "26.0.2"
+            elixir: "1.15.5"
             version-type: strict
 
           - otp: "25.3"
@@ -74,7 +74,9 @@ jobs:
       # Create PLTs if no cache was found
       - name: Create PLTs
         if: steps.cache-plt.outputs.cache-hit != 'true'
-        run: mix dialyzer --plt
+        run: |
+          mkdir -p priv/plts
+          mix dialyzer --plt
 
       - name: Check formatting
         run: mix format --check-formatted
