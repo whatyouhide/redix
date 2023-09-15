@@ -66,7 +66,7 @@ defmodule Redix.Mixfile do
       {:nimble_options, "~> 0.5.0 or ~> 1.0"},
 
       # Dev and test dependencies
-      {:dialyxir, "~> 1.1.0", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.17", only: :test},
       {:propcheck, "~> 1.1", only: :test},
