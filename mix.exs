@@ -66,11 +66,15 @@ defmodule Redix.Mixfile do
       {:nimble_options, "~> 0.5.0 or ~> 1.0"},
 
       # Dev and test dependencies
-      {:dialyxir, "~> 1.4.1", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.17", only: :test},
       {:propcheck, "~> 1.1", only: :test},
       {:stream_data, "~> 0.4", only: [:dev, :test]}
-    ]
+    ] ++
+      if Version.match?(System.version(), "~> 1.12") do
+        [{:dialyxir, "~> 1.4.1", only: [:dev, :test], runtime: false}]
+      else
+        []
+      end
   end
 end
