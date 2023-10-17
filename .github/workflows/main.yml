@@ -65,7 +65,7 @@ jobs:
         uses: actions/cache@v3
         id: cache-plt
         with:
-          path: priv/plts
+          path: plts
           key: |
             plt-${{ runner.os }}-otp${{ matrix.otp }}-elixir${{ matrix.elixir }}-${{ hashFiles('**/mix.lock') }}
           restore-keys: |
@@ -74,7 +74,9 @@ jobs:
       # Create PLTs if no cache was found
       - name: Create PLTs
         if: steps.cache-plt.outputs.cache-hit != 'true'
-        run: mix dialyzer --plt
+        run: |
+          mkdir -p plts
+          mix dialyzer --plt
 
       - name: Check formatting
         run: mix format --check-formatted
