@@ -17,6 +17,7 @@ jobs:
           - otp: "26.0.1"
             elixir: "1.15.0"
             version-type: strict
+            dialyzer: true
 
           - otp: "25.3"
             elixir: "1.14.3"
@@ -62,6 +63,7 @@ jobs:
       # Don't cache PLTs based on mix.lock hash, as Dialyzer can incrementally update even old ones
       # Cache key based on Elixir & Erlang version (also useful when running in matrix)
       - name: Cache Dialyzer's PLT
+        if: ${{ matrix.dialyzer }}
         uses: actions/cache@v3
         id: cache-plt
         with:
@@ -73,7 +75,7 @@ jobs:
 
       # Create PLTs if no cache was found
       - name: Create PLTs
-        if: steps.cache-plt.outputs.cache-hit != 'true'
+        if: steps.cache-plt.outputs.cache-hit != 'true' && matrix.dialyzer
         run: |
           mkdir -p plts
           mix dialyzer --plt
@@ -100,6 +102,7 @@ jobs:
 
       - name: Run dialyzer
         run: mix dialyzer --format github
+        if: ${{ matrix.dialyzer }}
 
       - name: Dump Docker logs on failure
         uses: jwalton/gh-docker-logs@v1
