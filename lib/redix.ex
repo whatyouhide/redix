@@ -570,7 +570,7 @@ defmodule Redix do
   @doc """
   Same as `noreply_command/3` but raises in case of errors.
   """
-  if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
+  @doc since: "0.8.0"
   @spec noreply_command!(connection(), command(), keyword()) :: :ok
   def noreply_command!(conn, command, options \\ []) do
     case noreply_command(conn, command, options) do
