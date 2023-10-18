@@ -79,7 +79,7 @@ defmodule Redix.Connector do
       # Redis gives use. The only alternative left would be to provide an explicit :use_username
       # option but that feels very orced on the user.
       {:error, %Redix.Error{message: "ERR wrong number of arguments for 'auth' command"}} ->
-        Logger.warn("""
+        Logger.warning("""
         a username was provided to connect to Redis (either via options or via a URI). However, \
         the Redis server version for this connection seems to not support ACLs, which are only \
         supported from Redis version 6.0.0 (https://redis.io/topics/acl). Earlier versions of \
