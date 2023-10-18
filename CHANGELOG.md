@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.2.4
+
+### Bug fixes and improvements
+
+  * Remove Dialyzer PLTs from the Hex package. This has no functional impact whatsoever on the library. The PLTs were accidentally published together with the Hex package, which just results in an unnecessarily large Hex package.
+
 ## v1.2.3
 
 ### Bug fixes and improvements
