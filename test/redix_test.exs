@@ -584,7 +584,8 @@ defmodule RedixTest do
       # with a hard-to-understand error (see the issue linked above).
       _ = Redix.noreply_command(conn, ["INCR", key])
 
-      assert {%RuntimeError{} = error, _stacktrace} = catch_exit(Redix.command!(conn, ["PING"]))
+      assert {:redix_exited_during_call, {%RuntimeError{} = error, _stacktrace}} =
+               catch_exit(Redix.command!(conn, ["PING"]))
 
       assert Exception.message(error) =~
                "failed to find an original command in the commands queue"
