@@ -361,7 +361,7 @@ defmodule RedixTest do
       Process.exit(conn, :kill)
 
       assert_receive {:EXIT, ^conn, :killed}
-      assert_receive {:EXIT, ^pid, :killed}
+      assert_receive {:EXIT, ^pid, {:redix_exited_during_call, :killed}}
     end
 
     test "passing a non-list as the command", %{conn: c} do
