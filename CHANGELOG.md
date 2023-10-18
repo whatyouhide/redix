@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.3.0
+
+### Bug fixes and improvements
+
+  * Improve EXITs that happen during calls to Redix functions.
+  * Remove call to deprecated `Logger.warn/2`.
+  * Support MFA for `:password` in the `:sentinel` option.
+  * Add the `Redix.password/0` type.
+  * Add the `Redix.sentinel_role/0` type.
+
 ## v1.2.4
 
 ### Bug fixes and improvements
