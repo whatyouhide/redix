@@ -102,6 +102,49 @@ defmodule Redix.StartOptionsTest do
       end
     end
 
+    test "sentinel password string" do
+      opts =
+        StartOptions.sanitize(
+          sentinel: [
+            sentinels: [
+              [host: "host1", port: 26379, password: "secret1"],
+              [host: "host2", port: 26379]
+            ],
+            group: "mygroup",
+            password: "secret2"
+          ]
+        )
+
+      sentinels = opts[:sentinel][:sentinels]
+
+      assert Enum.count(sentinels) == 2
+      assert Enum.find(sentinels, &(&1[:host] == 'host1'))[:password] == "secret1"
+      assert Enum.find(sentinels, &(&1[:host] == 'host2'))[:password] == "secret2"
+    end
+
+    test "sentinel password mfa" do
+      mfa1 = {System, :fetch_env!, ["REDIS_PASS1"]}
+      mfa2 = {System, :fetch_env!, ["REDIS_PASS2"]}
+
+      opts =
+        StartOptions.sanitize(
+          sentinel: [
+            sentinels: [
+              [host: "host1", port: 26379, password: mfa1],
+              [host: "host2", port: 26379]
+            ],
+            group: "mygroup",
+            password: mfa2
+          ]
+        )
+
+      sentinels = opts[:sentinel][:sentinels]
+
+      assert Enum.count(sentinels) == 2
+      assert Enum.find(sentinels, &(&1[:host] == 'host1'))[:password] == mfa1
+      assert Enum.find(sentinels, &(&1[:host] == 'host2'))[:password] == mfa2
+    end
+
     test "gen_statem options are allowed" do
       opts =
         StartOptions.sanitize(hibernate_after: 1000, debug: [], spawn_opt: [fullsweep_after: 0])
