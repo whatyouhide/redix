@@ -118,8 +118,8 @@ defmodule Redix.StartOptionsTest do
       sentinels = opts[:sentinel][:sentinels]
 
       assert Enum.count(sentinels) == 2
-      assert Enum.find(sentinels, &(&1[:host] == 'host1'))[:password] == "secret1"
-      assert Enum.find(sentinels, &(&1[:host] == 'host2'))[:password] == "secret2"
+      assert Enum.find(sentinels, &(&1[:host] == ~c"host1"))[:password] == "secret1"
+      assert Enum.find(sentinels, &(&1[:host] == ~c"host2"))[:password] == "secret2"
     end
 
     test "sentinel password mfa" do
@@ -141,8 +141,8 @@ defmodule Redix.StartOptionsTest do
       sentinels = opts[:sentinel][:sentinels]
 
       assert Enum.count(sentinels) == 2
-      assert Enum.find(sentinels, &(&1[:host] == 'host1'))[:password] == mfa1
-      assert Enum.find(sentinels, &(&1[:host] == 'host2'))[:password] == mfa2
+      assert Enum.find(sentinels, &(&1[:host] == ~c"host1"))[:password] == mfa1
+      assert Enum.find(sentinels, &(&1[:host] == ~c"host2"))[:password] == mfa2
     end
 
     test "gen_statem options are allowed" do
