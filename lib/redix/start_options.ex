@@ -41,6 +41,7 @@ defmodule Redix.StartOptions do
     ],
     password: [
       type: {:or, [:string, :mfa]},
+      type_doc: "`t:Redix.password/0`",
       doc: """
       the password used to connect to Redis. Defaults to
       `nil`, meaning no password is used. When this option is provided, all Redix
@@ -48,7 +49,8 @@ defmodule Redix.StartOptions do
       supported in the form of `{module, function, arguments}`. This can be used
       to fetch the password dynamically on every reconnection but most importantly to
       hide the password from crash reports in case the Redix connection crashes for
-      any reason. For example, you can use `password: {System, :fetch_env!, ["REDIX_PASSWORD"]}`.
+      any reason. For example, you can set this option to:
+      `{System, :fetch_env!, ["REDIX_PASSWORD"]}`.
       """
     ],
     timeout: [
@@ -155,7 +157,7 @@ defmodule Redix.StartOptions do
         sentinels: [
           type: {:custom, __MODULE__, :__validate_sentinels__, []},
           required: true,
-          type_doc: "list",
+          type_doc: "list of `t:String.t/0` or `t:keyword/0`",
           doc: """
           a list of sentinel addresses. Each element in this list is the address
           of a sentinel to be contacted in order to obtain the address of a primary. The address of
@@ -175,7 +177,7 @@ defmodule Redix.StartOptions do
         role: [
           type: {:in, [:primary, :replica]},
           default: :primary,
-          type_doc: "`:primary` or `:replica`",
+          type_doc: "`t:Redix.sentinel_role/0`",
           doc: """
           if `:primary`, the connection will be established
           with the primary for the given group. If `:replica`, Redix will ask the sentinel for all
@@ -210,7 +212,7 @@ defmodule Redix.StartOptions do
         ],
         password: [
           type: {:or, [:string, :mfa]},
-          type_doc: "`String.t/0` or `{mod, fun, args}`",
+          type_doc: "`t:Redix.password/0`",
           doc: """
           if you don't want to specify a password for each sentinel you
           list, you can use this option to specify a password that will be used to authenticate

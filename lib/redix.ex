@@ -109,8 +109,33 @@ defmodule Redix do
   # function in this module goes through Redix.Connection.pipeline/3 one way or
   # another.
 
+  @typedoc """
+  A command, which is a list of things that can be converted to strings.
+
+  For example, this is a valid command:
+
+      ["INCR", :my_key, 1]
+
+  We recommend using strings directly to avoid needless conversions.
+  """
   @type command() :: [String.Chars.t()]
+
+  @typedoc """
+  The reference to a Redix connection.
+  """
   @type connection() :: GenServer.server()
+
+  @typedoc """
+  Passwords that can be passed to the `:password` option (see `start_link/1`).
+  """
+  @typedoc since: "1.3.0"
+  @type password() :: String.t() | {module(), function_name :: atom(), arguments :: [term()]}
+
+  @typedoc """
+  The possible role of a Redis sentinel (see `start_link/1`).
+  """
+  @typedoc since: "1.3.0"
+  @type sentinel_role() :: :primary | :replica
 
   pipeline_opts_schema = [
     timeout: [
@@ -160,7 +185,7 @@ defmodule Redix do
 
   ## Using a Redis URI
 
-  In case `uri_or_opts` is a Redis URI, it must be in the form:
+  In case `uri_or_options` is a Redis URI, it must be in the form:
 
       redis://[username:password@]host[:port][/db]
 
@@ -196,7 +221,7 @@ defmodule Redix do
 
   """
   @spec start_link(binary() | keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
-  def start_link(uri_or_opts \\ [])
+  def start_link(uri_or_options \\ [])
 
   def start_link(uri) when is_binary(uri), do: start_link(uri, [])
   def start_link(opts) when is_list(opts), do: Redix.Connection.start_link(opts)
@@ -212,11 +237,11 @@ defmodule Redix do
   In this example, port `6380` will be used.
   """
   @spec start_link(binary(), keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
-  def start_link(uri, other_opts)
+  def start_link(uri, other_options)
 
-  def start_link(uri, other_opts) when is_binary(uri) and is_list(other_opts) do
+  def start_link(uri, other_options) when is_binary(uri) and is_list(other_options) do
     opts = Redix.URI.to_start_options(uri)
-    start_link(Keyword.merge(opts, other_opts))
+    start_link(Keyword.merge(opts, other_options))
   end
 
   @doc """
@@ -253,7 +278,7 @@ defmodule Redix do
   """
   @spec child_spec(uri | keyword() | {uri, keyword()}) :: Supervisor.child_spec()
         when uri: binary()
-  def child_spec(uri_or_opts)
+  def child_spec(uri_or_options)
 
   def child_spec({uri, opts}) when is_binary(uri) and is_list(opts) do
     child_spec_with_args([uri, opts])
@@ -340,9 +365,9 @@ defmodule Redix do
   @spec pipeline(connection(), [command()], keyword()) ::
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def pipeline(conn, commands, opts \\ []) when is_list(opts) do
+  def pipeline(conn, commands, options \\ []) when is_list(options) do
     assert_valid_pipeline_commands(commands)
-    pipeline_without_checks(conn, commands, opts)
+    pipeline_without_checks(conn, commands, options)
   end
 
   @doc """
@@ -376,8 +401,8 @@ defmodule Redix do
 
   """
   @spec pipeline!(connection(), [command()], keyword()) :: [Redix.Protocol.redis_value()]
-  def pipeline!(conn, commands, opts \\ []) do
-    case pipeline(conn, commands, opts) do
+  def pipeline!(conn, commands, options \\ []) do
+    case pipeline(conn, commands, options) do
       {:ok, response} -> response
       {:error, error} -> raise error
     end
@@ -408,11 +433,11 @@ defmodule Redix do
   @doc since: "0.8.0"
   @spec noreply_pipeline(connection(), [command()], keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def noreply_pipeline(conn, commands, opts \\ []) when is_list(opts) do
+  def noreply_pipeline(conn, commands, options \\ []) when is_list(options) do
     assert_valid_pipeline_commands(commands)
     commands = [["CLIENT", "REPLY", "OFF"]] ++ commands ++ [["CLIENT", "REPLY", "ON"]]
 
-    case pipeline_without_checks(conn, commands, opts) do
+    case pipeline_without_checks(conn, commands, options) do
       # The "OK" response comes from the last "CLIENT REPLY ON".
       {:ok, ["OK"]} -> :ok
       # This can happen if there's an error with the first "CLIENT REPLY OFF" command, like
@@ -428,8 +453,8 @@ defmodule Redix do
   """
   @doc since: "0.8.0"
   @spec noreply_pipeline!(connection(), [command()], keyword()) :: :ok
-  def noreply_pipeline!(conn, commands, opts \\ []) do
-    case noreply_pipeline(conn, commands, opts) do
+  def noreply_pipeline!(conn, commands, options \\ []) do
+    case noreply_pipeline(conn, commands, options) do
       :ok -> :ok
       {:error, error} -> raise error
     end
@@ -473,8 +498,8 @@ defmodule Redix do
   @spec command(connection(), command(), keyword()) ::
           {:ok, Redix.Protocol.redis_value()}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def command(conn, command, opts \\ []) when is_list(opts) do
-    case pipeline(conn, [command], opts) do
+  def command(conn, command, options \\ []) when is_list(options) do
+    case pipeline(conn, [command], options) do
       {:ok, [%Redix.Error{} = error]} -> {:error, error}
       {:ok, [response]} -> {:ok, response}
       {:error, _reason} = error -> error
@@ -508,8 +533,8 @@ defmodule Redix do
 
   """
   @spec command!(connection(), command(), keyword()) :: Redix.Protocol.redis_value()
-  def command!(conn, command, opts \\ []) do
-    case command(conn, command, opts) do
+  def command!(conn, command, options \\ []) do
+    case command(conn, command, options) do
       {:ok, response} -> response
       {:error, error} -> raise error
     end
@@ -538,8 +563,8 @@ defmodule Redix do
   @doc since: "0.8.0"
   @spec noreply_command(connection(), command(), keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
-  def noreply_command(conn, command, opts \\ []) when is_list(opts) do
-    noreply_pipeline(conn, [command], opts)
+  def noreply_command(conn, command, options \\ []) when is_list(options) do
+    noreply_pipeline(conn, [command], options)
   end
 
   @doc """
@@ -547,8 +572,8 @@ defmodule Redix do
   """
   if Version.match?(System.version(), "~> 1.7"), do: @doc(since: "0.8.0")
   @spec noreply_command!(connection(), command(), keyword()) :: :ok
-  def noreply_command!(conn, command, opts \\ []) do
-    case noreply_command(conn, command, opts) do
+  def noreply_command!(conn, command, options \\ []) do
+    case noreply_command(conn, command, options) do
       :ok -> :ok
       {:error, error} -> raise error
     end
