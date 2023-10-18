@@ -209,7 +209,7 @@ defmodule Redix.StartOptions do
           """
         ],
         password: [
-          type: :string,
+          type: {:or, [:string, :mfa]},
           doc: """
           if you don't want to specify a password for each sentinel you
           list, you can use this option to specify a password that will be used to authenticate

@@ -77,6 +77,45 @@ defmodule Redix.SentinelTest do
     assert Redix.command!(pid, ["PING"]) == "PONG"
   end
 
+  test "sentinel supports password mfa in sentinels list", %{sentinel_config: sentinel_config} do
+    System.put_env("REDIX_SENTINEL_MFA_PASSWORD", "sentinel-password")
+
+    password_mfa = {System, :get_env, ["REDIX_SENTINEL_MFA_PASSWORD"]}
+
+    sentinel_config =
+      Keyword.merge(sentinel_config,
+        sentinels: [[host: "localhost", port: 26383, password: password_mfa]]
+      )
+
+    pid =
+      start_supervised!(
+        {Redix, sentinel: sentinel_config, password: "main-password", sync_connect: true}
+      )
+
+    assert Redix.command!(pid, ["PING"]) == "PONG"
+  after
+    System.delete_env("REDIX_SENTINEL_MFA_PASSWORD")
+  end
+
+  test "sentinel supports global password mfa", %{sentinel_config: sentinel_config} do
+    System.put_env("REDIX_SENTINEL_MFA_PASSWORD", "sentinel-password")
+
+    sentinel_config =
+      Keyword.merge(sentinel_config,
+        password: {System, :get_env, ["REDIX_SENTINEL_MFA_PASSWORD"]},
+        sentinels: ["redis://localhost:26383"]
+      )
+
+    pid =
+      start_supervised!(
+        {Redix, sentinel: sentinel_config, password: "main-password", sync_connect: true}
+      )
+
+    assert Redix.command!(pid, ["PING"]) == "PONG"
+  after
+    System.delete_env("REDIX_SENTINEL_MFA_PASSWORD")
+  end
+
   test "failed sentinel connection" do
     {test_name, _arity} = __ENV__.function
 
