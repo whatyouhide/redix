@@ -13,7 +13,14 @@ defmodule Redix.Protocol do
     defexception [:message]
   end
 
-  @type redis_value :: binary | integer | nil | Redix.Error.t() | [redis_value]
+  @typedoc """
+  Represents a Redis value.
+  """
+  @type redis_value() :: binary | integer | nil | Redix.Error.t() | [redis_value()]
+
+  @typedoc """
+  The return value of parsing functions in this module.
+  """
   @type on_parse(value) :: {:ok, value, binary} | {:continuation, (binary -> on_parse(value))}
 
   @crlf "\r\n"

@@ -9,7 +9,10 @@ defmodule Redix.Error do
 
   defexception [:message]
 
-  @type t :: %__MODULE__{message: binary}
+  @typedoc """
+  The type for this exception struct.
+  """
+  @type t() :: %__MODULE__{message: binary()}
 end
 
 defmodule Redix.ConnectionError do
@@ -21,12 +24,7 @@ defmodule Redix.ConnectionError do
 
   ## Exception fields
 
-  This exception has the following public fields:
-
-    * `:reason` - (atom) the error reason. It can be one of the Redix-specific
-      reasons described in the "Error reasons" section below, or any error
-      reason returned by functions in the `:gen_tcp` module (see the
-      [`:inet.posix/0`](http://www.erlang.org/doc/man/inet.html#type-posix) type.
+  See `t:t/0`.
 
   ## Error reasons
 
@@ -41,7 +39,20 @@ defmodule Redix.ConnectionError do
     * `:timeout`: when Redis doesn't reply to the request in time.
 
   """
-  @type t :: %__MODULE__{reason: atom}
+
+  @typedoc """
+  The type for this exception struct.
+
+  This exception has the following public fields:
+
+    * `:reason` - the error reason. It can be one of the Redix-specific
+      reasons described in the "Error reasons" section below, or any error
+      reason returned by functions in the `:gen_tcp` module (see the
+      [`:inet.posix/0`](http://www.erlang.org/doc/man/inet.html#type-posix) type) or
+      `:ssl` module.
+
+  """
+  @type t() :: %__MODULE__{reason: atom}
 
   defexception [:reason]
 
