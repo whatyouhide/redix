@@ -7,7 +7,7 @@ defmodule Redix.Mixfile do
 
   @version "1.3.0"
 
-  def project() do
+  def project do
     [
       app: :redix,
       version: @version,
@@ -47,11 +47,11 @@ defmodule Redix.Mixfile do
     ]
   end
 
-  def application() do
+  def application do
     [extra_applications: [:logger, :ssl]]
   end
 
-  defp package() do
+  defp package do
     [
       maintainers: ["Andrea Leopardi"],
       licenses: ["MIT"],
@@ -59,7 +59,7 @@ defmodule Redix.Mixfile do
     ]
   end
 
-  defp deps() do
+  defp deps do
     [
       {:telemetry, "~> 0.4.0 or ~> 1.0"},
       {:castore, "~> 0.1.0 or ~> 1.0", optional: true},

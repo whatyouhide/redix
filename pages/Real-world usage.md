@@ -52,7 +52,7 @@ defmodule MyApp.Redix do
     Redix.command(:"redix_#{random_index()}", command)
   end
 
-  defp random_index() do
+  defp random_index do
     Enum.random(0..@pool_size - 1)
   end
 end

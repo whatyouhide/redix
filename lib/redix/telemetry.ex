@@ -123,7 +123,7 @@ defmodule Redix.Telemetry do
 
   """
   @spec attach_default_handler() :: :ok | {:error, :already_exists}
-  def attach_default_handler() do
+  def attach_default_handler do
     events = [
       [:redix, :disconnection],
       [:redix, :connection],

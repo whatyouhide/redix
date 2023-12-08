@@ -15,7 +15,7 @@ defmodule Redix.PropertiesTest do
   end
 
   defmodule Conn do
-    def start_link(), do: Redix.start_link(name: __MODULE__, backoff_initial: 10)
+    def start_link, do: Redix.start_link(name: __MODULE__, backoff_initial: 10)
 
     def set(key, value), do: Redix.command!(__MODULE__, ["SET", key, value])
 
@@ -23,7 +23,7 @@ defmodule Redix.PropertiesTest do
 
     def get_non_existing(key), do: get(key)
 
-    def stop(), do: Redix.stop(__MODULE__)
+    def stop, do: Redix.stop(__MODULE__)
 
     defp get(key), do: Redix.command!(__MODULE__, ["GET", key])
   end

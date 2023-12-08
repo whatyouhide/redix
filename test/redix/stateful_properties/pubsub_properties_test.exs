@@ -10,7 +10,7 @@ defmodule Redix.PubSubPropertiesTest do
   defstruct [:channels, :ref]
 
   defmodule PubSub do
-    def start_link() do
+    def start_link do
       Redix.PubSub.start_link(
         name: __MODULE__,
         backoff_initial: 0,
@@ -25,21 +25,21 @@ defmodule Redix.PubSubPropertiesTest do
 
     def unsubscribe(channel), do: Redix.PubSub.unsubscribe(__MODULE__, channel, self())
 
-    def stop(), do: Redix.PubSub.stop(__MODULE__)
+    def stop, do: Redix.PubSub.stop(__MODULE__)
   end
 
   defmodule ControlConn do
-    def start_link(), do: Redix.start_link(name: __MODULE__, sync_connect: true)
+    def start_link, do: Redix.start_link(name: __MODULE__, sync_connect: true)
 
-    def subscribed_channels(),
+    def subscribed_channels,
       do: MapSet.new(Redix.command!(__MODULE__, ["PUBSUB", "CHANNELS"]))
 
     def publish(channel, message), do: Redix.command!(__MODULE__, ["PUBLISH", channel, message])
 
-    def disconnect_pubsub(),
+    def disconnect_pubsub,
       do: Redix.command!(__MODULE__, ["CLIENT", "KILL", "TYPE", "pubsub"])
 
-    def stop(), do: Redix.stop(__MODULE__)
+    def stop, do: Redix.stop(__MODULE__)
   end
 
   property "subscribing and unsubscribing from channels", [:verbose] do

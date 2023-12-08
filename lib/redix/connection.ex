@@ -124,7 +124,7 @@ defmodule Redix.Connection do
   ## Init callbacks
 
   @impl true
-  def callback_mode(), do: :state_functions
+  def callback_mode, do: :state_functions
 
   @impl true
   def init(opts) do

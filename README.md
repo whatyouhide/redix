@@ -27,7 +27,7 @@ This README refers to the main branch of Redix, not the latest released version 
 Add the `:redix` dependency to your `mix.exs` file. If you plan on connecting to a Redis server [over SSL][docs-ssl] you may want to add the optional [`:castore`][castore] dependency as well:
 
 ```elixir
-defp deps() do
+defp deps do
   [
     {:redix, "~> 1.1"},
     {:castore, ">= 0.0.0"}
