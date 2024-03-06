@@ -416,4 +416,16 @@ defmodule Redix.PubSub do
       when is_binary(patterns) or is_list(patterns) do
     :gen_statem.call(conn, {:punsubscribe, List.wrap(patterns), subscriber})
   end
+
+  @doc """
+  Gets the redis `CLIENT ID` associated with a connection
+  ## Examples
+
+      iex> Redix.PubSub.client_id(conn)
+      {:ok, 123}
+  """
+  @spec client_id(connection()) :: {:ok, integer()} | {:error, any()}
+  def client_id(conn) do
+    :gen_statem.call(conn, :client_id)
+  end
 end

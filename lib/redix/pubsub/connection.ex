@@ -13,6 +13,7 @@ defmodule Redix.PubSub.Connection do
     :backoff_current,
     :last_disconnect_reason,
     :connected_address,
+    :client_id,
     subscriptions: %{},
     monitors: %{}
   ]
@@ -28,14 +29,14 @@ defmodule Redix.PubSub.Connection do
     data = %__MODULE__{opts: opts, transport: transport}
 
     if opts[:sync_connect] do
-      with {:ok, socket, address} <- Connector.connect(data.opts, _conn_pid = self()),
-           :ok <- setopts(data, socket, active: :once) do
+      with {:ok, socket, address, client_id} <- connect(data) do
         data = %__MODULE__{
           data
           | socket: socket,
             last_disconnect_reason: nil,
             backoff_current: nil,
-            connected_address: address
+            connected_address: address,
+            client_id: client_id
         }
 
         {:ok, :connected, data}
@@ -104,8 +105,7 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnected(:internal, :connect, data) do
-    with {:ok, socket, address} <- Connector.connect(data.opts, _conn_pid = self()),
-         :ok <- setopts(data, socket, active: :once) do
+    with {:ok, socket, address, client_id} <- connect(data) do
       :telemetry.execute([:redix, :connection], %{}, %{
         connection: self(),
         connection_name: data.opts[:name],
@@ -118,7 +118,8 @@ defmodule Redix.PubSub.Connection do
         | socket: socket,
           last_disconnect_reason: nil,
           backoff_current: nil,
-          connected_address: address
+          connected_address: address,
+          client_id: client_id
       }
 
       {:next_state, :connected, data, {:next_event, :internal, :handle_connection}}
@@ -193,6 +194,12 @@ defmodule Redix.PubSub.Connection do
     {:keep_state, data}
   end
 
+  def disconnected({:call, from}, :client_id, data) do
+    :ok = :gen_statem.reply(from, {:error, :disconnected})
+
+    {:keep_state, data}
+  end
+
   def connected(:internal, :handle_connection, data) do
     if map_size(data.subscriptions) > 0 do
       case resubscribe_after_reconnection(data) do
@@ -222,6 +229,12 @@ defmodule Redix.PubSub.Connection do
       data = demonitor_if_not_subscribed_to_anything(data, pid)
       {:keep_state, data}
     end
+  end
+
+  def connected({:call, from}, :client_id, data) do
+    :ok = :gen_statem.reply(from, {:ok, data.client_id})
+
+    {:keep_state, data}
   end
 
   def connected(:info, {transport_closed, socket}, %__MODULE__{socket: socket} = data)
@@ -560,6 +573,16 @@ defmodule Redix.PubSub.Connection do
   defp key_for_target(:unsubscribe, channel), do: {:channel, channel}
   defp key_for_target(:psubscribe, pattern), do: {:pattern, pattern}
   defp key_for_target(:punsubscribe, pattern), do: {:pattern, pattern}
+
+  defp connect(%__MODULE__{opts: opts, transport: transport} = data) do
+    timeout = Keyword.fetch!(opts, :timeout)
+
+    with {:ok, socket, address} <- Connector.connect(opts, _conn_pid = self()),
+         {:ok, client_id} <- Connector.sync_command(transport, socket, ["CLIENT", "ID"], timeout),
+         :ok <- setopts(data, socket, active: :once) do
+      {:ok, socket, address, client_id}
+    end
+  end
 
   defp setopts(data, socket, opts) do
     inets_mod(data.transport).setopts(socket, opts)
