@@ -418,14 +418,24 @@ defmodule Redix.PubSub do
   end
 
   @doc """
-  Gets the redis `CLIENT ID` associated with a connection
+  Gets the Redis `CLIENT ID` associated with a connection.
+
+  This is useful for implementing [**client-side
+  caching**](https://redis.io/docs/manual/client-side-caching/), where you can
+  subscribe your pub/sub connection to changes on keys.
+
+  If the pub/sub connection is currently disconnected, this function returns
+  `{:error, error}`.
+
   ## Examples
 
-      iex> Redix.PubSub.client_id(conn)
+      iex> Redix.PubSub.get_client_id(conn)
       {:ok, 123}
+
   """
-  @spec client_id(connection()) :: {:ok, integer()} | {:error, any()}
-  def client_id(conn) do
-    :gen_statem.call(conn, :client_id)
+  @doc since: "1.4.0"
+  @spec get_client_id(connection()) :: {:ok, integer()} | {:error, Redix.ConnectionError.t()}
+  def get_client_id(conn) do
+    :gen_statem.call(conn, :get_client_id)
   end
 end

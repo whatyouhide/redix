@@ -194,10 +194,9 @@ defmodule Redix.PubSub.Connection do
     {:keep_state, data}
   end
 
-  def disconnected({:call, from}, :client_id, data) do
-    :ok = :gen_statem.reply(from, {:error, :disconnected})
-
-    {:keep_state, data}
+  def disconnected({:call, from}, :get_client_id, _data) do
+    reply = {:error, %ConnectionError{reason: :closed}}
+    {:keep_state_and_data, {:reply, from, reply}}
   end
 
   def connected(:internal, :handle_connection, data) do
@@ -231,10 +230,8 @@ defmodule Redix.PubSub.Connection do
     end
   end
 
-  def connected({:call, from}, :client_id, data) do
-    :ok = :gen_statem.reply(from, {:ok, data.client_id})
-
-    {:keep_state, data}
+  def connected({:call, from}, :get_client_id, data) do
+    {:keep_state_and_data, {:reply, from, {:ok, data.client_id}}}
   end
 
   def connected(:info, {transport_closed, socket}, %__MODULE__{socket: socket} = data)

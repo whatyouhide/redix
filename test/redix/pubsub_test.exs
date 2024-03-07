@@ -23,9 +23,15 @@ defmodule Redix.PubSubTest do
     assert info[:fullsweep_after] == fullsweep_after
   end
 
-  test "client_id should be available after start_link/2" do
+  test "client_id/1 should be available after start_link/2" do
     {:ok, pid} = PubSub.start_link(port: @port)
-    assert match?({:ok, client_id} when is_number(client_id), PubSub.client_id(pid))
+    assert {:ok, client_id} = PubSub.get_client_id(pid)
+    assert is_integer(client_id)
+  end
+
+  test "client_id/1 returns an error if connection fails" do
+    {:ok, pid} = PubSub.start_link(port: 9999, name: :redix_pubsub_telemetry_failed_conn_test)
+    assert {:error, %ConnectionError{reason: :closed}} = PubSub.get_client_id(pid)
   end
 
   test "subscribe/unsubscribe flow", %{pubsub: pubsub, conn: conn} do
