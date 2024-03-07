@@ -250,7 +250,13 @@ defmodule Redix.Connector do
     end
   end
 
-  defp sync_command(transport, socket, command, timeout) do
+  @spec sync_command(
+          :ssl | :gen_tcp,
+          :gen_tcp.socket() | :ssl.sslsocket(),
+          [String.t()],
+          integer()
+        ) :: {:ok, any} | {:error, any}
+  def sync_command(transport, socket, command, timeout) do
     with :ok <- transport.send(socket, Redix.Protocol.pack(command)),
          do: recv_response(transport, socket, &Redix.Protocol.parse/1, timeout)
   end

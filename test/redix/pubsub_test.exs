@@ -23,6 +23,11 @@ defmodule Redix.PubSubTest do
     assert info[:fullsweep_after] == fullsweep_after
   end
 
+  test "client_id should be available after start_link/2" do
+    {:ok, pid} = PubSub.start_link(port: @port)
+    assert match?({:ok, client_id} when is_number(client_id), PubSub.client_id(pid))
+  end
+
   test "subscribe/unsubscribe flow", %{pubsub: pubsub, conn: conn} do
     # First, we subscribe.
     assert {:ok, ref} = PubSub.subscribe(pubsub, ["foo", "bar"], self())
