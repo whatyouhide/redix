@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0
+
+### Bug fixes and improvements
+
+  * Introduce `Redix.PubSub.get_client/1`, which can be used to implement [client-side caching](https://redis.io/docs/manual/client-side-caching/).
+
 ## v1.3.0
 
 ### Bug fixes and improvements
