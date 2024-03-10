@@ -24,7 +24,7 @@ defmodule Redix.PubSubTest do
   end
 
   test "client_id/1 should be available after start_link/2" do
-    {:ok, pid} = PubSub.start_link(port: @port)
+    {:ok, pid} = PubSub.start_link(port: @port, fetch_client_id_on_connect: true)
     assert {:ok, client_id} = PubSub.get_client_id(pid)
     assert is_integer(client_id)
   end
@@ -32,6 +32,11 @@ defmodule Redix.PubSubTest do
   test "client_id/1 returns an error if connection fails" do
     {:ok, pid} = PubSub.start_link(port: 9999, name: :redix_pubsub_telemetry_failed_conn_test)
     assert {:error, %ConnectionError{reason: :closed}} = PubSub.get_client_id(pid)
+  end
+
+  test "client_id/1 returns an error if :fetch_client_id_on_connect is not true" do
+    {:ok, pid} = PubSub.start_link(port: @port, fetch_client_id_on_connect: false)
+    assert {:error, %ConnectionError{reason: :client_id_not_stored}} = PubSub.get_client_id(pid)
   end
 
   test "subscribe/unsubscribe flow", %{pubsub: pubsub, conn: conn} do

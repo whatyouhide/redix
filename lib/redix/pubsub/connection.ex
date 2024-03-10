@@ -231,7 +231,14 @@ defmodule Redix.PubSub.Connection do
   end
 
   def connected({:call, from}, :get_client_id, data) do
-    {:keep_state_and_data, {:reply, from, {:ok, data.client_id}}}
+    reply =
+      if id = data.client_id do
+        {:ok, id}
+      else
+        {:error, %ConnectionError{reason: :client_id_not_stored}}
+      end
+
+    {:keep_state_and_data, {:reply, from, reply}}
   end
 
   def connected(:info, {transport_closed, socket}, %__MODULE__{socket: socket} = data)
@@ -573,13 +580,20 @@ defmodule Redix.PubSub.Connection do
 
   defp connect(%__MODULE__{opts: opts, transport: transport} = data) do
     timeout = Keyword.fetch!(opts, :timeout)
+    fetch_client_id? = Keyword.fetch!(opts, :fetch_client_id_on_connect)
 
     with {:ok, socket, address} <- Connector.connect(opts, _conn_pid = self()),
-         {:ok, client_id} <- Connector.sync_command(transport, socket, ["CLIENT", "ID"], timeout),
+         {:ok, client_id} <- maybe_fetch_client_id(fetch_client_id?, transport, socket, timeout),
          :ok <- setopts(data, socket, active: :once) do
       {:ok, socket, address, client_id}
     end
   end
+
+  defp maybe_fetch_client_id(false, _transport, _socket, _timeout),
+    do: {:ok, nil}
+
+  defp maybe_fetch_client_id(true, transport, socket, timeout),
+    do: Connector.sync_command(transport, socket, ["CLIENT", "ID"], timeout)
 
   defp setopts(data, socket, opts) do
     inets_mod(data.transport).setopts(socket, opts)

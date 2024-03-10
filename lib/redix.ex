@@ -206,7 +206,7 @@ defmodule Redix do
 
   The following options can be used to specify the connection:
 
-  #{Redix.StartOptions.options_docs()}
+  #{Redix.StartOptions.options_docs(:redix)}
 
   ## Examples
 

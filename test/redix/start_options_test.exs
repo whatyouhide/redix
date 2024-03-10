@@ -5,7 +5,7 @@ defmodule Redix.StartOptionsTest do
 
   describe "sanitize/1" do
     test "fills in defaults" do
-      opts = StartOptions.sanitize(host: "foo.com", backoff_max: 0, sync_connect: true)
+      opts = sanitize(host: "foo.com", backoff_max: 0, sync_connect: true)
 
       assert opts[:host] == ~c"foo.com"
       assert opts[:backoff_max] == 0
@@ -14,35 +14,35 @@ defmodule Redix.StartOptionsTest do
 
     test "raises on unknown options" do
       assert_raise NimbleOptions.ValidationError, ~r/unknown options \[:foo\]/, fn ->
-        StartOptions.sanitize(foo: "bar")
+        sanitize(foo: "bar")
       end
     end
 
     test "raises if the port is not an integer" do
       assert_raise NimbleOptions.ValidationError, ~r/invalid value for :port option/, fn ->
-        StartOptions.sanitize(port: :not_an_integer)
+        sanitize(port: :not_an_integer)
       end
     end
 
     test "host and port are filled in based on Unix sockets" do
-      opts = StartOptions.sanitize([])
+      opts = sanitize([])
       assert opts[:host] == ~c"localhost"
       assert opts[:port] == 6379
 
-      opts = StartOptions.sanitize(host: {:local, "some_path"})
+      opts = sanitize(host: {:local, "some_path"})
       assert opts[:port] == 0
 
-      opts = StartOptions.sanitize(host: {:local, "some_path"}, port: 0)
+      opts = sanitize(host: {:local, "some_path"}, port: 0)
       assert opts[:port] == 0
 
       assert_raise ArgumentError, ~r/when using Unix domain sockets, the port must be 0/, fn ->
-        StartOptions.sanitize(host: {:local, "some_path"}, port: 1)
+        sanitize(host: {:local, "some_path"}, port: 1)
       end
     end
 
     test "sentinel options" do
       opts =
-        StartOptions.sanitize(sentinel: [sentinels: ["redis://localhost:26379"], group: "foo"])
+        sanitize(sentinel: [sentinels: ["redis://localhost:26379"], group: "foo"])
 
       assert [sentinel] = opts[:sentinel][:sentinels]
       assert sentinel[:host] == ~c"localhost"
@@ -55,39 +55,39 @@ defmodule Redix.StartOptionsTest do
       message = ~r/sentinel address should be specified/
 
       assert_raise ArgumentError, message, fn ->
-        StartOptions.sanitize(sentinel: [sentinels: [:not_a_sentinel], group: "foo"])
+        sanitize(sentinel: [sentinels: [:not_a_sentinel], group: "foo"])
       end
     end
 
     test "sentinel options should have a :sentinels option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :sentinels option not found/, fn ->
-        StartOptions.sanitize(sentinel: [])
+        sanitize(sentinel: [])
       end
     end
 
     test "sentinel options should have a :group option" do
       assert_raise NimbleOptions.ValidationError, ~r/required :group option not found/, fn ->
-        StartOptions.sanitize(sentinel: [sentinels: ["redis://localhos:6379"]])
+        sanitize(sentinel: [sentinels: ["redis://localhos:6379"]])
       end
     end
 
     test "sentinel options should have a non-empty list in :sentinels" do
       assert_raise NimbleOptions.ValidationError, ~r/invalid value for :sentinels option/, fn ->
-        StartOptions.sanitize(sentinel: [sentinels: :not_a_list])
+        sanitize(sentinel: [sentinels: :not_a_list])
       end
 
       assert_raise NimbleOptions.ValidationError, ~r/invalid value for :sentinels option/, fn ->
-        StartOptions.sanitize(sentinel: [sentinels: []])
+        sanitize(sentinel: [sentinels: []])
       end
     end
 
     test "every sentinel address must have a host and a port" do
       assert_raise ArgumentError, "a host should be specified for each sentinel", fn ->
-        StartOptions.sanitize(sentinel: [sentinels: ["redis://:6379"]])
+        sanitize(sentinel: [sentinels: ["redis://:6379"]])
       end
 
       assert_raise ArgumentError, "a port should be specified for each sentinel", fn ->
-        StartOptions.sanitize(sentinel: [sentinels: ["redis://localhost"]])
+        sanitize(sentinel: [sentinels: ["redis://localhost"]])
       end
     end
 
@@ -95,7 +95,7 @@ defmodule Redix.StartOptionsTest do
       message = ":host or :port can't be passed as option if :sentinel is used"
 
       assert_raise ArgumentError, message, fn ->
-        StartOptions.sanitize(
+        sanitize(
           sentinel: [sentinels: ["redis://localhost:6379"], group: "foo"],
           host: "localhost"
         )
@@ -104,7 +104,7 @@ defmodule Redix.StartOptionsTest do
 
     test "sentinel password string" do
       opts =
-        StartOptions.sanitize(
+        sanitize(
           sentinel: [
             sentinels: [
               [host: "host1", port: 26379, password: "secret1"],
@@ -127,7 +127,7 @@ defmodule Redix.StartOptionsTest do
       mfa2 = {System, :fetch_env!, ["REDIS_PASS2"]}
 
       opts =
-        StartOptions.sanitize(
+        sanitize(
           sentinel: [
             sentinels: [
               [host: "host1", port: 26379, password: mfa1],
@@ -147,11 +147,15 @@ defmodule Redix.StartOptionsTest do
 
     test "gen_statem options are allowed" do
       opts =
-        StartOptions.sanitize(hibernate_after: 1000, debug: [], spawn_opt: [fullsweep_after: 0])
+        sanitize(hibernate_after: 1000, debug: [], spawn_opt: [fullsweep_after: 0])
 
       assert opts[:hibernate_after] == 1000
       assert opts[:debug] == []
       assert opts[:spawn_opt] == [fullsweep_after: 0]
     end
+  end
+
+  defp sanitize(opts) do
+    StartOptions.sanitize(:redix_pubsub, opts)
   end
 end

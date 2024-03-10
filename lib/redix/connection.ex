@@ -24,7 +24,7 @@ defmodule Redix.Connection do
   ## Public API
 
   def start_link(opts) when is_list(opts) do
-    opts = StartOptions.sanitize(opts)
+    opts = StartOptions.sanitize(:redix, opts)
     {gen_statem_opts, opts} = Keyword.split(opts, [:hibernate_after, :debug, :spawn_opt])
 
     case Keyword.fetch(opts, :name) do

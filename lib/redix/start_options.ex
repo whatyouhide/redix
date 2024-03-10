@@ -146,6 +146,16 @@ defmodule Redix.StartOptions do
       [`:sys` module](http://www.erlang.org/doc/man/sys.html) is invoked.
       """
     ],
+    fetch_client_id_on_connect: [
+      type: :boolean,
+      default: false,
+      doc: """
+      if `true`, Redix will fetch the client ID after connecting to Redis and before
+      subscribing to any topic. You can then read the client ID of the pub/sub connection
+      with `get_client_id/1`. This option uses the `CLIENT ID` command under the hood,
+      which is available since Redis 5.0.0. *This option is available since v1.4.1*.
+      """
+    ],
     sentinel: [
       type: :keyword_list,
       doc: """
@@ -226,17 +236,23 @@ defmodule Redix.StartOptions do
     ]
   ]
 
-  @start_link_opts_schema NimbleOptions.new!(start_link_opts_schema)
+  @redix_start_link_opts_schema start_link_opts_schema |> Keyword.drop([:fetch_client_id_on_connect]) |> NimbleOptions.new!()
+  @redix_pubsub_start_link_opts_schema NimbleOptions.new!(start_link_opts_schema)
 
-  @spec options_docs() :: String.t()
-  def options_docs do
-    NimbleOptions.docs(@start_link_opts_schema)
-  end
+  @spec options_docs(:redix | :redix_pubsub) :: String.t()
+  def options_docs(:redix), do: NimbleOptions.docs(@redix_start_link_opts_schema)
+  def options_docs(:redix_pubsub), do: NimbleOptions.docs(@redix_pubsub_start_link_opts_schema)
 
-  @spec sanitize(keyword()) :: keyword()
-  def sanitize(options) when is_list(options) do
+  @spec sanitize(:redix | :redix_pubsub, keyword()) :: keyword()
+  def sanitize(conn_type, options) when is_list(options) do
+    schema =
+      case conn_type do
+        :redix -> @redix_start_link_opts_schema
+        :redix_pubsub -> @redix_pubsub_start_link_opts_schema
+      end
+
     options
-    |> NimbleOptions.validate!(@start_link_opts_schema)
+    |> NimbleOptions.validate!(schema)
     |> maybe_sanitize_sentinel_opts()
     |> maybe_sanitize_host_and_port()
   end

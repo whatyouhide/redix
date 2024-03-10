@@ -216,7 +216,7 @@ defmodule Redix.PubSub do
 
   The following options can be used to specify the connection:
 
-  #{StartOptions.options_docs()}
+  #{StartOptions.options_docs(:redix_pubsub)}
 
   ## Examples
 
@@ -238,7 +238,7 @@ defmodule Redix.PubSub do
   end
 
   def start_link(opts) when is_list(opts) do
-    opts = StartOptions.sanitize(opts)
+    opts = StartOptions.sanitize(:redix_pubsub, opts)
     {gen_statem_opts, opts} = Keyword.split(opts, [:hibernate_after, :debug, :spawn_opt])
 
     case Keyword.fetch(opts, :name) do
@@ -427,10 +427,26 @@ defmodule Redix.PubSub do
   If the pub/sub connection is currently disconnected, this function returns
   `{:error, error}`.
 
+  This function requires the `Redix.PubSub` connection to have been started
+  with the `fetch_client_id_on_connect: true` option. This requires
+  Redis 5.0.0 or later, since that's where the
+  [`CLIENT ID` command](https://redis.io/commands/client-id/)
+  was introduced.
+
   ## Examples
 
       iex> Redix.PubSub.get_client_id(conn)
       {:ok, 123}
+
+  If the connection is not currently connected:
+
+      iex> Redix.PubSub.get_client_id(conn)
+      {:error, %Redix.ConnectionError{reason: :disconnected}
+
+  If the connection was not storing the client ID:
+
+      iex> Redix.PubSub.get_client_id(conn)
+      {:error, %Redix.ConnectionError{reason: :client_id_not_stored}
 
   """
   @doc since: "1.4.0"
