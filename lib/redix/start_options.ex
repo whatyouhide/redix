@@ -236,7 +236,9 @@ defmodule Redix.StartOptions do
     ]
   ]
 
-  @redix_start_link_opts_schema start_link_opts_schema |> Keyword.drop([:fetch_client_id_on_connect]) |> NimbleOptions.new!()
+  @redix_start_link_opts_schema start_link_opts_schema
+                                |> Keyword.drop([:fetch_client_id_on_connect])
+                                |> NimbleOptions.new!()
   @redix_pubsub_start_link_opts_schema NimbleOptions.new!(start_link_opts_schema)
 
   @spec options_docs(:redix | :redix_pubsub) :: String.t()
