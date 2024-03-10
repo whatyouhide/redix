@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.1
+
+### Bug fixes and improvements
+
+  * `Redix.PubSub.get_client/1` is not available only behind the `:fetch_client_id_on_connect` option that you can pass to `Redix.PubSub.start_link/1`. This option defaults to `false`, so that this version of Redix is compatible with Redis v4 or earlier out of the box. To opt in into the behavior desired for [client-side caching](https://redis.io/docs/manual/client-side-caching/) and use `Redix.PubSub.get_client/1`, pass `fetch_client_id_on_connect: true` to `Redix.PubSub.start_link/1`.
+
 ## v1.4.0
 
 ### Bug fixes and improvements
