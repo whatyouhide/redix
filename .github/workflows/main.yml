@@ -18,11 +18,11 @@ jobs:
             elixir: "1.16.0"
             version-type: strict
             dialyzer: true
+            lint: true
 
           - otp: "25.3"
             elixir: "1.14.3"
             coverage: true
-            lint: true
             version-type: loose
 
           - otp: "23.0"
