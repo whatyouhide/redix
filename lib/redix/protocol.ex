@@ -25,6 +25,7 @@ defmodule Redix.Protocol do
 
   @crlf "\r\n"
   @crlf_iodata [?\r, ?\n]
+  @max_integer_digits 18
 
   @doc ~S"""
   Packs a list of Elixir terms to a Redis (RESP) array.
@@ -79,6 +80,9 @@ defmodule Redix.Protocol do
   """
   @spec parse(binary) :: on_parse(redis_value)
   def parse(data)
+
+  # Clause for the most common response.
+  def parse("+OK\r\n" <> rest), do: {:ok, "OK", rest}
 
   def parse("+" <> rest), do: parse_simple_string(rest)
   def parse("-" <> rest), do: parse_error(rest)
@@ -135,12 +139,25 @@ defmodule Redix.Protocol do
     |> resolve_cont(&{:ok, %Redix.Error{message: &1}, &2})
   end
 
-  defp parse_integer(""), do: {:continuation, &parse_integer/1}
+  # Fast integer clauses for non-split packets.
+  for n <- 1..@max_integer_digits do
+    defp parse_integer(<<digits::binary-size(unquote(n)), "\r\n", rest::binary>> = binary) do
+      String.to_integer(digits)
+    rescue
+      ArgumentError -> parse_integer_with_splits(binary)
+    else
+      int -> {:ok, int, rest}
+    end
+  end
 
-  defp parse_integer("-" <> rest),
+  defp parse_integer(bin), do: parse_integer_with_splits(bin)
+
+  defp parse_integer_with_splits(""), do: {:continuation, &parse_integer_with_splits/1}
+
+  defp parse_integer_with_splits("-" <> rest),
     do: resolve_cont(parse_integer_without_sign(rest), &{:ok, -&1, &2})
 
-  defp parse_integer(bin), do: parse_integer_without_sign(bin)
+  defp parse_integer_with_splits(bin), do: parse_integer_without_sign(bin)
 
   defp parse_integer_without_sign("") do
     {:continuation, &parse_integer_without_sign/1}
