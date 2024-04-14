@@ -50,6 +50,19 @@ defmodule Redix.SocketOwner do
     end
   end
 
+  # The connection is notifying the socket owner that sending failed. If the socket owner
+  # gets this, it can stop normally without waiting for the "closed"/"error" network
+  # message from the socket.
+  def handle_info({:send_errored, conn}, %__MODULE__{conn: conn} = state) do
+    error =
+      case state.transport do
+        :ssl -> {:ssl_error, :closed}
+        :gen_tcp -> {:tcp_error, :closed}
+      end
+
+    stop(error, state)
+  end
+
   def handle_info({transport, socket, data}, %__MODULE__{socket: socket} = state)
       when transport in [:tcp, :ssl] do
     :ok = setopts(state, socket, active: :once)
