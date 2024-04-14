@@ -271,9 +271,13 @@ defmodule Redix.Connection do
           {:keep_state, data, actions}
 
         {:error, _reason} ->
-          # The socket owner will get a closed message at some point, so we just move to the
-          # disconnected state.
+          # The socket owner is not guaranteed to get a "closed" message, even if we close the
+          # socket here. So, we move to the disconnected state but also notify the owner that
+          # sending failed. If the owner already got the "closed" message, it exited so this
+          # message goes nowere, otherwise the socket owner will exit and notify the connection.
+          # See https://github.com/whatyouhide/redix/issues/265.
           :ok = data.transport.close(data.socket)
+          send(data.socket_owner, {:send_errored, self()})
           {:next_state, :disconnected, data}
       end
     else
