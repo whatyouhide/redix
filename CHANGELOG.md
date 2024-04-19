@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.2
+
+### Bug fixes and improvements
+
+  * Speed up `Redix.Protocol` a little bit for common responses (`"OK"` and friends).
+  * Fix a bug where `:tcp_closed`/`:ssl_closed` and `:tcp_error`/`:ssl_error` messages wouldn't arrive to the socket owner, and Redix would get stuck in a disconnected state when sending would error out. See the discussion in [#265](https://github.com/whatyouhide/redix/issues/265).
+
 ## v1.4.1
 
 ### Bug fixes and improvements
