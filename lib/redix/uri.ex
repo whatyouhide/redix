@@ -26,8 +26,8 @@ defmodule Redix.URI do
   def to_start_options(uri) when is_binary(uri) do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
-    unless scheme in ["redis", "rediss"] do
-      raise ArgumentError, "expected scheme to be redis:// or rediss://, got: #{scheme}://"
+    unless scheme in ["redis", "rediss", "valkey"] do
+      raise ArgumentError, "expected scheme to be redis://, valkey:// or rediss://, got: #{scheme}://"
     end
 
     {username, password} = username_and_password(uri)
