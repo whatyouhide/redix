@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.0
+
+### New features
+
+  * Add support for the `valkey://` scheme when using URIs.
+
 ## v1.4.2
 
 ### Bug fixes and improvements
