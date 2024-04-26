@@ -9,7 +9,7 @@
 
 ![dalle](https://user-images.githubusercontent.com/3890250/208236010-a89acc2a-ac79-44ca-9413-c1fa7c664ffe.jpg)
 
-Redix is a [Redis][redis] client written in pure Elixir with focus on speed, correctness, and resiliency (that is, being able to automatically reconnect to Redis in case of network errors).
+Redix is a [Redis][redis] and [Valkey][valkey] client written in pure Elixir with focus on speed, correctness, and resiliency (that is, being able to automatically reconnect to Redis in case of network errors).
 
 This README refers to the main branch of Redix, not the latest released version on Hex. Make sure to check [the documentation][docs] for the version you're using.
 
@@ -153,3 +153,4 @@ Redix is released under the MIT license. See the [license file](LICENSE.txt).
 [docker]: https://www.docker.com
 [docker-compose]: https://docs.docker.com/compose/
 [redis-terminology-issue]: https://github.com/antirez/redis/issues/5335
+[valkey]: https://valkey.io/

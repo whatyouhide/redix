@@ -1,6 +1,7 @@
 defmodule Redix do
   @moduledoc """
-  This module provides the main API to interface with Redis.
+  This module provides the main API to interface with [Redis](http://redis.io) and
+  [Valkey](https://valkey.io/).
 
   ## Overview
 
@@ -195,12 +196,18 @@ defmodule Redix do
     * `redis://:secret@localhost:6397`
     * `redis://username:secret@localhost:6397`
     * `redis://example.com:6380/1`
+    * `rediss://example.com:6380/1` (for SSL connections)
+    * `valkey://example.com:6380/1` (for [Valkey](https://valkey.io/) connections)
 
   The only mandatory thing when using URIs is the host. All other elements are optional
   and their default value can be found in the "Options" section below.
 
   In earlier versions of Redix, the username in the URI was ignored. Redis 6 introduced [ACL
   support](https://redis.io/topics/acl). Now, Redix supports usernames as well.
+
+  > #### Valkey {: .info}
+  >
+  > The `valkey://` schema is supported since Redix v1.5.0.
 
   ## Options
 

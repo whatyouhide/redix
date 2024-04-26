@@ -7,7 +7,7 @@ defmodule Redix.URITest do
 
   describe "to_start_options/1" do
     test "invalid scheme" do
-      message = "expected scheme to be redis:// or rediss://, got: foo://"
+      message = "expected scheme to be redis://, valkey://, or rediss://, got: foo://"
 
       assert_raise ArgumentError, message, fn ->
         to_start_options("foo://example.com")
@@ -84,6 +84,15 @@ defmodule Redix.URITest do
       opts = to_start_options("rediss://example.com")
       assert opts[:host] == "example.com"
       assert opts[:ssl] == true
+      assert is_nil(opts[:port])
+      assert is_nil(opts[:database])
+      assert is_nil(opts[:password])
+    end
+
+    test "accepts valkey scheme" do
+      opts = to_start_options("valkey://example.com")
+      assert opts[:host] == "example.com"
+      assert is_nil(opts[:ssl])
       assert is_nil(opts[:port])
       assert is_nil(opts[:database])
       assert is_nil(opts[:password])

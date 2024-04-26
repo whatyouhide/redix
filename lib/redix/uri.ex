@@ -12,6 +12,11 @@ defmodule Redix.URI do
 
       redis://[username:password@]host[:port][/db]
 
+> #### Valkey {: .tip}
+  >
+  > URIs also work with [Valkey](https://valkey.io/), a Redis-compatible in-memory key-value
+  > store. Use `valkey://` as the scheme instead of `redis://`.
+
   ## Examples
 
       iex> Redix.URI.to_start_options("redis://example.com")
@@ -27,7 +32,7 @@ defmodule Redix.URI do
     %URI{host: host, port: port, scheme: scheme} = uri = URI.parse(uri)
 
     unless scheme in ["redis", "rediss", "valkey"] do
-      raise ArgumentError, "expected scheme to be redis://, valkey:// or rediss://, got: #{scheme}://"
+      raise ArgumentError, "expected scheme to be redis://, valkey://, or rediss://, got: #{scheme}://"
     end
 
     {username, password} = username_and_password(uri)
