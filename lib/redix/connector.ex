@@ -32,9 +32,16 @@ defmodule Redix.Connector do
 
     with {:ok, socket} <- transport.connect(host, port, socket_opts, timeout),
          :ok <- setup_socket_buffers(transport, socket) do
+      # Here, we should stop if AUTHing or SELECTing a DB fails with a *semantic* error
+      # because disconnecting and retrying doesn't make sense, but we should not
+      # stop if the issue is at the network layer, because it might happen due to
+      # a race condition where the network conn breaks after connecting but before
+      # AUTH/SELECT.
       case auth_and_select(transport, socket, opts, timeout) do
         :ok -> {:ok, socket, Format.format_host_and_port(host, port)}
-        {:error, reason} -> {:stop, reason}
+        {:error, %Redix.Error{} = error} -> {:stop, error}
+        {:error, :extra_bytes_after_reply} -> {:stop, :extra_bytes_after_reply}
+        {:error, reason} -> {:error, reason}
       end
     end
   end
@@ -255,7 +262,11 @@ defmodule Redix.Connector do
           :gen_tcp.socket() | :ssl.sslsocket(),
           [String.t()],
           integer()
-        ) :: {:ok, any} | {:error, any}
+        ) ::
+          {:ok, any}
+          | {:error, :extra_bytes_after_reply}
+          | {:error, Redix.Error.t()}
+          | {:error, :inet.posix()}
   def sync_command(transport, socket, command, timeout) do
     with :ok <- transport.send(socket, Redix.Protocol.pack(command)),
          do: recv_response(transport, socket, &Redix.Protocol.parse/1, timeout)
