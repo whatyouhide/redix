@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.1
+
+### Bug fixes
+
+  * Fix a race condition that would cause connections to stop and not reconnect in cases where the network would fail *after* establishing the connection but *before* issuing potential `AUTH` or `SELECT` commands. This is a recommended upgrade for everyone.
+
 ## v1.5.0
 
 ### New features
