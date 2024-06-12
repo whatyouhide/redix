@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - otp: "26.2"
-            elixir: "1.16.0"
+          - otp: "27.0"
+            elixir: "1.17.0"
             version-type: strict
             dialyzer: true
             lint: true
@@ -26,7 +26,7 @@ jobs:
             version-type: loose
 
           - otp: "23.0"
-            elixir: "1.11.2"
+            elixir: "1.12"
             version-type: loose
 
     env:
