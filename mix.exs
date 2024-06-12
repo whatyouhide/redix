@@ -11,7 +11,7 @@ defmodule Redix.Mixfile do
     [
       app: :redix,
       version: @version,
-      elixir: "~> 1.11",
+      elixir: "~> 1.12",
       build_embedded: Mix.env() == :prod,
       start_permanent: Mix.env() == :prod,
       deps: deps(),
@@ -70,7 +70,7 @@ defmodule Redix.Mixfile do
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.17", only: :test},
       {:propcheck, "~> 1.1", only: :test},
-      {:stream_data, "~> 0.4", only: [:dev, :test]}
+      {:stream_data, "~> 1.1", only: [:dev, :test]}
     ]
   end
 end
