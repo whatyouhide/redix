@@ -7,7 +7,7 @@
 
 > Fast, pipelined, resilient Redis client for Elixir.
 
-![dalle](https://user-images.githubusercontent.com/3890250/208236010-a89acc2a-ac79-44ca-9413-c1fa7c664ffe.jpg)
+![DALL·E Golden Retriever](https://github.com/user-attachments/assets/cd7f8c7a-49ba-46e5-8d35-2b0fa371fdb9)
 
 Redix is a [Redis][redis] and [Valkey][valkey] client written in pure Elixir with focus on speed, correctness, and resiliency (that is, being able to automatically reconnect to Redis in case of network errors).
 
