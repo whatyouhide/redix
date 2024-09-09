@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.5.2
+
+### Bug fixes
+
+  * Fix a bug with `Redix.transaction_pipeline/2`, which would return `{:ok, Redix.Error.t()}` in some cases. Those cases now return `{:error, Redix.Error.t()}`, which is what was documented in the spec.
+  * Fix an issue with sentinels reporting their peers with IPv4 or IPv6 addresses. In these cases, Redix wouldn't be able to connect—that has been fixed.
+
 ## v1.5.1
 
 ### Bug fixes
