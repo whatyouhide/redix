@@ -4,7 +4,7 @@ defmodule Redix.Format do
   # Used for formatting things to print or log or anything like that.
 
   @spec format_host_and_port(host, :inet.port_number()) :: String.t()
-        when host: {:local, String.t()} | binary()
+        when host: {:local, String.t()} | charlist() | binary() | :inet.ip_address()
   def format_host_and_port(host, port)
 
   def format_host_and_port({:local, path}, 0) when is_binary(path), do: path
