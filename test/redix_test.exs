@@ -192,6 +192,11 @@ defmodule RedixTest do
       end
     end
 
+    test "with IPv4" do
+      {:ok, pid} = Redix.start_link("redis://127.0.0.1:6379", sync_connect: true)
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
     test "with IPv6" do
       {:ok, pid} =
         Redix.start_link("redis://[::1]:6379",
