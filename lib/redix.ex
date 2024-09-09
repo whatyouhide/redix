@@ -629,8 +629,12 @@ defmodule Redix do
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def transaction_pipeline(conn, [_ | _] = commands, options \\ []) when is_list(options) do
-    with {:ok, responses} <- Redix.pipeline(conn, [["MULTI"]] ++ commands ++ [["EXEC"]], options),
-         do: {:ok, List.last(responses)}
+    with {:ok, responses} <- Redix.pipeline(conn, [["MULTI"]] ++ commands ++ [["EXEC"]], options) do
+      case List.last(responses) do
+        %Redix.Error{} = error -> {:error, error}
+        other -> {:ok, other}
+      end
+    end
   end
 
   @doc """

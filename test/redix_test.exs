@@ -528,6 +528,18 @@ defmodule RedixTest do
         Redix.transaction_pipeline!(conn, commands, timeout: 0)
       end
     end
+
+    # Regression for https://github.com/whatyouhide/redix/issues/271
+    test "returns {:error, error} if the command errors out", %{conn: conn} do
+      assert {:error, %Redix.Error{} = error} =
+               Redix.transaction_pipeline(conn, [
+                 ["SET", "foo", "bar"],
+                 ["SADD", "bar"],
+                 ["GET", "foo"]
+               ])
+
+      assert error.message =~ "EXECABORT"
+    end
   end
 
   describe "noreply_* functions" do
