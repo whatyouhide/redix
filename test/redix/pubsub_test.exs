@@ -7,7 +7,7 @@ defmodule Redix.PubSubTest do
 
   @moduletag :pubsub
 
-  # See docker-compose.
+  # See docker-compose.yml.
   @port 6380
 
   setup do

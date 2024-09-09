@@ -131,10 +131,10 @@ Redix is low-level, but it's still built to handle most things thrown at it. For
 
 ## Contributing
 
-To run the Redix test suite you will have to have Redis running locally. Redix requires a somewhat complex setup for running tests (because it needs a few instances running, for pub/sub and sentinel). For this reason, in this repository you'll find a `docker-compose.yml` file so that you can use [Docker][docker] and [docker-compose][] to spin up all the necessary Redis instances with just one command. Make sure you have Docker installed and then just run:
+To run the Redix test suite you will have to have Redis running locally. Redix requires a somewhat complex setup for running tests (because it needs a few instances running, for pub/sub and sentinel). For this reason, in this repository you'll find a `docker-compose.yml` file so that you can use [Docker][docker] and [docker compose][docker-compose] to spin up all the necessary Redis instances with just one command. Make sure you have Docker installed and then just run:
 
 ```bash
-docker-compose up
+docker compose up
 ```
 
 Now, you're ready to run tests with the `$ mix test` command.

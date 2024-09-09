@@ -49,6 +49,7 @@ defmodule Redix.SentinelTest do
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "foo", payload: "hello"}}
   end
 
+  @tag :capture_log
   test "when no sentinels are reachable" do
     Process.flag(:trap_exit, true)
 
