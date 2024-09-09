@@ -137,15 +137,16 @@ defmodule Redix.Connector do
                Logger.debug(fn ->
                  "Sentinel reported #{sentinel_opts[:role]}: #{server_host}:#{server_port}"
                end),
-             {:ok, server_socket, _address} <-
+             server_host = string_address_to_erlang(server_host),
+             {:ok, server_socket, address} <-
                connect_directly(
-                 String.to_charlist(server_host),
+                 server_host,
                  String.to_integer(server_port),
                  opts
                ),
              :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
           :ok = transport.close(sent_socket)
-          {:ok, server_socket, "#{server_host}:#{server_port}"}
+          {:ok, server_socket, address}
         else
           {cause, reason} when cause in [:error, :stop] ->
             :telemetry.execute([:redix, :failed_connection], %{}, %{
@@ -169,6 +170,19 @@ defmodule Redix.Connector do
 
         connect_through_sentinel(rest, sentinel_opts, opts, transport, conn_pid)
     end
+  end
+
+  defp string_address_to_erlang(address) when is_binary(address) do
+    address = String.to_charlist(address)
+
+    case :inet.parse_address(address) do
+      {:ok, ip} -> ip
+      {:error, :einval} -> address
+    end
+  end
+
+  defp string_address_to_erlang(address) do
+    address
   end
 
   defp connect_to_sentinel(sentinel, sentinel_opts, transport) do
