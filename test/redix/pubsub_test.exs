@@ -365,6 +365,29 @@ defmodule Redix.PubSubTest do
     refute new_state.continuation
   end
 
+  test "pubsub: multiple pings succeeds", %{pubsub: pubsub} do
+    assert :ok = PubSub.ping(pubsub)
+    assert :ok = PubSub.ping(pubsub)
+  end
+
+  test "pubsub: ping gives error when disconnected", %{pubsub: pubsub} do
+    {:connected, state} = :sys.get_state(pubsub)
+    socket = state.socket
+
+    send(pubsub, {:tcp_closed, socket})
+    assert {:disconnected, _new_state} = :sys.get_state(pubsub)
+
+    assert :error = PubSub.ping(pubsub)
+  end
+
+  test "pubsub: multiple pings succeeds when subscribed to channel", %{pubsub: pubsub} do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}, 1000
+
+    assert :ok = PubSub.ping(pubsub)
+    assert :ok = PubSub.ping(pubsub)
+  end
+
   defp wait_until_passes(timeout, fun) when timeout <= 0 do
     fun.()
   end

@@ -15,7 +15,8 @@ defmodule Redix.PubSub.Connection do
     :connected_address,
     :client_id,
     subscriptions: %{},
-    monitors: %{}
+    monitors: %{},
+    pings: []
   ]
 
   @backoff_exponent 1.5
@@ -161,6 +162,29 @@ defmodule Redix.PubSub.Connection do
     {:keep_state, data}
   end
 
+  def disconnected(:info, {:ping_callback, random_string}, data) do
+    data =
+      case List.first(data.pings) do
+        nil ->
+          # already processed
+          data
+
+        ping ->
+          case ping.random_string do
+            ^random_string ->
+              :ok = :gen_statem.reply(ping.from, :error)
+              [_ping | pings] = data.pings
+              Map.put(data, :pings, pings)
+
+            _ ->
+              # already processed
+              data
+          end
+      end
+
+    {:keep_state, data}
+  end
+
   def disconnected({:call, from}, {operation, targets, pid}, data)
       when operation in [:unsubscribe, :punsubscribe] do
     :ok = :gen_statem.reply(from, :ok)
@@ -192,6 +216,11 @@ defmodule Redix.PubSub.Connection do
 
     data = demonitor_if_not_subscribed_to_anything(data, pid)
     {:keep_state, data}
+  end
+
+  def disconnected({:call, from}, :ping, _data) do
+    reply = :error
+    {:keep_state_and_data, {:reply, from, reply}}
   end
 
   def disconnected({:call, from}, :get_client_id, _data) do
@@ -230,6 +259,19 @@ defmodule Redix.PubSub.Connection do
     end
   end
 
+  def connected({:call, from}, :ping, data) do
+    random_string = :crypto.strong_rand_bytes(12) |> Base.encode64()
+    pipeline = [["PING", "ping:#{random_string}"]]
+    data.transport.send(data.socket, Enum.map(pipeline, &Protocol.pack/1))
+
+    Process.send_after(self(), {:ping_callback, random_string}, 5000)
+
+    pings = data.pings ++ [%{random_string: random_string, from: from}]
+    data = Map.put(data, :pings, pings)
+
+    {:keep_state, data}
+  end
+
   def connected({:call, from}, :get_client_id, data) do
     reply =
       if id = data.client_id do
@@ -239,6 +281,29 @@ defmodule Redix.PubSub.Connection do
       end
 
     {:keep_state_and_data, {:reply, from, reply}}
+  end
+
+  def connected(:info, {:ping_callback, random_string}, data) do
+    data =
+      case List.first(data.pings) do
+        nil ->
+          # already processed
+          data
+
+        ping ->
+          case ping.random_string do
+            ^random_string ->
+              :ok = :gen_statem.reply(ping.from, :error)
+              [_ping | pings] = data.pings
+              Map.put(data, :pings, pings)
+
+            _ ->
+              # already processed
+              data
+          end
+      end
+
+    {:keep_state, data}
   end
 
   def connected(:info, {transport_closed, socket}, %__MODULE__{socket: socket} = data)
@@ -349,6 +414,25 @@ defmodule Redix.PubSub.Connection do
   defp handle_pubsub_msg(data, ["pmessage", pattern, channel, payload]) do
     properties = %{channel: channel, pattern: pattern, payload: payload}
     handle_pubsub_message_with_payload(data, {:pattern, pattern}, :pmessage, properties)
+  end
+
+  defp handle_pubsub_msg(data, "ping:" <> _rest = reply) do
+    handle_pubsub_msg(data, ["pong", reply])
+  end
+
+  defp handle_pubsub_msg(data, ["pong", "ping:" <> reply]) do
+    [ping | pings] = data.pings
+    data = Map.put(data, :pings, pings)
+
+    res =
+      case ping.random_string do
+        ^reply -> :ok
+        _ -> :error
+      end
+
+    :ok = :gen_statem.reply(ping.from, res)
+
+    {:ok, data}
   end
 
   defp handle_pubsub_message_with_payload(data, target_key, kind, properties) do
