@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - otp: "27.0"
-            elixir: "1.17"
+          - otp: "27.2"
+            elixir: "1.18"
             os: ubuntu-latest
             dialyzer: true
             lint: true
