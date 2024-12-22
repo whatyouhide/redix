@@ -9,7 +9,7 @@ jobs:
   publish:
     name: Publish to Hex
 
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout this repository
@@ -18,8 +18,8 @@ jobs:
       - name: Install Erlang and Elixir
         uses: erlef/setup-beam@v1
         with:
-          otp-version: "26.0.2"
-          elixir-version: "1.15.4"
+          otp-version: "27.2"
+          elixir-version: "1.18"
 
       - name: Fetch and compile dependencies
         run: mix do deps.get + deps.compile
