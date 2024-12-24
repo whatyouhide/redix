@@ -330,6 +330,17 @@ defmodule Redix.PubSub do
   end
 
   @doc """
+  Sends a ping and waits for a reply from the server.
+
+  Upon a successful reply from the server, :ok will be returned. If no reply is received within 5 seconds, :error will be returned.
+
+  """
+  @spec ping(connection()) :: :ok | :error
+  def ping(conn) do
+    :gen_statem.call(conn, :ping)
+  end
+
+  @doc """
   Subscribes `subscriber` to the given pattern or list of patterns.
 
   Works like `subscribe/3` but subscribing `subscriber` to a pattern (or list of
