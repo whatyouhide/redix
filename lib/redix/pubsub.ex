@@ -159,7 +159,7 @@ defmodule Redix.PubSub do
         {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "my_channel"}} -> :ok
       end
 
-      Redix.command!(client, ~w(PUBLISH my_channel hello)
+      Redix.command!(client, ~w(PUBLISH my_channel hello))
 
       receive do
         {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "my_channel"} = properties} ->
