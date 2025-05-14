@@ -249,10 +249,20 @@ defmodule Redix.Connector do
     ca_store_mod = CAStore
 
     default_opts =
-      if Code.ensure_loaded?(ca_store_mod) do
-        [{:cacertfile, ca_store_mod.file_path()} | @default_ssl_opts]
-      else
+      if Keyword.has_key?(user_socket_opts, :cacertfile) or
+           Keyword.has_key?(user_socket_opts, :cacerts) do
         @default_ssl_opts
+      else
+        try do
+          [{:cacerts, :public_key.cacerts_get()} | @default_ssl_opts]
+        rescue
+          _ ->
+            if Code.ensure_loaded?(ca_store_mod) do
+              [{:cacertfile, ca_store_mod.file_path()} | @default_ssl_opts]
+            else
+              @default_ssl_opts
+            end
+        end
       end
       |> Keyword.drop(Keyword.keys(user_socket_opts))
 
