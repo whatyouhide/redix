@@ -9,25 +9,19 @@ on:
 jobs:
   test:
     name: Test (Elixir ${{matrix.elixir}} | Erlang/OTP ${{matrix.otp}})
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
           - otp: "27.2"
             elixir: "1.18"
-            os: ubuntu-latest
-            dialyzer: true
+            dialyzer: trueos
             lint: true
 
           - otp: "25.3"
             elixir: "1.14.3"
-            os: ubuntu-20.04
             coverage: true
-
-          - otp: "23.0"
-            elixir: "1.12"
-            os: ubuntu-20.04
 
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
