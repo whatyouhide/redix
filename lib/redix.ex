@@ -82,11 +82,13 @@ defmodule Redix do
   Redix supports SSL by passing `ssl: true` in `start_link/1`. You can use the `:socket_opts`
   option to pass options that will be used by the SSL socket, like certificates.
 
-  If the [CAStore](https://hex.pm/packages/castore) dependency is available, Redix will pick
-  up its CA certificate store file automatically. You can select a different CA certificate
-  store by passing in the `:cacertfile` or `:cacerts` socket options. If the server uses a
-  self-signed certificate, such as for testing purposes, disable certificate verification by
-  passing `verify: :verify_none` in the socket options.
+  If you are using Erlang/OTP 25+, Redix will use the system CA certificate store
+  automatically. If that is not available and the [CAStore](https://hex.pm/packages/castore)
+  dependency is available, Redix will use the CA certificate store file from CAStore
+  instead. You can select a different CA certificate store by passing in the `:cacertfile`
+  or `:cacerts` socket options. If the server uses a self-signed certificate, such as for
+  testing purposes, disable certificate verification by passing `verify: :verify_none` in
+  the socket options.
 
   Some Redis servers, notably Amazon ElastiCache, use wildcard certificates that require
   additional socket options for successful verification (requires OTP 21.0 or later):

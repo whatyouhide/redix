@@ -119,8 +119,9 @@ defmodule Redix.StartOptions do
       overridden by Redix so that it functions properly.
 
       If `ssl: true`, then these are added to the default: `[verify: :verify_peer, depth: 3]`.
-      If the `CAStore` dependency is available, the `:cacertfile` option is added
-      to the SSL options by default as well.
+      If you are using Erlang/OTP 25+ or if the `CAStore` dependency is available, the
+      `:cacerts` or `:cacertfile` option is added to the SSL options by default as well,
+      unless either option is already specified.
       """
     ],
     hibernate_after: [
