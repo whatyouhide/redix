@@ -73,7 +73,7 @@ defmodule Redix do
 
   > ### Blocked `CLIENT` commands {: .warning}
   >
-  > Some servers may block `CLIENT` commands. For example, Google Memorystorage is [does
+  > Some servers may block `CLIENT` commands. For example, Google Memorystorage [does
   > this](https://cloud.google.com/memorystore/docs/redis/product-constraints).
   > If this is the case, the `noreply_*` functions mentioned above won't work.
 
