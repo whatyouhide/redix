@@ -199,6 +199,19 @@ defmodule Redix.PubSub.Connection do
     {:keep_state_and_data, {:reply, from, reply}}
   end
 
+  def disconnected(:info, {:DOWN, _ref, :process, pid, _reason}, data) do
+    data = update_in(data.monitors, &Map.delete(&1, pid))
+
+    targets = Map.keys(data.subscriptions)
+    channels = for {:channel, channel} <- targets, do: channel
+    patterns = for {:pattern, pattern} <- targets, do: pattern
+
+    with {:ok, data} <- unsubscribe_pid_from_targets(data, :unsubscribe, channels, pid),
+         {:ok, data} <- unsubscribe_pid_from_targets(data, :punsubscribe, patterns, pid) do
+      {:keep_state, data}
+    end
+  end
+
   def connected(:internal, :handle_connection, data) do
     if map_size(data.subscriptions) > 0 do
       case resubscribe_after_reconnection(data) do
