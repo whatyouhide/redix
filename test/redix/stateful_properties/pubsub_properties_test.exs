@@ -42,7 +42,7 @@ defmodule Redix.PubSubPropertiesTest do
     def stop, do: Redix.stop(__MODULE__)
   end
 
-  property "subscribing and unsubscribing from channels", [verbose: true] do
+  property "subscribing and unsubscribing from channels", [:verbose] do
     numtests(
       50,
       forall cmds <- commands(__MODULE__) do
