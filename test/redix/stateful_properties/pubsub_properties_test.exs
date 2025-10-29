@@ -42,7 +42,7 @@ defmodule Redix.PubSubPropertiesTest do
     def stop, do: Redix.stop(__MODULE__)
   end
 
-  property "subscribing and unsubscribing from channels", [:verbose] do
+  property "subscribing and unsubscribing from channels", [verbose: true] do
     numtests(
       50,
       forall cmds <- commands(__MODULE__) do
@@ -148,8 +148,8 @@ defmodule Redix.PubSubPropertiesTest do
 
   ## Next state
 
-  def next_state(state, result, {:call, PubSub, :subscribe, [channel]}) do
-    %__MODULE__{state | channels: MapSet.put(state.channels, channel), ref: result}
+  def next_state(%__MODULE__{} = state, result, {:call, PubSub, :subscribe, [channel]}) do
+    %{state | channels: MapSet.put(state.channels, channel), ref: result}
   end
 
   def next_state(state, _result, {:call, PubSub, :unsubscribe, [channel]}) do

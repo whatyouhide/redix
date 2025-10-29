@@ -70,7 +70,7 @@ defmodule Redix.Mixfile do
       {:ex_doc, "~> 0.28", only: :dev},
       {:excoveralls, "~> 0.17", only: :test},
       {:propcheck, "~> 1.1", only: :test},
-      {:stream_data, "~> 1.1", only: [:dev, :test]}
+      {:stream_data, "~> 1.2", only: [:dev, :test]}
     ]
   end
 end

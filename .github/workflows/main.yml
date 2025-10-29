@@ -14,6 +14,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - otp: "28.1"
+            elixir: "1.19.1"
+            dialyzer: trueos
+            lint: true
+
           - otp: "27.2"
             elixir: "1.18"
             dialyzer: trueos
