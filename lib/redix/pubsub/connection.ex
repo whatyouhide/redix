@@ -113,14 +113,7 @@ defmodule Redix.PubSub.Connection do
         reconnection: not is_nil(data.last_disconnect_reason)
       })
 
-      data = %__MODULE__{
-        data
-        | socket: socket,
-          last_disconnect_reason: nil,
-          backoff_current: nil,
-          connected_address: address,
-          client_id: client_id
-      }
+      data = update_pubsub_connection(data, client_id, address, socket)
 
       {:next_state, :connected, data, {:next_event, :internal, :handle_connection}}
     else
@@ -197,6 +190,17 @@ defmodule Redix.PubSub.Connection do
   def disconnected({:call, from}, :get_client_id, _data) do
     reply = {:error, %ConnectionError{reason: :closed}}
     {:keep_state_and_data, {:reply, from, reply}}
+  end
+
+  defp update_pubsub_connection(%__MODULE__{} = data, client_id, address, socket) do
+    %{
+      data
+      | socket: socket,
+        last_disconnect_reason: nil,
+        backoff_current: nil,
+        connected_address: address,
+        client_id: client_id
+    }
   end
 
   def connected(:internal, :handle_connection, data) do
