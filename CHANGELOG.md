@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.5.3
+
+  * Address warnings with recent Elixir versions.
+
 ## v1.5.2
 
 ### Bug fixes
