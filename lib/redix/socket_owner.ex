@@ -86,6 +86,13 @@ defmodule Redix.SocketOwner do
     stop({:ssl_error, reason}, state)
   end
 
+  # These messages seem to sometimes leak from gen_tcp internals (at least in OTP 26). We can
+  # pretty much safely ignore them here.
+  # See https://github.com/whatyouhide/redix/issues/289.
+  def handle_info({:timeout, _ref, :inet}, %__MODULE__{} = state) do
+    {:noreply, state}
+  end
+
   ## Helpers
 
   defp setopts(%__MODULE__{transport: transport}, socket, opts) do
