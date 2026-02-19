@@ -52,7 +52,7 @@ defmodule Redix.ConnectionError do
       `:ssl` module.
 
   """
-  @type t() :: %__MODULE__{reason: atom}
+  @type t() :: %__MODULE__{reason: atom() | {:wrong_role, binary()}}
 
   defexception [:reason]
 
@@ -69,15 +69,22 @@ defmodule Redix.ConnectionError do
   # send a command to Redis.
   defp format_reason(:closed), do: "the connection to Redis is closed"
 
+  # Returned during sentinel connections when the server has an
+  # unexpected role (for example, "master" instead of "slave").
+  defp format_reason({:wrong_role, role}), do: "wrong role: #{role}"
+
   if System.otp_release() >= "26" do
-    defp format_reason(reason), do: reason |> :inet.format_error() |> List.to_string()
+    defp format_reason(reason) when is_atom(reason) do
+      reason |> :inet.format_error() |> List.to_string()
+    end
   else
-    defp format_reason(reason) do
+    defp format_reason(reason) when is_atom(reason) do
       case :inet.format_error(reason) do
-        ~c"unknown POSIX error" = message when is_atom(reason) -> "#{message}: #{reason}"
-        ~c"unknown POSIX error" -> inspect(reason)
+        ~c"unknown POSIX error" = message -> "#{message}: #{reason}"
         message -> List.to_string(message)
       end
     end
   end
+
+  defp format_reason(reason), do: inspect(reason)
 end

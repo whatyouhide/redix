@@ -15,4 +15,12 @@ defmodule Redix.ConnectionErrorTest do
     assert Exception.message(%ConnectionError{reason: :tcp_closed}) == "TCP connection closed"
     assert Exception.message(%ConnectionError{reason: :ssl_closed}) == "SSL connection closed"
   end
+
+  test "Exception.message/1 with a \"wrong role\" tuple" do
+    assert Exception.message(%ConnectionError{reason: {:wrong_role, "master"}}) ==
+             "wrong role: master"
+
+    assert Exception.message(%ConnectionError{reason: {:wrong_role, "slave"}}) ==
+             "wrong role: slave"
+  end
 end
