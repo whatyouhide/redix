@@ -180,6 +180,7 @@ defmodule Redix.PubSub do
   @type subscriber() :: pid() | port() | atom() | {atom(), node()}
   @type connection() :: GenServer.server()
 
+  alias Redix.ConnectionError
   alias Redix.StartOptions
 
   @doc """
@@ -327,6 +328,33 @@ defmodule Redix.PubSub do
   def subscribe(conn, channels, subscriber \\ self())
       when is_binary(channels) or is_list(channels) do
     :gen_statem.call(conn, {:subscribe, List.wrap(channels), subscriber})
+  end
+
+  @doc """
+  Sends a `PING` to the Redis server and waits for a `PONG` reply.
+
+  Upon a successful reply from the server, returns `:ok`. If no reply is received
+  within the given timeout, returns `:error`.
+
+  This is useful for periodic health checks of the underlying connection. `PING` is
+  one of the few commands that Redis allows on a pub/sub connection.
+
+  ## Examples
+
+      iex> Redix.PubSub.ping(pubsub)
+      :ok
+
+      iex> Redix.PubSub.ping(pubsub, 1000)
+      :ok
+
+  """
+  @doc since: "1.6.0"
+  @spec ping(connection(), timeout()) :: :ok | {:error, ConnectionError.t()}
+  def ping(conn, timeout \\ 5000)
+      when (is_integer(timeout) and timeout >= 0) or timeout == :infinity do
+    :gen_statem.call(conn, :ping, timeout)
+  catch
+    :exit, {:timeout, _} -> {:error, %ConnectionError{reason: :timeout}}
   end
 
   @doc """

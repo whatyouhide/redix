@@ -15,7 +15,8 @@ defmodule Redix.PubSub.Connection do
     :connected_address,
     :client_id,
     subscriptions: %{},
-    monitors: %{}
+    monitors: %{},
+    ping_callers: :queue.new()
   ]
 
   @backoff_exponent 1.5
@@ -187,6 +188,10 @@ defmodule Redix.PubSub.Connection do
     {:keep_state, data}
   end
 
+  def disconnected({:call, from}, :ping, _data) do
+    {:keep_state_and_data, {:reply, from, {:error, %ConnectionError{reason: :closed}}}}
+  end
+
   def disconnected({:call, from}, :get_client_id, _data) do
     reply = {:error, %ConnectionError{reason: :closed}}
     {:keep_state_and_data, {:reply, from, reply}}
@@ -231,6 +236,18 @@ defmodule Redix.PubSub.Connection do
     with {:ok, data} <- unsubscribe_pid_from_targets(data, operation, targets, pid) do
       data = demonitor_if_not_subscribed_to_anything(data, pid)
       {:keep_state, data}
+    end
+  end
+
+  def connected({:call, from}, :ping, data) do
+    data = %{data | ping_callers: :queue.in(from, data.ping_callers)}
+
+    case data.transport.send(data.socket, Protocol.pack(["PING"])) do
+      :ok ->
+        {:keep_state, data}
+
+      {:error, reason} ->
+        disconnect(data, reason, _handle_disconnection? = true)
     end
   end
 
@@ -345,6 +362,13 @@ defmodule Redix.PubSub.Connection do
     end
   end
 
+  # When a Redis connection is in pub/sub mode (subscribed to at least one
+  # channel), Redis wraps PING responses as pub/sub messages: ["pong", ""]. When
+  # not subscribed to anything, Redis returns a plain +PONG\r\n simple string,
+  # which parses to "PONG".
+  defp handle_pubsub_msg(data, ["pong", _message]), do: handle_pong(data)
+  defp handle_pubsub_msg(data, "PONG"), do: handle_pong(data)
+
   defp handle_pubsub_msg(data, ["message", channel, payload]) do
     properties = %{channel: channel, payload: payload}
     handle_pubsub_message_with_payload(data, {:channel, channel}, :message, properties)
@@ -367,6 +391,31 @@ defmodule Redix.PubSub.Connection do
     end
 
     {:ok, data}
+  end
+
+  # Ping handling.
+
+  defp handle_pong(data) do
+    {popped, data} = get_and_update_in(data.ping_callers, &:queue.out/1)
+
+    # :empty is not supposed to happen but we're not gonna crash the process
+    # if it does.
+    case popped do
+      {:value, from} -> :gen_statem.reply(from, :ok)
+      :empty -> :ok
+    end
+
+    {:ok, data}
+  end
+
+  defp drain_ping_callers(data) do
+    error = {:error, %ConnectionError{reason: :closed}}
+
+    data.ping_callers
+    |> :queue.to_list()
+    |> Enum.each(&:gen_statem.reply(&1, error))
+
+    %{data | ping_callers: :queue.new()}
   end
 
   # Subscribing.
@@ -622,6 +671,7 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnect(data, reason, handle_disconnection?) do
+    data = drain_ping_callers(data)
     {next_backoff, data} = next_backoff(data)
 
     if data.socket do

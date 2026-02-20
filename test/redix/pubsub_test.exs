@@ -365,6 +365,50 @@ defmodule Redix.PubSubTest do
     refute new_state.continuation
   end
 
+  describe "ping/2" do
+    test "returns :ok when connected", %{pubsub: pubsub} do
+      assert PubSub.ping(pubsub) == :ok
+      assert PubSub.ping(pubsub, _with_custom_timeout = 10_000) == :ok
+      assert PubSub.ping(pubsub, _with_custom_timeout = :infinity) == :ok
+    end
+
+    test "returns :ok when subscribed to channels", %{pubsub: pubsub} do
+      assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+      assert PubSub.ping(pubsub) == :ok
+    end
+
+    test "returns :error when disconnected" do
+      {:ok, pubsub} = PubSub.start_link(port: 9999)
+      assert PubSub.ping(pubsub) == {:error, %ConnectionError{reason: :closed}}
+    end
+
+    @tag :capture_log
+    test "returns :error when connection goes down", %{pubsub: pubsub, conn: conn} do
+      assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+
+      Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}
+
+      assert PubSub.ping(pubsub) == {:error, %ConnectionError{reason: :closed}}
+    end
+
+    test "returns :error when timeout expires", %{pubsub: pubsub} do
+      assert PubSub.ping(pubsub, 0) == {:error, %ConnectionError{reason: :timeout}}
+    end
+
+    test "multiple concurrent pings return :ok", %{pubsub: pubsub} do
+      tasks =
+        for _ <- 1..5 do
+          Task.async(fn -> PubSub.ping(pubsub) end)
+        end
+
+      results = Task.await_many(tasks)
+      assert Enum.all?(results, &(&1 == :ok))
+    end
+  end
+
   defp wait_until_passes(timeout, fun) when timeout <= 0 do
     fun.()
   end
