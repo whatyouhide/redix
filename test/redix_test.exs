@@ -346,7 +346,8 @@ defmodule RedixTest do
     end
 
     test "timeout", %{conn: c} do
-      assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~W(PING), timeout: 0)
+      assert {:error, %ConnectionError{reason: :timeout}} =
+               Redix.command(c, ~w(BLPOP timeout_test_key 0), timeout: 10)
     end
 
     test "Redix process crashes while waiting" do
@@ -447,7 +448,7 @@ defmodule RedixTest do
 
     test "timeout", %{conn: c} do
       assert {:error, %ConnectionError{reason: :timeout}} =
-               Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
+               Redix.pipeline(c, [~w(BLPOP timeout_test_key 0)], timeout: 10)
     end
 
     test "commands must be lists of binaries", %{conn: c} do
@@ -488,7 +489,7 @@ defmodule RedixTest do
 
     test "connection errors", %{conn: c} do
       assert_raise Redix.ConnectionError, "unknown POSIX error: timeout", fn ->
-        Redix.command!(c, ["PING"], timeout: 0)
+        Redix.command!(c, ~w(BLPOP timeout_test_key 0), timeout: 10)
       end
     end
   end
@@ -509,7 +510,7 @@ defmodule RedixTest do
 
     test "connection errors", %{conn: c} do
       assert_raise Redix.ConnectionError, "unknown POSIX error: timeout", fn ->
-        Redix.pipeline!(c, [["PING"]], timeout: 0)
+        Redix.pipeline!(c, [~w(BLPOP timeout_test_key 0)], timeout: 10)
       end
     end
   end
@@ -521,7 +522,11 @@ defmodule RedixTest do
       commands = [~w(SET transaction_pipeline_key 1), ~w(GET transaction_pipeline_key)]
       assert Redix.transaction_pipeline(conn, commands) == {:ok, ["OK", "1"]}
 
-      assert Redix.transaction_pipeline(conn, commands, timeout: 0) ==
+      # Block the connection with a long-running command so the next call reliably times out.
+      spawn(fn -> Redix.command(conn, ~w(BLPOP __timeout_test__ 10)) end)
+      Process.sleep(50)
+
+      assert Redix.transaction_pipeline(conn, commands, timeout: 10) ==
                {:error, %ConnectionError{reason: :timeout}}
     end
 
@@ -529,8 +534,12 @@ defmodule RedixTest do
       commands = [~w(SET transaction_pipeline_key 1), ~w(GET transaction_pipeline_key)]
       assert Redix.transaction_pipeline!(conn, commands) == ["OK", "1"]
 
+      # Block the connection with a long-running command so the next call reliably times out.
+      spawn(fn -> Redix.command(conn, ~w(BLPOP __timeout_test__ 10)) end)
+      Process.sleep(50)
+
       assert_raise Redix.ConnectionError, fn ->
-        Redix.transaction_pipeline!(conn, commands, timeout: 0)
+        Redix.transaction_pipeline!(conn, commands, timeout: 10)
       end
     end
 
@@ -555,7 +564,7 @@ defmodule RedixTest do
       assert Redix.noreply_pipeline(conn, commands) == :ok
       assert Redix.command!(conn, ~w(GET noreply_pl_mykey)) == "2"
 
-      assert Redix.noreply_pipeline(conn, commands, timeout: 0) ==
+      assert Redix.noreply_pipeline(conn, [~w(BLPOP __timeout_test__ 10)], timeout: 10) ==
                {:error, %ConnectionError{reason: :timeout}}
     end
 
@@ -565,7 +574,7 @@ defmodule RedixTest do
       assert Redix.command!(conn, ~w(GET noreply_pl_bang_mykey)) == "2"
 
       assert_raise Redix.ConnectionError, fn ->
-        Redix.noreply_pipeline!(conn, commands, timeout: 0)
+        Redix.noreply_pipeline!(conn, [~w(BLPOP __timeout_test__ 10)], timeout: 10)
       end
     end
 
@@ -573,7 +582,7 @@ defmodule RedixTest do
       assert Redix.noreply_command(conn, ["SET", "noreply_cmd_mykey", "myvalue"]) == :ok
       assert Redix.command!(conn, ["GET", "noreply_cmd_mykey"]) == "myvalue"
 
-      assert Redix.noreply_command(conn, ["SET", "noreply_cmd_mykey", "myvalue"], timeout: 0) ==
+      assert Redix.noreply_command(conn, ~w(BLPOP __timeout_test__ 10), timeout: 10) ==
                {:error, %ConnectionError{reason: :timeout}}
     end
 
@@ -582,7 +591,7 @@ defmodule RedixTest do
       assert Redix.command!(conn, ["GET", "noreply_cmd_bang_mykey"]) == "myvalue"
 
       assert_raise Redix.ConnectionError, fn ->
-        Redix.noreply_command!(conn, ["SET", "noreply_cmd_bang_mykey", "myvalue"], timeout: 0)
+        Redix.noreply_command!(conn, ~w(BLPOP __timeout_test__ 10), timeout: 10)
       end
     end
 
@@ -639,7 +648,8 @@ defmodule RedixTest do
     end
 
     test "timeouts", %{conn: c} do
-      assert {:error, %ConnectionError{reason: :timeout}} = Redix.command(c, ~w(PING), timeout: 0)
+      assert {:error, %ConnectionError{reason: :timeout}} =
+               Redix.command(c, ~w(BLPOP __timeout_test__ 0), timeout: 10)
 
       # Let's check that the Redix connection doesn't reply anyways, even if the
       # timeout happened.
@@ -764,7 +774,7 @@ defmodule RedixTest do
         if meta.connection == c do
           assert event == [:redix, :pipeline, :stop]
           assert is_integer(measurements.duration)
-          assert meta.commands == [["PING"], ["PING"]]
+          assert meta.commands == [["BLPOP", "__timeout_test__", "0"]]
           assert meta.kind == :error
           assert meta.reason == %ConnectionError{reason: :timeout}
           assert is_nil(meta.connection_name)
@@ -776,7 +786,7 @@ defmodule RedixTest do
       :telemetry.attach(to_string(test_name), [:redix, :pipeline, :stop], handler, :no_config)
 
       assert {:error, %ConnectionError{reason: :timeout}} =
-               Redix.pipeline(c, [~w(PING), ~w(PING)], timeout: 0)
+               Redix.pipeline(c, [~w(BLPOP __timeout_test__ 0)], timeout: 10)
 
       assert_receive ^ref
 
