@@ -15,7 +15,7 @@ defmodule Redix.ClusterTest do
   end
 
   setup do
-    cluster_name = :"cluster_#{:erlang.unique_integer([:positive])}"
+    cluster_name = :"cluster_#{System.unique_integer([:positive])}"
 
     start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name})
 
@@ -214,7 +214,7 @@ defmodule Redix.ClusterTest do
 
   describe "connection via different seed nodes" do
     test "can connect using a single seed node" do
-      name = :"single_seed_#{:erlang.unique_integer([:positive])}"
+      name = :"single_seed_#{System.unique_integer([:positive])}"
 
       start_supervised!(
         {Redix.Cluster, nodes: ["redis://localhost:7001"], name: name},
@@ -225,7 +225,7 @@ defmodule Redix.ClusterTest do
     end
 
     test "can connect using keyword list nodes" do
-      name = :"kw_seed_#{:erlang.unique_integer([:positive])}"
+      name = :"kw_seed_#{System.unique_integer([:positive])}"
 
       start_supervised!(
         {Redix.Cluster, nodes: [[host: "localhost", port: 7002]], name: name},
@@ -238,7 +238,7 @@ defmodule Redix.ClusterTest do
 
   describe "stop/2" do
     test "stops the cluster cleanly" do
-      name = :"stop_test_#{:erlang.unique_integer([:positive])}"
+      name = :"stop_test_#{System.unique_integer([:positive])}"
       {:ok, pid} = Redix.Cluster.start_link(nodes: @nodes, name: name)
 
       assert Redix.Cluster.command!(name, ["PING"]) == "PONG"
@@ -306,7 +306,7 @@ defmodule Redix.ClusterTest do
         :no_config
       )
 
-      name = :"failed_topo_#{:erlang.unique_integer([:positive])}"
+      name = :"failed_topo_#{System.unique_integer([:positive])}"
 
       # The Supervisor.start_link propagates the EXIT from the Manager's init failure.
       Process.flag(:trap_exit, true)
@@ -326,7 +326,7 @@ defmodule Redix.ClusterTest do
 
       Redix.Telemetry.attach_default_handler()
 
-      name = :"log_test_#{:erlang.unique_integer([:positive])}"
+      name = :"log_test_#{System.unique_integer([:positive])}"
 
       Process.flag(:trap_exit, true)
 
