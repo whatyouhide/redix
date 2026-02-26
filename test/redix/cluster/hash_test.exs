@@ -1,5 +1,6 @@
 defmodule Redix.Cluster.HashTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Redix.Cluster.Hash
 
@@ -75,6 +76,89 @@ defmodule Redix.Cluster.HashTest do
       assert Hash.hash_slot("bar") == 5061
       assert Hash.hash_slot("hello") == 866
       assert Hash.hash_slot("{user:1}") == Hash.hash_slot("user:1")
+    end
+  end
+
+  describe "crc16/1 properties" do
+    property "always returns a 16-bit unsigned integer" do
+      check all data <- binary(min_length: 0, max_length: 200) do
+        assert Hash.crc16(data) in 0..0xFFFF
+      end
+    end
+
+    property "is deterministic" do
+      check all data <- binary(min_length: 0, max_length: 200) do
+        assert Hash.crc16(data) == Hash.crc16(data)
+      end
+    end
+  end
+
+  describe "extract_hash_tag/1 properties" do
+    property "returns a binary for any binary input" do
+      check all key <- binary(min_length: 0, max_length: 100) do
+        assert is_binary(Hash.extract_hash_tag(key))
+      end
+    end
+
+    property "result is always a substring of the key" do
+      check all key <- string(:printable, min_length: 1, max_length: 100) do
+        tag = Hash.extract_hash_tag(key)
+        assert String.contains?(key, tag)
+      end
+    end
+
+    property "keys without braces are returned as-is" do
+      check all key <- string([?a..?z, ?0..?9, ?_, ?:, ?.], min_length: 1, max_length: 50) do
+        assert Hash.extract_hash_tag(key) == key
+      end
+    end
+
+    property "keys with empty {} are returned as-is" do
+      check all prefix <- string(:alphanumeric, min_length: 0, max_length: 20),
+                suffix <- string(:alphanumeric, min_length: 0, max_length: 20) do
+        key = prefix <> "{}" <> suffix
+        assert Hash.extract_hash_tag(key) == key
+      end
+    end
+
+    property "keys with {tag} return the tag" do
+      check all prefix <- string(:alphanumeric, min_length: 0, max_length: 20),
+                tag <- string(:alphanumeric, min_length: 1, max_length: 20),
+                suffix <- string(:alphanumeric, min_length: 0, max_length: 20) do
+        key = prefix <> "{" <> tag <> "}" <> suffix
+        assert Hash.extract_hash_tag(key) == tag
+      end
+    end
+  end
+
+  describe "hash_slot/1 properties" do
+    property "always returns a slot in 0..16383" do
+      check all key <- binary(min_length: 1, max_length: 200) do
+        slot = Hash.hash_slot(key)
+        assert slot >= 0 and slot < 16384
+      end
+    end
+
+    property "is deterministic" do
+      check all key <- binary(min_length: 1, max_length: 200) do
+        assert Hash.hash_slot(key) == Hash.hash_slot(key)
+      end
+    end
+
+    property "keys sharing a hash tag always map to the same slot" do
+      check all tag <- string(:alphanumeric, min_length: 1, max_length: 20),
+                suffix1 <- string(:alphanumeric, min_length: 0, max_length: 20),
+                suffix2 <- string(:alphanumeric, min_length: 0, max_length: 20) do
+        key1 = "{" <> tag <> "}." <> suffix1
+        key2 = "{" <> tag <> "}." <> suffix2
+        assert Hash.hash_slot(key1) == Hash.hash_slot(key2)
+      end
+    end
+
+    property "{tag} hashes the same as the bare tag" do
+      check all tag <- string(:alphanumeric, min_length: 1, max_length: 50) do
+        assert Hash.hash_slot("{" <> tag <> "}") == Hash.hash_slot(tag)
+      end
     end
   end
 end

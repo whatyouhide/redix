@@ -1,5 +1,6 @@
 defmodule Redix.Cluster.CommandParserTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Redix.Cluster.CommandParser, as: Command
 
@@ -131,6 +132,111 @@ defmodule Redix.Cluster.CommandParserTest do
     test "geo commands" do
       assert Command.key_from_command(["GEOADD", "geo", "1", "2", "m"]) == {:ok, "geo"}
       assert Command.key_from_command(["GEOPOS", "geo", "m"]) == {:ok, "geo"}
+    end
+  end
+
+  describe "key_from_command/1 properties" do
+    @key_pos_1_commands ~w(
+      GET SET DEL INCR APPEND HGET HSET HMGET HDEL LPUSH RPOP LRANGE
+      SADD SCARD SMEMBERS ZADD ZSCORE ZRANGE XADD XLEN XRANGE
+      MGET MSET EXPIRE TTL PERSIST PFADD PFCOUNT GEOADD GEOPOS
+      DUMP EXISTS GETDEL TYPE UNLINK STRLEN SRANDMEMBER RPUSH LLEN
+    )
+
+    @keyless_commands ~w(
+      PING INFO DBSIZE TIME MULTI EXEC FLUSHALL SELECT AUTH
+      QUIT MONITOR BGSAVE DISCARD READONLY READWRITE RESET
+    )
+
+    property "key-at-position-1 commands are case-insensitive" do
+      check all command_name <- member_of(@key_pos_1_commands),
+                key <- string(:printable, min_length: 1, max_length: 50),
+                casing <- member_of([:up, :down, :mixed]) do
+        cmd =
+          case casing do
+            :up -> String.upcase(command_name)
+            :down -> String.downcase(command_name)
+            :mixed -> mix_case(command_name)
+          end
+
+        assert {:ok, ^key} = Command.key_from_command([cmd, key, "extra"])
+      end
+    end
+
+    property "keyless commands always return :no_key regardless of arguments" do
+      check all command_name <- member_of(@keyless_commands),
+                args <- list_of(string(:printable, min_length: 1, max_length: 20), max_length: 5) do
+        assert :no_key = Command.key_from_command([command_name | args])
+      end
+    end
+
+    property "EVAL with numkeys=0 always returns :no_key" do
+      check all script <- string(:printable, min_length: 1, max_length: 50),
+                extra <-
+                  list_of(string(:printable, min_length: 1, max_length: 10), max_length: 3),
+                command_name <- member_of(["EVAL", "EVALSHA"]) do
+        assert :no_key = Command.key_from_command([command_name, script, "0" | extra])
+      end
+    end
+
+    property "EVAL with numkeys>=1 returns the first key" do
+      check all script <- string(:printable, min_length: 1, max_length: 50),
+                numkeys <- integer(1..5),
+                keys <-
+                  list_of(string(:alphanumeric, min_length: 1, max_length: 20), length: numkeys),
+                args <- list_of(string(:printable, min_length: 1, max_length: 10), max_length: 3),
+                command_name <- member_of(["EVAL", "EVALSHA"]) do
+        first_key = hd(keys)
+
+        assert {:ok, ^first_key} =
+                 Command.key_from_command(
+                   [command_name, script, to_string(numkeys)] ++ keys ++ args
+                 )
+      end
+    end
+
+    property "XREAD always extracts the first stream key after STREAMS keyword" do
+      check all prefix_opts <- xread_prefix_gen(),
+                stream_key <- string(:alphanumeric, min_length: 1, max_length: 20),
+                extra_streams <-
+                  list_of(string(:alphanumeric, min_length: 1, max_length: 20), max_length: 3) do
+        stream_keys = [stream_key | extra_streams]
+        ids = Enum.map(stream_keys, fn _ -> "0" end)
+
+        assert {:ok, ^stream_key} =
+                 Command.key_from_command(
+                   ["XREAD" | prefix_opts] ++ ["STREAMS"] ++ stream_keys ++ ids
+                 )
+      end
+    end
+
+    property "return value is always {:ok, binary}, :no_key, or :unknown" do
+      check all command <-
+                  list_of(string(:printable, min_length: 1, max_length: 30),
+                    min_length: 0,
+                    max_length: 8
+                  ) do
+        result = Command.key_from_command(command)
+
+        assert match?({:ok, key} when is_binary(key), result) or result == :no_key or
+                 result == :unknown
+      end
+    end
+  end
+
+  defp mix_case(string) do
+    string
+    |> String.graphemes()
+    |> Enum.with_index()
+    |> Enum.map(fn {char, i} ->
+      if rem(i, 2) == 0, do: String.downcase(char), else: String.upcase(char)
+    end)
+    |> Enum.join()
+  end
+
+  defp xread_prefix_gen do
+    gen all opts <- list_of(member_of([["COUNT", "10"], ["BLOCK", "0"]]), max_length: 2) do
+      List.flatten(opts)
     end
   end
 end
