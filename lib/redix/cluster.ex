@@ -76,10 +76,12 @@ defmodule Redix.Cluster do
 
   @max_redirections 5
 
-  endpoint_schema = [
+  node_as_keyword_opts_schema = [
     host: [type: :string, default: "localhost"],
-    port: [type: :integer, default: 6379]
+    port: [type: {:in, 0..65_535}, default: 6379]
   ]
+
+  @node_as_keyword_opts_schema NimbleOptions.new!(node_as_keyword_opts_schema)
 
   start_link_opts_schema = [
     name: [
@@ -95,7 +97,7 @@ defmodule Redix.Cluster do
       """
     ],
     nodes: [
-      type: {:list, {:or, [:string, {:keyword_list, endpoint_schema}]}},
+      type: {:list, {:custom, __MODULE__, :__parse_node__, []}},
       type_doc: "list of `t:endpoint/0`",
       required: true,
       doc: """
@@ -145,8 +147,14 @@ defmodule Redix.Cluster do
     cluster_opts = NimbleOptions.validate!(cluster_opts, @start_link_opts_schema)
 
     name = Keyword.fetch!(cluster_opts, :name)
-    nodes = Keyword.fetch!(cluster_opts, :nodes)
+    seed_nodes = Keyword.fetch!(cluster_opts, :nodes)
     refresh_interval = Keyword.fetch!(cluster_opts, :topology_refresh_interval)
+
+    if Keyword.has_key?(conn_opts, :sentinel) do
+      raise ArgumentError, "Sentinel connections are not supported in cluster mode"
+    end
+
+    conn_opts = Redix.StartOptions.sanitize(:redix, conn_opts)
 
     case Keyword.fetch(conn_opts, :database) do
       {:ok, db} when db in [0, nil] ->
@@ -166,7 +174,7 @@ defmodule Redix.Cluster do
       {Manager,
        name: manager_name(name),
        cluster_name: name,
-       seed_nodes: nodes,
+       seed_nodes: seed_nodes,
        pool_supervisor: pool_name(name),
        conn_opts: conn_opts,
        refresh_interval: refresh_interval,
@@ -593,4 +601,25 @@ defmodule Redix.Cluster do
   defp manager_name(cluster), do: :"#{cluster}_manager"
   defp pool_name(cluster), do: :"#{cluster}_pool"
   defp task_supervisor_name(cluster), do: :"#{cluster}_task_supervisor"
+
+  ## NimbleOptions custom validators
+
+  @doc false
+  def __parse_node__(node)
+
+  def __parse_node__(uri) when is_binary(uri) do
+    parsed = Redix.URI.to_start_options(uri)
+    {:ok, {Keyword.get(parsed, :host, "localhost"), Keyword.get(parsed, :port, 6379)}}
+  end
+
+  def __parse_node__(opts) when is_list(opts) do
+    case NimbleOptions.validate(opts, @node_as_keyword_opts_schema) do
+      {:ok, opts} -> {:ok, {Keyword.get(opts, :host), Keyword.get(opts, :port)}}
+      {:error, reason} -> {:error, Exception.message(reason)}
+    end
+  end
+
+  def __parse_node__(other) do
+    {:error, "expected a Redis URI or a :host/:port keyword list, got: #{inspect(other)}"}
+  end
 end

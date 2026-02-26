@@ -246,27 +246,12 @@ defmodule Redix.Cluster.Manager do
     try_fetch_slots(host, port, conn_opts, rest)
   end
 
-  defp fetch_cluster_slots([uri | rest], conn_opts) when is_binary(uri) do
-    parsed = Redix.URI.to_start_options(uri)
-    host = Keyword.get(parsed, :host, "localhost")
-    port = Keyword.get(parsed, :port, 6379)
-    try_fetch_slots(host, port, conn_opts, rest)
-  end
-
-  defp fetch_cluster_slots([opts | rest], conn_opts) when is_list(opts) do
-    host = Keyword.get(opts, :host, "localhost")
-    port = Keyword.get(opts, :port, 6379)
-    try_fetch_slots(host, port, conn_opts, rest)
-  end
-
   defp try_fetch_slots(host, port, conn_opts, rest) do
     transport = if(conn_opts[:ssl], do: :ssl, else: :gen_tcp)
 
     opts =
       conn_opts
       |> Keyword.delete(:name)
-      |> Keyword.put_new(:timeout, 5_000)
-      |> Keyword.put_new(:socket_opts, [])
       |> Keyword.merge(host: to_charlist(host), port: port)
 
     timeout = opts[:timeout]
