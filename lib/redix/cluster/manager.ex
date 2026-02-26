@@ -260,38 +260,33 @@ defmodule Redix.Cluster.Manager do
   end
 
   defp try_fetch_slots(host, port, conn_opts, rest) do
-    temp_opts =
+    transport = if(conn_opts[:ssl], do: :ssl, else: :gen_tcp)
+
+    opts =
       conn_opts
       |> Keyword.delete(:name)
-      |> Keyword.merge(host: host, port: port, sync_connect: true)
+      |> Keyword.put_new(:timeout, 5_000)
+      |> Keyword.put_new(:socket_opts, [])
+      |> Keyword.merge(host: to_charlist(host), port: port)
 
-    # Temporarily trap exits so a failed sync_connect doesn't kill us via the link.
-    Process.flag(:trap_exit, true)
-    result = Redix.start_link(temp_opts)
-    Process.flag(:trap_exit, false)
-    flush_exits()
+    timeout = opts[:timeout]
 
-    case result do
-      {:ok, conn} ->
+    case Redix.Connector.connect(opts, _unused_conn_pid = self()) do
+      {:ok, socket, _address} ->
         try do
-          case Redix.command(conn, ["CLUSTER", "SLOTS"]) do
+          case Redix.Connector.sync_command(transport, socket, ["CLUSTER", "SLOTS"], timeout) do
             {:ok, slots} -> {:ok, slots}
             {:error, _} -> fetch_cluster_slots(rest, conn_opts)
           end
         after
-          Redix.stop(conn)
+          transport.close(socket)
         end
 
       {:error, _} ->
         fetch_cluster_slots(rest, conn_opts)
-    end
-  end
 
-  defp flush_exits do
-    receive do
-      {:EXIT, _, _} -> flush_exits()
-    after
-      0 -> :ok
+      {:stop, _} ->
+        fetch_cluster_slots(rest, conn_opts)
     end
   end
 
