@@ -3,11 +3,10 @@ defmodule Redix.Cluster.Manager do
 
   @behaviour :gen_statem
 
-  require Logger
-
   @refresh_cooldown 1_000
 
   defstruct [
+    :cluster_name,
     :slot_table,
     :registry,
     :pool_supervisor,
@@ -96,6 +95,7 @@ defmodule Redix.Cluster.Manager do
 
   @impl true
   def init(opts) do
+    cluster_name = Keyword.fetch!(opts, :cluster_name)
     seed_nodes = Keyword.fetch!(opts, :seed_nodes)
     pool_supervisor = Keyword.fetch!(opts, :pool_supervisor)
     conn_opts = Keyword.fetch!(opts, :conn_opts)
@@ -106,6 +106,7 @@ defmodule Redix.Cluster.Manager do
     slot_table = :ets.new(table_name, [:named_table, :public, :set, {:read_concurrency, true}])
 
     data = %__MODULE__{
+      cluster_name: cluster_name,
       slot_table: slot_table,
       registry: registry,
       pool_supervisor: pool_supervisor,
@@ -204,10 +205,25 @@ defmodule Redix.Cluster.Manager do
       {:ok, slots_data} ->
         update_slot_map(data, slots_data)
         data = ensure_connections(data, slots_data)
+
+        node_addresses =
+          slots_data
+          |> Enum.map(fn [_start, _end, [host, port | _] | _] -> "#{host}:#{port}" end)
+          |> Enum.uniq()
+
+        :telemetry.execute([:redix, :cluster, :topology_change], %{}, %{
+          cluster: data.cluster_name,
+          nodes: node_addresses
+        })
+
         {:ok, data}
 
       {:error, reason} ->
-        Logger.error("Redix.Cluster: failed to refresh topology: #{inspect(reason)}")
+        :telemetry.execute([:redix, :cluster, :failed_topology_refresh], %{}, %{
+          cluster: data.cluster_name,
+          reason: reason
+        })
+
         {:error, reason}
     end
   end
@@ -249,7 +265,13 @@ defmodule Redix.Cluster.Manager do
       |> Keyword.delete(:name)
       |> Keyword.merge(host: host, port: port, sync_connect: true)
 
-    case Redix.start_link(temp_opts) do
+    # Temporarily trap exits so a failed sync_connect doesn't kill us via the link.
+    Process.flag(:trap_exit, true)
+    result = Redix.start_link(temp_opts)
+    Process.flag(:trap_exit, false)
+    flush_exits()
+
+    case result do
       {:ok, conn} ->
         try do
           case Redix.command(conn, ["CLUSTER", "SLOTS"]) do
@@ -262,6 +284,14 @@ defmodule Redix.Cluster.Manager do
 
       {:error, _} ->
         fetch_cluster_slots(rest, conn_opts)
+    end
+  end
+
+  defp flush_exits do
+    receive do
+      {:EXIT, _, _} -> flush_exits()
+    after
+      0 -> :ok
     end
   end
 
@@ -323,7 +353,12 @@ defmodule Redix.Cluster.Manager do
         %{data | monitors: Map.put(data.monitors, ref, node_id)}
 
       {:error, reason} ->
-        Logger.warning("Redix.Cluster: failed to connect to #{node_id}: #{inspect(reason)}")
+        :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
+          cluster: data.cluster_name,
+          address: node_id,
+          reason: reason
+        })
+
         data
     end
   end

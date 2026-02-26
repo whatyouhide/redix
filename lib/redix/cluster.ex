@@ -56,7 +56,8 @@ defmodule Redix.Cluster do
 
   ## Telemetry
 
-  TODO: we need to somehow enrich events with cluster info.
+  `Redix.Cluster` emits cluster-specific Telemetry events for topology changes
+  and redirections. See `Redix.Telemetry` for details.
   """
   @moduledoc since: "1.6.0"
 
@@ -164,6 +165,7 @@ defmodule Redix.Cluster do
       {Task.Supervisor, name: task_supervisor_name(name)},
       {Manager,
        name: manager_name(name),
+       cluster_name: name,
        seed_nodes: nodes,
        pool_supervisor: pool_name(name),
        conn_opts: conn_opts,
@@ -355,8 +357,6 @@ defmodule Redix.Cluster do
   defp execute_pipeline(cluster, commands, opts) do
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
-    manager = manager_name(cluster)
-    task_supervisor = task_supervisor_name(cluster)
 
     # Group commands by target node
     indexed_commands =
@@ -371,7 +371,7 @@ defmodule Redix.Cluster do
     groups = group_by_node(slot_table, registry, indexed_commands)
 
     # Execute each group on its target node
-    results = execute_groups(task_supervisor, groups, opts, slot_table, registry, manager)
+    results = execute_groups(cluster, groups, opts)
 
     case results do
       {:error, _} = error ->
@@ -417,35 +417,20 @@ defmodule Redix.Cluster do
   end
 
   # If there's only a single group to execute, we don't need parallel tasks.
-  defp execute_groups(_task_supervisor, [{conn, cmds}], opts, slot_table, registry, manager) do
-    execute_and_handle_redirections(
-      conn,
-      cmds,
-      opts,
-      slot_table,
-      registry,
-      manager,
-      @max_redirections
-    )
+  defp execute_groups(cluster, [{conn, cmds}], opts) do
+    execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
   end
 
-  defp execute_groups(task_supervisor, groups, opts, slot_table, registry, manager) do
-    # Execute groups in parallel
+  defp execute_groups(cluster, groups, opts) do
+    task_supervisor = task_supervisor_name(cluster)
+
     tasks =
       Enum.map(groups, fn {conn, cmds} ->
         if conn == nil do
           Task.completed({:error, %Redix.ConnectionError{reason: :closed}})
         else
           Task.Supervisor.async(task_supervisor, fn ->
-            execute_and_handle_redirections(
-              conn,
-              cmds,
-              opts,
-              slot_table,
-              registry,
-              manager,
-              @max_redirections
-            )
+            execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
           end)
         end
       end)
@@ -463,11 +448,11 @@ defmodule Redix.Cluster do
     first_error || Enum.map(tasks_with_results, fn {_task, {:ok, res}} -> res end)
   end
 
-  defp execute_and_handle_redirections(_conn, _cmds, _opts, _st, _reg, _mgr, 0) do
+  defp execute_and_handle_redirections(_cluster, _conn, _cmds, _opts, 0) do
     {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
   end
 
-  defp execute_and_handle_redirections(conn, cmds, opts, slot_table, registry, manager, remaining) do
+  defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
     commands = Enum.map(cmds, fn {_idx, cmd} -> cmd end)
 
     case Redix.pipeline(conn, commands, opts) do
@@ -478,17 +463,17 @@ defmodule Redix.Cluster do
         {redirect_cmds, final_results} =
           Enum.reduce(indexed_results, {%{}, []}, fn {idx, result}, {redirects, finals} ->
             case parse_redirection(result) do
-              {:moved, _slot, host, port} ->
-                Manager.refresh_topology(manager)
+              {type, slot, host, port} when type in [:moved, :ask] ->
+                if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
 
-                redirect_key = {:moved, host, port}
-                cmd = Enum.find(cmds, fn {i, _} -> i == idx end)
+                :telemetry.execute([:redix, :cluster, :redirection], %{}, %{
+                  cluster: cluster,
+                  type: type,
+                  slot: slot,
+                  target_address: "#{host}:#{port}"
+                })
 
-                redirects = Map.update(redirects, redirect_key, [cmd], &[cmd | &1])
-                {redirects, finals}
-
-              {:ask, _slot, host, port} ->
-                redirect_key = {:ask, host, port}
+                redirect_key = {type, host, port}
                 cmd = Enum.find(cmds, fn {i, _} -> i == idx end)
 
                 redirects = Map.update(redirects, redirect_key, [cmd], &[cmd | &1])
@@ -502,22 +487,15 @@ defmodule Redix.Cluster do
         if map_size(redirect_cmds) == 0 do
           final_results
         else
+          registry = registry_name(cluster)
+
           redirect_results =
             Enum.flat_map(redirect_cmds, fn {redirect_key, redirect_cmds_list} ->
               redirect_cmds_list = Enum.reverse(redirect_cmds_list)
 
               case redirect_key do
                 {:moved, host, port} ->
-                  handle_moved_redirect(
-                    host,
-                    port,
-                    redirect_cmds_list,
-                    opts,
-                    slot_table,
-                    registry,
-                    manager,
-                    remaining
-                  )
+                  handle_moved_redirect(cluster, host, port, redirect_cmds_list, opts, remaining)
 
                 {:ask, host, port} ->
                   handle_ask_redirect(host, port, redirect_cmds_list, opts, registry)
@@ -535,18 +513,12 @@ defmodule Redix.Cluster do
     end
   end
 
-  defp handle_moved_redirect(host, port, cmds, opts, slot_table, registry, manager, remaining) do
+  defp handle_moved_redirect(cluster, host, port, cmds, opts, remaining) do
+    registry = registry_name(cluster)
+
     case Manager.get_connection_by_node(registry, {host, port}) do
       {:ok, conn} ->
-        case execute_and_handle_redirections(
-               conn,
-               cmds,
-               opts,
-               slot_table,
-               registry,
-               manager,
-               remaining - 1
-             ) do
+        case execute_and_handle_redirections(cluster, conn, cmds, opts, remaining - 1) do
           {:error, _} = error -> [error]
           results -> results
         end
