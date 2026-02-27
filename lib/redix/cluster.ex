@@ -63,8 +63,6 @@ defmodule Redix.Cluster do
 
   alias Redix.Cluster.{CommandParser, Hash, Manager}
 
-  @type command() :: [String.Chars.t()]
-
   @typedoc """
   A node endpoint.
 
@@ -239,7 +237,7 @@ defmodule Redix.Cluster do
       #=> {:ok, "foo"}
 
   """
-  @spec command(atom(), command(), keyword()) ::
+  @spec command(atom(), Redix.command(), keyword()) ::
           {:ok, Redix.Protocol.redis_value()}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def command(cluster, command, opts \\ []) when is_atom(cluster) do
@@ -254,7 +252,7 @@ defmodule Redix.Cluster do
   @doc """
   Same as `command/3` but raises on errors.
   """
-  @spec command!(atom(), command(), keyword()) :: Redix.Protocol.redis_value()
+  @spec command!(atom(), Redix.command(), keyword()) :: Redix.Protocol.redis_value()
   def command!(cluster, command, opts \\ []) do
     case command(cluster, command, opts) do
       {:ok, response} -> response
@@ -280,7 +278,7 @@ defmodule Redix.Cluster do
       #=> {:ok, ["OK", "OK"]}
 
   """
-  @spec pipeline(atom(), [command()], keyword()) ::
+  @spec pipeline(atom(), [Redix.command()], keyword()) ::
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def pipeline(cluster, commands, opts \\ []) when is_atom(cluster) and is_list(commands) do
@@ -290,7 +288,7 @@ defmodule Redix.Cluster do
   @doc """
   Same as `pipeline/3` but raises on errors.
   """
-  @spec pipeline!(atom(), [command()], keyword()) :: [Redix.Protocol.redis_value()]
+  @spec pipeline!(atom(), [Redix.command()], keyword()) :: [Redix.Protocol.redis_value()]
   def pipeline!(cluster, commands, opts \\ []) do
     case pipeline(cluster, commands, opts) do
       {:ok, response} -> response
@@ -318,7 +316,7 @@ defmodule Redix.Cluster do
       #=> {:ok, ["OK", "OK"]}
 
   """
-  @spec transaction_pipeline(atom(), [command()], keyword()) ::
+  @spec transaction_pipeline(atom(), [Redix.command()], keyword()) ::
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def transaction_pipeline(cluster, [_ | _] = commands, opts \\ []) when is_atom(cluster) do
@@ -350,7 +348,7 @@ defmodule Redix.Cluster do
   @doc """
   Same as `transaction_pipeline/3` but raises on errors.
   """
-  @spec transaction_pipeline!(atom(), [command()], keyword()) :: [
+  @spec transaction_pipeline!(atom(), [Redix.command()], keyword()) :: [
           Redix.Protocol.redis_value()
         ]
   def transaction_pipeline!(cluster, commands, opts \\ []) do
