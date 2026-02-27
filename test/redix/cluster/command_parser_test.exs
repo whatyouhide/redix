@@ -159,14 +159,14 @@ defmodule Redix.Cluster.CommandParserTest do
             :mixed -> mix_case(command_name)
           end
 
-        assert {:ok, ^key} = Command.key_from_command([cmd, key, "extra"])
+        assert {:ok, ^key} = key_from_command([cmd, key, "extra"])
       end
     end
 
     property "keyless commands always return :no_key regardless of arguments" do
       check all command_name <- member_of(@keyless_commands),
                 args <- list_of(string(:printable, min_length: 1, max_length: 20), max_length: 5) do
-        assert :no_key = Command.key_from_command([command_name | args])
+        assert :no_key = key_from_command([command_name | args])
       end
     end
 
@@ -175,7 +175,7 @@ defmodule Redix.Cluster.CommandParserTest do
                 extra <-
                   list_of(string(:printable, min_length: 1, max_length: 10), max_length: 3),
                 command_name <- member_of(["EVAL", "EVALSHA"]) do
-        assert :no_key = Command.key_from_command([command_name, script, "0" | extra])
+        assert :no_key = key_from_command([command_name, script, "0" | extra])
       end
     end
 
@@ -189,9 +189,7 @@ defmodule Redix.Cluster.CommandParserTest do
         first_key = hd(keys)
 
         assert {:ok, ^first_key} =
-                 Command.key_from_command(
-                   [command_name, script, to_string(numkeys)] ++ keys ++ args
-                 )
+                 key_from_command([command_name, script, to_string(numkeys)] ++ keys ++ args)
       end
     end
 
@@ -204,9 +202,7 @@ defmodule Redix.Cluster.CommandParserTest do
         ids = Enum.map(stream_keys, fn _ -> "0" end)
 
         assert {:ok, ^stream_key} =
-                 Command.key_from_command(
-                   ["XREAD" | prefix_opts] ++ ["STREAMS"] ++ stream_keys ++ ids
-                 )
+                 key_from_command(["XREAD" | prefix_opts] ++ ["STREAMS"] ++ stream_keys ++ ids)
       end
     end
 
@@ -216,7 +212,7 @@ defmodule Redix.Cluster.CommandParserTest do
                     min_length: 0,
                     max_length: 8
                   ) do
-        result = Command.key_from_command(command)
+        result = key_from_command(command)
 
         assert match?({:ok, key} when is_binary(key), result) or result == :no_key or
                  result == :unknown

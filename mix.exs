@@ -39,6 +39,7 @@ defmodule Redix.Mixfile do
           "README.md",
           "pages/Reconnections.md",
           "pages/Real-world usage.md",
+          "pages/Cluster.md",
           "pages/Telemetry.md",
           "CHANGELOG.md",
           "LICENSE.txt": [title: "License"]
