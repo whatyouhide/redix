@@ -600,24 +600,29 @@ defmodule RedixTest do
     test "throw a human-readable error when the server disabled CLIENT commands and users " <>
            "of Redix ignore function results" do
       conn = start_supervised!({Redix, port: 6386})
-      Process.flag(:trap_exit, true)
+      ref = Process.monitor(conn)
       key = Base.encode16(:crypto.strong_rand_bytes(6))
 
       # Here we send a command with noreply. Redis returns an error here since CLIENT commands
       # (issued under the hood) are disabled, but we are simulating a user ignoring the results
-      # of the noreply_command/2 calls. When issuing more normal commands, Redix has trouble
-      # finding the command in the ETS queue when popping the response and used to fail
-      # with a hard-to-understand error (see the issue linked above).
+      # of the noreply_command/2 calls. The socket owner will crash when it encounters the
+      # unexpected additional responses from Redis (the queue is empty but data remains).
+      # This crash takes down the linked connection process.
       _ = Redix.noreply_command(conn, ["INCR", key])
 
-      assert {:redix_exited_during_call, {%RuntimeError{} = error, _stacktrace}} =
-               catch_exit(Redix.command!(conn, ["PING"]))
+      # We monitor the connection and verify the crash reason directly, rather than sending
+      # another command (which would be racy with TCP fragmentation — the remaining responses
+      # from Redis may arrive in a separate TCP segment, causing the next command's response
+      # to be misaligned).
+      assert_receive {:DOWN, ^ref, :process, ^conn, {%RuntimeError{} = error, _stacktrace}},
+                     1000
 
       assert Exception.message(error) =~
                "failed to find an original command in the commands queue"
     end
 
     # Regression for https://github.com/whatyouhide/redix/issues/192
+    @tag :capture_log
     test "return an error when the server disabled CLIENT commands" do
       conn = start_supervised!({Redix, port: 6386})
       key = Base.encode16(:crypto.strong_rand_bytes(6))
