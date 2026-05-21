@@ -90,6 +90,40 @@ defmodule Redix.Telemetry do
       * `:kind` - the atom `:error`.
       * `:reason` - the error reason (such as a `Redix.ConnectionError` struct).
 
+  ## Cluster events
+
+  `Redix.Cluster` connections execute the following Telemetry events:
+
+    * `[:redix, :cluster, :topology_change]` - executed when the cluster topology
+      is successfully refreshed. There are no measurements. Metadata are:
+
+      * `:cluster` - the name of the cluster (the atom passed as `:name`).
+      * `:nodes` - the list of primary node addresses (as `"host:port"` strings).
+
+    * `[:redix, :cluster, :failed_topology_refresh]` - executed when the cluster
+      manager fails to refresh the topology (no reachable node). There are no
+      measurements. Metadata are:
+
+      * `:cluster` - the name of the cluster.
+      * `:reason` - the error reason (such as `:no_reachable_node`).
+
+    * `[:redix, :cluster, :node_connection_failed]` - executed when the cluster
+      manager fails to establish a connection to a specific node. There are no
+      measurements. Metadata are:
+
+      * `:cluster` - the name of the cluster.
+      * `:address` - the node address (as a `"host:port"` string).
+      * `:reason` - the error reason.
+
+    * `[:redix, :cluster, :redirection]` - executed when a command receives a
+      `MOVED` or `ASK` redirection from a cluster node. There are no measurements.
+      Metadata are:
+
+      * `:cluster` - the name of the cluster.
+      * `:type` - either `:moved` or `:ask`.
+      * `:slot` - the hash slot being redirected.
+      * `:target_address` - the target node address (as a `"host:port"` string).
+
   More events might be added in the future and that won't be considered a breaking
   change, so if you're writing a handler for Redix events be sure to ignore events
   that are not known. All future Redix events will start with the `:redix` atom,
@@ -112,6 +146,9 @@ defmodule Redix.Telemetry do
     * `[:redix, :failed_connection]` - logged at the `:error` level
     * `[:redix, :connection]` - logged at the `:info` level if it's a
       reconnection, not logged if it's the first connection.
+    * `[:redix, :cluster, :failed_topology_refresh]` - logged at the `:error` level
+    * `[:redix, :cluster, :node_connection_failed]` - logged at the `:warning` level
+    * `[:redix, :cluster, :redirection]` - logged at the `:info` level
 
   See the module documentation for more information. If you want to
   attach your own handler, look at the [Telemetry page](telemetry.html)
@@ -127,7 +164,11 @@ defmodule Redix.Telemetry do
     events = [
       [:redix, :disconnection],
       [:redix, :connection],
-      [:redix, :failed_connection]
+      [:redix, :failed_connection],
+      [:redix, :cluster, :topology_change],
+      [:redix, :cluster, :failed_topology_refresh],
+      [:redix, :cluster, :node_connection_failed],
+      [:redix, :cluster, :redirection]
     ]
 
     :telemetry.attach_many(
@@ -177,6 +218,35 @@ defmodule Redix.Telemetry do
 
       {:connection, %{reconnection: false}} ->
         :ok
+    end
+  end
+
+  def handle_event([:redix, :cluster, event], _measurements, metadata, :no_config) do
+    cluster = metadata.cluster
+
+    case event do
+      :topology_change ->
+        :ok
+
+      :failed_topology_refresh ->
+        _ =
+          Logger.error(fn ->
+            "Cluster #{inspect(cluster)} failed to refresh topology: #{inspect(metadata.reason)}"
+          end)
+
+      :node_connection_failed ->
+        _ =
+          Logger.warning(fn ->
+            "Cluster #{inspect(cluster)} failed to connect to node " <>
+              "#{metadata.address}: #{inspect(metadata.reason)}"
+          end)
+
+      :redirection ->
+        _ =
+          Logger.info(fn ->
+            "Cluster #{inspect(cluster)} #{metadata.type} redirection " <>
+              "for slot #{metadata.slot} to #{metadata.target_address}"
+          end)
     end
   end
 end
