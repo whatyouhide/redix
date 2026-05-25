@@ -81,10 +81,11 @@ This eliminates the need for `persistent_term` or any external lookup.
   not a boolean flag. Periodic refresh uses a named timeout `{:timeout, :periodic_refresh}`
   that restarts itself. The periodic refresh is `:postpone`d during cooldown.
 
-- **trap_exit in try_fetch_slots.** `Redix.start_link(sync_connect: true)` to an
-  unreachable host sends an EXIT that would kill the Manager via the link. The Manager
-  temporarily traps exits around this call and flushes them afterward. This was caught
-  by a telemetry test for `failed_topology_refresh`.
+- **Transient socket for topology fetches.** `try_fetch_slots/4` connects with
+  `Redix.Connector.connect/2` against a raw socket, runs `CLUSTER SLOTS` via
+  `Redix.Connector.sync_command/4`, and closes the socket in an `after` block. There's
+  no `Redix.start_link` and no linked process, so an unreachable host can't take down
+  the Manager — failures just fall through to the next node.
 
 - **Transparent pipeline splitting.** Pipelines spanning multiple nodes are grouped by
   target node, executed in parallel via `Task.Supervisor`, and results reassembled in
