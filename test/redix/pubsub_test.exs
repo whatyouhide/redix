@@ -7,24 +7,24 @@ defmodule Redix.PubSubTest do
 
   @moduletag :pubsub
 
-  # See docker-compose.yml.
-  @port 6380
+  # See docker-compose.yml and Redix.TestPorts (REDIX_PUBSUB_PORT).
+  defp port, do: Redix.TestPorts.port(:pubsub)
 
   setup do
-    {:ok, pubsub} = PubSub.start_link(port: @port)
-    {:ok, conn} = Redix.start_link(port: @port)
+    {:ok, pubsub} = PubSub.start_link(port: port())
+    {:ok, conn} = Redix.start_link(port: port())
     {:ok, %{pubsub: pubsub, conn: conn}}
   end
 
   test "using gen_statem options in start_link/2" do
     fullsweep_after = Enum.random(0..50000)
-    {:ok, pid} = PubSub.start_link(port: @port, spawn_opt: [fullsweep_after: fullsweep_after])
+    {:ok, pid} = PubSub.start_link(port: port(), spawn_opt: [fullsweep_after: fullsweep_after])
     {:garbage_collection, info} = Process.info(pid, :garbage_collection)
     assert info[:fullsweep_after] == fullsweep_after
   end
 
   test "client_id/1 should be available after start_link/2" do
-    {:ok, pid} = PubSub.start_link(port: @port, fetch_client_id_on_connect: true)
+    {:ok, pid} = PubSub.start_link(port: port(), fetch_client_id_on_connect: true)
     assert {:ok, client_id} = PubSub.get_client_id(pid)
     assert is_integer(client_id)
   end
@@ -35,7 +35,7 @@ defmodule Redix.PubSubTest do
   end
 
   test "client_id/1 returns an error if :fetch_client_id_on_connect is not true" do
-    {:ok, pid} = PubSub.start_link(port: @port, fetch_client_id_on_connect: false)
+    {:ok, pid} = PubSub.start_link(port: port(), fetch_client_id_on_connect: false)
     assert {:error, %ConnectionError{reason: :client_id_not_stored}} = PubSub.get_client_id(pid)
   end
 
@@ -264,7 +264,7 @@ defmodule Redix.PubSubTest do
     events = [[:redix, :connection], [:redix, :disconnection]]
     :ok = :telemetry.attach_many(to_string(test_name), events, handler, :no_config)
 
-    {:ok, pubsub} = PubSub.start_link(port: @port, name: :redix_pubsub_telemetry_test)
+    {:ok, pubsub} = PubSub.start_link(port: port(), name: :redix_pubsub_telemetry_test)
     # Make sure to call subscribe/3 so that Redis considers this a PubSub connection.
     {:ok, pubsub_ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^pubsub_ref, :subscribed, %{channel: "foo"}}
@@ -333,7 +333,7 @@ defmodule Redix.PubSubTest do
   end
 
   test ":exit_on_disconnection option", %{conn: conn} do
-    {:ok, pubsub} = PubSub.start_link(port: @port, exit_on_disconnection: true)
+    {:ok, pubsub} = PubSub.start_link(port: port(), exit_on_disconnection: true)
 
     # We need to subscribe to something so that this client becomes a PubSub
     # client and we can kill it with "CLIENT KILL TYPE pubsub".

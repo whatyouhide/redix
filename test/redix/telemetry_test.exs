@@ -3,11 +3,13 @@ defmodule Redix.TelemetryTest do
 
   import ExUnit.CaptureLog
 
+  defp base_port, do: Redix.TestPorts.port(:base)
+
   describe "attach_default_handler/0" do
     test "attaches an handler that logs disconnections and reconnections" do
       Redix.Telemetry.attach_default_handler()
 
-      conn = start_supervised!(Redix)
+      conn = start_supervised!({Redix, port: base_port()})
 
       client_id = Redix.command!(conn, ["CLIENT", "ID"])
 
@@ -28,8 +30,8 @@ defmodule Redix.TelemetryTest do
           assert wait_for_reconnection(conn, 1000) == :ok
         end)
 
-      assert log =~ ~r/Connection .* disconnected from Redis at localhost:6379/
-      assert log =~ ~r/Connection .* reconnected to Redis at localhost:6379/
+      assert log =~ ~r/Connection .* disconnected from Redis at localhost:#{base_port()}/
+      assert log =~ ~r/Connection .* reconnected to Redis at localhost:#{base_port()}/
     end
 
     test "attaches an handler that logs failed connections" do

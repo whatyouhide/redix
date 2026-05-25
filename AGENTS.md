@@ -119,6 +119,37 @@ mix test test/redix/cluster/  # unit tests (hash, command parser)
 mix test test/redix/cluster_test.exs  # integration tests (needs Docker cluster)
 ```
 
+### Overriding host ports
+
+If something on the host is already bound to one of the default ports (most
+commonly `6379`), the host-side mapping can be overridden via env vars. Defaults
+match the original `docker-compose.yml`, so leaving them unset changes nothing.
+
+| Service                              | Env var                         | Default |
+|--------------------------------------|---------------------------------|---------|
+| `base`                               | `REDIX_BASE_PORT`               | `6379`  |
+| `pubsub`                             | `REDIX_PUBSUB_PORT`             | `6380`  |
+| `base_with_auth`                     | `REDIX_AUTH_PORT`               | `16379` |
+| `base_with_acl`                      | `REDIX_ACL_PORT`                | `6385`  |
+| `base_with_stunnel`                  | `REDIX_STUNNEL_PORT`            | `6384`  |
+| `base_with_disallowed_client_command`| `REDIX_DISALLOWED_CLIENT_PORT`  | `6386`  |
+
+The same env vars are read by `Redix.TestPorts` (`test/support/test_ports.ex`),
+which the test suite uses for every connection — so `mix test` honors the
+override automatically:
+
+```sh
+REDIX_BASE_PORT=6479 docker compose up -d base
+REDIX_BASE_PORT=6479 mix test
+```
+
+The `sentinel`, `sentinel_with_auth`, and `cluster` services are **not**
+parameterized. Their ports (`6381`, `6382`, `6383`, `26379-26383`, `7000-7005`)
+are baked into the container topology — sentinel returns `localhost:6381` to
+clients, and cluster MOVED redirections point at `127.0.0.1:7000..7005`.
+Remapping their host-side ports would break client redirection, so those
+services need their default host ports free.
+
 ### Known limitations / future work
 
 - Primary-only routing (no READONLY replica reads)

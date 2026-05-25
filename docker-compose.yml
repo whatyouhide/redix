@@ -1,15 +1,25 @@
+# Host-side ports for the single-node services can be overridden via the
+# REDIX_*_PORT environment variables (e.g. REDIX_BASE_PORT=6479 docker compose up).
+# The container-side ports are intentionally NOT parameterized — Redix tests pick up
+# the same env vars (see test/support/test_ports.ex), so changing the host-side mapping
+# is enough.
+#
+# The sentinel and cluster services bake their port numbers into their internal
+# topology (sentinel.conf references `localhost 6381`; `CLUSTER MEET` uses
+# 127.0.0.1:7000..7005). Remapping their host-side ports would break client
+# redirection. They are left as fixed mappings on purpose.
 services:
   base:
     image: "redis:alpine"
     ports:
-      - "6379:6379"
+      - "${REDIX_BASE_PORT:-6379}:6379"
     sysctls:
       net.core.somaxconn: 1024
 
   pubsub:
     image: "redis:alpine"
     ports:
-      - "6380:6379"
+      - "${REDIX_PUBSUB_PORT:-6380}:6379"
     sysctls:
       net.core.somaxconn: 1024
 
@@ -17,14 +27,14 @@ services:
     image: "redis:5-alpine"
     command: redis-server --requirepass some-password
     ports:
-      - "16379:6379"
+      - "${REDIX_AUTH_PORT:-16379}:6379"
     sysctls:
       net.core.somaxconn: 1024
 
   base_with_acl:
     build: ./test/docker/base_with_acl
     ports:
-      - "6385:6379"
+      - "${REDIX_ACL_PORT:-6385}:6379"
     sysctls:
       net.core.somaxconn: 1024
 
@@ -56,14 +66,14 @@ services:
     links:
       - base
     ports:
-      - 6384:6384
+      - "${REDIX_STUNNEL_PORT:-6384}:6384"
     sysctls:
       net.core.somaxconn: 1024
 
   base_with_disallowed_client_command:
     build: ./test/docker/base_with_disallowed_client_command
     ports:
-      - "6386:6379"
+      - "${REDIX_DISALLOWED_CLIENT_PORT:-6386}:6379"
     sysctls:
       net.core.somaxconn: 1024
 

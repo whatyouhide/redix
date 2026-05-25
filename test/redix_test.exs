@@ -8,11 +8,16 @@ defmodule RedixTest do
     Error
   }
 
-  @with_auth_port 16379
-  @with_acl_port 6385
+  # Port helpers are functions (not module attributes) so that REDIX_*_PORT env
+  # var changes are picked up without forcing a recompile.
+  defp base_port, do: Redix.TestPorts.port(:base)
+  defp with_auth_port, do: Redix.TestPorts.port(:auth)
+  defp with_acl_port, do: Redix.TestPorts.port(:acl)
+  defp stunnel_port, do: Redix.TestPorts.port(:stunnel)
+  defp disallowed_client_port, do: Redix.TestPorts.port(:disallowed_client)
 
   setup_all do
-    {:ok, conn} = Redix.start_link(sync_connect: true)
+    {:ok, conn} = Redix.start_link(port: Redix.TestPorts.port(:base), sync_connect: true)
     Redix.command!(conn, ["FLUSHALL"])
     :ok = Redix.stop(conn)
     :ok
@@ -20,18 +25,18 @@ defmodule RedixTest do
 
   describe "start_link/2" do
     test "specifying a database" do
-      {:ok, c} = Redix.start_link(database: 1)
+      {:ok, c} = Redix.start_link(port: base_port(), database: 1)
       assert Redix.command(c, ~w(SET my_key my_value)) == {:ok, "OK"}
 
       # Let's check we didn't write to the default database (which is 0).
-      {:ok, c} = Redix.start_link()
+      {:ok, c} = Redix.start_link(port: base_port())
       assert Redix.command(c, ~w(GET my_key)) == {:ok, nil}
     end
 
     test "specifying a non-existing database" do
       capture_log(fn ->
         Process.flag(:trap_exit, true)
-        {:ok, pid} = Redix.start_link(database: 1000)
+        {:ok, pid} = Redix.start_link(port: base_port(), database: 1000)
 
         assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
         assert message in ["ERR invalid DB index", "ERR DB index is out of range"]
@@ -42,7 +47,7 @@ defmodule RedixTest do
       log =
         capture_log(fn ->
           Process.flag(:trap_exit, true)
-          {:ok, pid} = Redix.start_link(password: "foo")
+          {:ok, pid} = Redix.start_link(port: base_port(), password: "foo")
 
           assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
 
@@ -59,7 +64,7 @@ defmodule RedixTest do
         Process.flag(:trap_exit, true)
 
         {:ok, pid} =
-          Redix.start_link(port: @with_acl_port, username: "nonexistent", password: "foo")
+          Redix.start_link(port: with_acl_port(), username: "nonexistent", password: "foo")
 
         assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
 
@@ -73,7 +78,7 @@ defmodule RedixTest do
 
         # Readonly user
         {:ok, c} =
-          Redix.start_link(port: @with_acl_port, username: "readonly", password: "ropass")
+          Redix.start_link(port: with_acl_port(), username: "readonly", password: "ropass")
 
         assert {:error, %Error{message: message}} = Redix.command(c, ~w(SET abc my_value))
         assert message =~ "NOPERM this user has no permissions to run the 'set' command"
@@ -81,7 +86,7 @@ defmodule RedixTest do
 
         # Superuser
         {:ok, c} =
-          Redix.start_link(port: @with_acl_port, username: "superuser", password: "superpass")
+          Redix.start_link(port: with_acl_port(), username: "superuser", password: "superpass")
 
         assert Redix.command(c, ~w(SET def my_value)) == {:ok, "OK"}
         assert Redix.command(c, ~w(GET def)) == {:ok, "my_value"}
@@ -89,13 +94,13 @@ defmodule RedixTest do
     end
 
     test "specifying a string password when a password is set" do
-      {:ok, pid} = Redix.start_link(port: @with_auth_port, password: "some-password")
+      {:ok, pid} = Redix.start_link(port: with_auth_port(), password: "some-password")
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
     test "overriding username when a URI is used" do
       {:ok, pid} =
-        Redix.start_link("redis://ignored:some-password@localhost:#{@with_auth_port}",
+        Redix.start_link("redis://ignored:some-password@localhost:#{with_auth_port()}",
           username: nil
         )
 
@@ -108,7 +113,7 @@ defmodule RedixTest do
           # We warn but fall back to ignoring the username.
           {:ok, pid} =
             Redix.start_link(
-              port: @with_auth_port,
+              port: with_auth_port(),
               username: "discarded",
               password: "some-password",
               sync_connect: true
@@ -125,7 +130,7 @@ defmodule RedixTest do
 
       {:ok, pid} =
         Redix.start_link(
-          port: @with_auth_port,
+          port: with_auth_port(),
           password: {System, :get_env, ["REDIX_MFA_PASSWORD"]}
         )
 
@@ -160,13 +165,13 @@ defmodule RedixTest do
     end
 
     test "using a redis:// url" do
-      {:ok, pid} = Redix.start_link("redis://localhost:6379/3")
+      {:ok, pid} = Redix.start_link("redis://localhost:#{base_port()}/3")
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
     test "using a rediss:// url, ignoring certificate" do
       {:ok, pid} =
-        Redix.start_link("rediss://localhost:6384/3",
+        Redix.start_link("rediss://localhost:#{stunnel_port()}/3",
           socket_opts: [verify: :verify_none, reuse_sessions: false]
         )
 
@@ -178,7 +183,7 @@ defmodule RedixTest do
       Process.flag(:trap_exit, true)
 
       assert {:error, error} =
-               Redix.start_link("rediss://localhost:6384/3",
+               Redix.start_link("rediss://localhost:#{stunnel_port()}/3",
                  socket_opts: [reuse_sessions: false],
                  sync_connect: true
                )
@@ -193,13 +198,13 @@ defmodule RedixTest do
     end
 
     test "with IPv4" do
-      {:ok, pid} = Redix.start_link("redis://127.0.0.1:6379", sync_connect: true)
+      {:ok, pid} = Redix.start_link("redis://127.0.0.1:#{base_port()}", sync_connect: true)
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
     end
 
     test "with IPv6" do
       {:ok, pid} =
-        Redix.start_link("redis://[::1]:6379",
+        Redix.start_link("redis://[::1]:#{base_port()}",
           socket_opts: [:inet6],
           sync_connect: true
         )
@@ -208,7 +213,7 @@ defmodule RedixTest do
     end
 
     test "name registration with atom name" do
-      {:ok, pid} = Redix.start_link(name: :redix_server)
+      {:ok, pid} = Redix.start_link(port: base_port(), name: :redix_server)
       assert Process.whereis(:redix_server) == pid
       assert Redix.command(:redix_server, ["PING"]) == {:ok, "PONG"}
     end
@@ -220,24 +225,27 @@ defmodule RedixTest do
     end
 
     test "name registration with :global name" do
-      {:ok, _pid} = Redix.start_link(name: {:global, :redix_server})
+      {:ok, _pid} = Redix.start_link(port: base_port(), name: {:global, :redix_server})
       assert Redix.command({:global, :redix_server}, ["PING"]) == {:ok, "PONG"}
     end
 
     test "name registration with :via registry name" do
       name = {:via, :global, :redix_server_via}
-      {:ok, _pid} = Redix.start_link(name: name)
+      {:ok, _pid} = Redix.start_link(port: base_port(), name: name)
       assert Redix.command(name, ["PING"]) == {:ok, "PONG"}
     end
 
     test "passing options along with a Redis URI" do
-      {:ok, pid} = Redix.start_link("redis://localhost", name: :redix_uri)
+      {:ok, pid} = Redix.start_link("redis://localhost", port: base_port(), name: :redix_uri)
       assert Process.whereis(:redix_uri) == pid
     end
 
     test "using gen_statem options" do
       fullsweep_after = Enum.random(0..50000)
-      {:ok, pid} = Redix.start_link(spawn_opt: [fullsweep_after: fullsweep_after])
+
+      {:ok, pid} =
+        Redix.start_link(port: base_port(), spawn_opt: [fullsweep_after: fullsweep_after])
+
       {:garbage_collection, info} = Process.info(pid, :garbage_collection)
       assert info[:fullsweep_after] == fullsweep_after
     end
@@ -264,7 +272,7 @@ defmodule RedixTest do
 
   describe "stop/1" do
     test "stops the connection" do
-      {:ok, pid} = Redix.start_link()
+      {:ok, pid} = Redix.start_link(port: base_port())
       ref = Process.monitor(pid)
       assert Redix.stop(pid) == :ok
 
@@ -272,7 +280,7 @@ defmodule RedixTest do
     end
 
     test "closes the socket as well" do
-      {:ok, pid} = Redix.start_link(sync_connect: true)
+      {:ok, pid} = Redix.start_link(port: base_port(), sync_connect: true)
 
       # This is a hack to get the socket. If I'll have a better idea, good for me :).
       {_, data} = :sys.get_state(pid)
@@ -352,7 +360,7 @@ defmodule RedixTest do
 
     test "Redix process crashes while waiting" do
       # We manually start a connection without start_supervised/1 here.
-      {:ok, conn} = Redix.start_link()
+      {:ok, conn} = Redix.start_link(port: base_port())
 
       Process.flag(:trap_exit, true)
 
@@ -599,7 +607,7 @@ defmodule RedixTest do
     @tag :capture_log
     test "throw a human-readable error when the server disabled CLIENT commands and users " <>
            "of Redix ignore function results" do
-      conn = start_supervised!({Redix, port: 6386})
+      conn = start_supervised!({Redix, port: disallowed_client_port()})
       ref = Process.monitor(conn)
       key = Base.encode16(:crypto.strong_rand_bytes(6))
 
@@ -624,7 +632,7 @@ defmodule RedixTest do
     # Regression for https://github.com/whatyouhide/redix/issues/192
     @tag :capture_log
     test "return an error when the server disabled CLIENT commands" do
-      conn = start_supervised!({Redix, port: 6386})
+      conn = start_supervised!({Redix, port: disallowed_client_port()})
       key = Base.encode16(:crypto.strong_rand_bytes(6))
 
       assert {:error, %Redix.Error{} = error} = Redix.noreply_command(conn, ["INCR", key])
@@ -662,7 +670,7 @@ defmodule RedixTest do
     end
 
     test "mid-command disconnections", %{conn: conn} do
-      {:ok, kill_conn} = Redix.start_link()
+      {:ok, kill_conn} = Redix.start_link(port: base_port())
 
       capture_log(fn ->
         task = Task.async(fn -> Redix.command(conn, ~w(BLPOP mid_command_disconnection 0)) end)
@@ -678,7 +686,7 @@ defmodule RedixTest do
     test "no leaking messages when timeout happens at the same time as disconnections", %{
       conn: conn
     } do
-      {:ok, kill_conn} = Redix.start_link()
+      {:ok, kill_conn} = Redix.start_link(port: base_port())
 
       capture_log(fn ->
         {_pid, ref} =
@@ -705,7 +713,7 @@ defmodule RedixTest do
   end
 
   test ":exit_on_disconnection option" do
-    {:ok, c} = Redix.start_link(exit_on_disconnection: true)
+    {:ok, c} = Redix.start_link(port: base_port(), exit_on_disconnection: true)
     Process.flag(:trap_exit, true)
 
     capture_log(fn ->
@@ -815,13 +823,14 @@ defmodule RedixTest do
       events = [[:redix, :connection], [:redix, :disconnection]]
       :ok = :telemetry.attach_many(to_string(test_name), events, handler, :no_config)
 
-      {:ok, c} = Redix.start_link(name: :redix_telemetry_test)
+      {:ok, c} = Redix.start_link(port: base_port(), name: :redix_telemetry_test)
+      expected_address = "localhost:#{base_port()}"
 
       assert_receive {^ref, [:redix, :connection], measurements, meta}, 1000
       assert measurements == %{}
 
       assert %{
-               address: "localhost:6379",
+               address: ^expected_address,
                connection: ^c,
                reconnection: false,
                connection_name: :redix_telemetry_test
@@ -834,7 +843,7 @@ defmodule RedixTest do
         assert measurements == %{}
 
         assert %{
-                 address: "localhost:6379",
+                 address: ^expected_address,
                  connection: ^c,
                  connection_name: :redix_telemetry_test
                } = meta
@@ -843,7 +852,7 @@ defmodule RedixTest do
         assert measurements == %{}
 
         assert %{
-                 address: "localhost:6379",
+                 address: ^expected_address,
                  connection: ^c,
                  reconnection: true,
                  connection_name: :redix_telemetry_test
@@ -853,7 +862,7 @@ defmodule RedixTest do
 
     test "the :connection_name metadata field is filled in when the connection is named" do
       {test_name, _arity} = __ENV__.function
-      {:ok, c} = Redix.start_link(name: test_name)
+      {:ok, c} = Redix.start_link(port: base_port(), name: test_name)
 
       parent = self()
       ref = make_ref()
@@ -922,7 +931,8 @@ defmodule RedixTest do
   end
 
   defp connect(context) do
-    conn = start_supervised!(Supervisor.child_spec(Redix, id: context.test))
+    spec = Supervisor.child_spec({Redix, port: base_port()}, id: context.test)
+    conn = start_supervised!(spec)
     {:ok, %{conn: conn}}
   end
 end
