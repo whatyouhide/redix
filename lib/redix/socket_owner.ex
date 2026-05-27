@@ -115,12 +115,11 @@ defmodule Redix.SocketOwner do
   defp new_data(%{continuation: continuation} = state, data) do
     case continuation.(data) do
       {:ok, resp, rest} ->
-        {_counter, {pid, request_id}, _ncommands, timed_out?} =
-          take_first_in_queue(state.queue_table)
+        {_counter, alias_ref, _ncommands} = take_first_in_queue(state.queue_table)
 
-        if not timed_out? do
-          send(pid, {request_id, {:ok, resp}})
-        end
+        # `alias_ref` is a process alias (see Redix.Connection.pipeline/4). If the caller
+        # already timed out, the alias is deactivated and this reply is silently dropped.
+        send(alias_ref, {alias_ref, {:ok, resp}})
 
         new_data(%{state | continuation: nil}, rest)
 

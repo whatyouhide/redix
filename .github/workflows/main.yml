@@ -25,7 +25,7 @@ jobs:
             lint: true
 
           - otp: "25.3"
-            elixir: "1.14.3"
+            elixir: "1.15.8"
             coverage: true
 
     env:

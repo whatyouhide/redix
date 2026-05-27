@@ -58,22 +58,22 @@ defmodule Redix.Connection do
     :gen_statem.stop(conn, :normal, timeout)
   end
 
-  # TODO: Once we depend on Elixir 1.15+ (which requires OTP 24+, which introduces process
-  # aliases), we can get rid of the extra work to support timeouts.
   def pipeline(conn, commands, timeout, telemetry_metadata) do
     conn_pid = GenServer.whereis(conn)
 
-    request_id = Process.monitor(conn_pid)
+    # The reference doubles as a process alias (OTP 24+): the connection replies to the
+    # alias rather than to our pid. If we time out, demonitoring deactivates the alias, so
+    # any late reply is silently dropped instead of leaking into our mailbox.
+    request_id = Process.monitor(conn_pid, alias: :demonitor)
 
     telemetry_metadata = telemetry_pipeline_metadata(conn, conn_pid, commands, telemetry_metadata)
 
     start_time = System.monotonic_time()
     :ok = execute_telemetry_pipeline_start(telemetry_metadata)
 
-    # We cast to the connection process knowing that it will reply at some point,
-    # either after roughly timeout or when a response is ready.
-    cast = {:pipeline, commands, _from = {self(), request_id}, timeout}
-    :ok = :gen_statem.cast(conn_pid, cast)
+    # We cast to the connection process knowing that it will reply at some point (to the
+    # alias) when a response is ready. We enforce the timeout on our side.
+    :ok = :gen_statem.cast(conn_pid, {:pipeline, commands, _from = request_id})
 
     receive do
       {^request_id, resp} ->
@@ -83,6 +83,12 @@ defmodule Redix.Connection do
 
       {:DOWN, ^request_id, _, _, reason} ->
         exit({:redix_exited_during_call, reason})
+    after
+      timeout ->
+        _ = Process.demonitor(request_id, [:flush])
+        resp = {:error, %ConnectionError{reason: :timeout}}
+        :ok = execute_telemetry_pipeline_stop(telemetry_metadata, start_time, resp)
+        resp
     end
   end
 
@@ -180,13 +186,9 @@ defmodule Redix.Connection do
     {:next_state, :connecting, new_data}
   end
 
-  def disconnected({:timeout, {:client_timed_out, _counter}}, _from, _data) do
-    :keep_state_and_data
-  end
-
   def disconnected(:internal, {:notify_of_disconnection, _reason}, %__MODULE__{table: table}) do
-    fun = fn {_counter, from, _ncommands, timed_out?}, _acc ->
-      if not timed_out?, do: reply(from, {:error, %ConnectionError{reason: :disconnected}})
+    fun = fn {_counter, from, _ncommands}, _acc ->
+      reply(from, {:error, %ConnectionError{reason: :disconnected}})
     end
 
     :ets.foldl(fun, nil, table)
@@ -195,7 +197,7 @@ defmodule Redix.Connection do
     :keep_state_and_data
   end
 
-  def disconnected(:cast, {:pipeline, _commands, from, _timeout}, _data) do
+  def disconnected(:cast, {:pipeline, _commands, from}, _data) do
     reply(from, {:error, %ConnectionError{reason: :closed}})
     :keep_state_and_data
   end
@@ -231,7 +233,7 @@ defmodule Redix.Connection do
     {:next_state, :connected, %{data | socket: socket}}
   end
 
-  def connecting(:cast, {:pipeline, _commands, _from, _timeout}, _data) do
+  def connecting(:cast, {:pipeline, _commands, _from}, _data) do
     {:keep_state_and_data, :postpone}
   end
 
@@ -247,28 +249,18 @@ defmodule Redix.Connection do
     disconnect(data, reason)
   end
 
-  def connecting({:timeout, {:client_timed_out, _counter}}, _from, _data) do
-    :keep_state_and_data
-  end
-
-  def connected(:cast, {:pipeline, commands, from, timeout}, data) do
+  def connected(:cast, {:pipeline, commands, from}, data) do
     {ncommands, data} = get_client_reply(data, commands)
 
     if ncommands > 0 do
       {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
 
-      row = {counter, from, ncommands, _timed_out? = false}
+      row = {counter, from, ncommands}
       :ets.insert(data.table, row)
 
       case data.transport.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
         :ok ->
-          actions =
-            case timeout do
-              :infinity -> []
-              _other -> [{{:timeout, {:client_timed_out, counter}}, timeout, from}]
-            end
-
-          {:keep_state, data, actions}
+          {:keep_state, data}
 
         {:error, _reason} ->
           # The socket owner is not guaranteed to get a "closed" message, even if we close the
@@ -298,18 +290,12 @@ defmodule Redix.Connection do
     disconnect(data, reason)
   end
 
-  def connected({:timeout, {:client_timed_out, counter}}, from, %__MODULE__{} = data) do
-    if _found? = :ets.update_element(data.table, counter, {4, _timed_out? = true}) do
-      reply(from, {:error, %ConnectionError{reason: :timeout}})
-    end
-
-    :keep_state_and_data
-  end
-
   ## Helpers
 
-  defp reply({pid, request_id} = _from, reply) do
-    send(pid, {request_id, reply})
+  # `from` is a process alias (see pipeline/4). Sending to a deactivated alias (e.g. after
+  # the caller timed out) is silently dropped, so we never leak late replies.
+  defp reply(alias_ref, reply) do
+    send(alias_ref, {alias_ref, reply})
   end
 
   defp disconnect(_data, %Redix.Error{} = error) do
