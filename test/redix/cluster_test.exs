@@ -261,6 +261,58 @@ defmodule Redix.ClusterTest do
     end
   end
 
+  describe "MOVED to a node not yet in the registry (issue #293)" do
+    test "Manager.connect_to_node connects to a reachable target on demand", %{cluster: cluster} do
+      registry = :"#{cluster}_registry"
+      manager = :"#{cluster}_manager"
+
+      registered_ports = registered_ports(registry)
+
+      # Replicas are reachable Redis nodes that aren't registered as primaries,
+      # so they stand in for a node a MOVED redirect points at before the
+      # topology refresh has discovered it.
+      unknown_port = Enum.find(7000..7005, &(&1 not in registered_ports))
+      assert unknown_port, "expected at least one unregistered (replica) cluster port"
+
+      address = {"127.0.0.1", unknown_port}
+
+      # Precondition: the node is not known yet.
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == :error
+
+      # On-demand connect succeeds and registers the node.
+      assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, address)
+      assert is_pid(pid)
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == {:ok, pid}
+
+      # The connection is real and usable.
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+
+      # Idempotent: a second call returns the same connection.
+      assert Redix.Cluster.Manager.connect_to_node(manager, address) == {:ok, pid}
+    end
+
+    test "Manager.connect_to_node returns the existing pid for a known node", %{cluster: cluster} do
+      registry = :"#{cluster}_registry"
+      manager = :"#{cluster}_manager"
+
+      [node_id | _] = Registry.select(registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+      [host, port_str] = String.split(node_id, ":")
+      address = {host, String.to_integer(port_str)}
+
+      assert {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, address)
+      assert Redix.Cluster.Manager.connect_to_node(manager, address) == {:ok, pid}
+    end
+
+    test "Manager.connect_to_node returns an error for an unreachable target", %{cluster: cluster} do
+      manager = :"#{cluster}_manager"
+
+      # sync_connect is false, so the Redix process still starts; PING is what
+      # surfaces the connection failure.
+      assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, {"127.0.0.1", 9999})
+      assert {:error, %Redix.ConnectionError{}} = Redix.command(pid, ["PING"])
+    end
+  end
+
   describe "telemetry" do
     test "topology_change is emitted on startup", %{cluster: cluster} do
       {test_name, _arity} = __ENV__.function
@@ -338,5 +390,14 @@ defmodule Redix.ClusterTest do
 
       assert log =~ ~r/Cluster.*failed to refresh topology/
     end
+  end
+
+  defp registered_ports(registry) do
+    registry
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.map(fn node_id ->
+      node_id |> String.split(":") |> List.last() |> String.to_integer()
+    end)
+    |> MapSet.new()
   end
 end

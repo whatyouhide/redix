@@ -94,6 +94,16 @@ This eliminates the need for `persistent_term` or any external lookup.
 - **`:name` is required.** All internal resource names derive from it. No `persistent_term`
   or PID-based lookups needed. Callers always use the atom name.
 
+- **MOVED redirects connect on demand.** When a `MOVED` points at a node not yet in the
+  Registry (typical mid-resharding: the topology refresh cast is async and the Manager
+  may be `:cooling_down`), `handle_moved_redirect/6` falls back to
+  `Manager.connect_to_node/2` — a `:gen_statem.call` served in both `:ready` and
+  `:cooling_down` that starts+monitors a connection to the redirect target and returns its
+  pid. `MOVED` is authoritative, so we trust the address rather than returning a fake
+  "unreachable" error. The next `ensure_connections` adopts the connection (if `CLUSTER
+  SLOTS` lists it) or terminates it (if not), so a bogus address can't leak connections.
+  The async refresh still fires to update the slot table for future routing.
+
 ### Telemetry events
 
 All under `[:redix, :cluster, ...]`:

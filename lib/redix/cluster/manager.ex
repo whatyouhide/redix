@@ -88,6 +88,28 @@ defmodule Redix.Cluster.Manager do
     :gen_statem.cast(manager, :refresh_topology)
   end
 
+  @doc """
+  Ensures a connection to `{host, port}` exists, starting one **on demand**
+  if needed.
+
+  Used when a `MOVED` redirect points at a node we haven't discovered yet (for
+  example mid-resharding). `MOVED` is authoritative, so we trust the address,
+  connect, register, and monitor it just like a node found via `CLUSTER SLOTS`.
+  The next topology refresh "adopts" the connection (if the node shows up in
+  `CLUSTER SLOTS`) or terminates it (if it doesn't), so a bogus address can't
+  leak connections.
+  """
+  @spec connect_to_node(:gen_statem.server_ref(), {String.t(), :inet.port_number()}) ::
+          {:ok, pid()} | {:error, term()}
+  def connect_to_node(manager, {host, port}) do
+    # This runs in the command hot path, so a Manager that's briefly busy (say,
+    # mid-refresh against slow nodes) must not crash the caller: degrade to an
+    # error tuple, which the MOVED handler turns into a normal Redix error.
+    :gen_statem.call(manager, {:connect_to_node, host, port})
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
   ## gen_statem callbacks
 
   @impl true
@@ -151,6 +173,10 @@ defmodule Redix.Cluster.Manager do
     {:keep_state, handle_down(data, ref)}
   end
 
+  def ready({:call, from}, {:connect_to_node, host, port}, data) do
+    handle_connect_to_node(from, host, port, data)
+  end
+
   ## State: :cooling_down — reactive refreshes are silently dropped.
 
   def cooling_down(:state_timeout, :cooldown_expired, data) do
@@ -170,12 +196,30 @@ defmodule Redix.Cluster.Manager do
     {:keep_state, handle_down(data, ref)}
   end
 
+  # On-demand connects are not refreshes, so they're served even during cooldown.
+  def cooling_down({:call, from}, {:connect_to_node, host, port}, data) do
+    handle_connect_to_node(from, host, port, data)
+  end
+
   def cooling_down(:info, _msg, _data), do: :keep_state_and_data
 
   ## Private helpers
 
   defp periodic_refresh_action(interval) do
     {{:timeout, :periodic_refresh}, interval, :refresh}
+  end
+
+  defp handle_connect_to_node(from, host, port, data) do
+    node_id = "#{host}:#{port}"
+
+    case lookup_connection(data.registry, node_id) do
+      {:ok, pid} ->
+        {:keep_state_and_data, [{:reply, from, {:ok, pid}}]}
+
+      :error ->
+        {result, data} = start_and_monitor_connection(data, node_id, host, port)
+        {:keep_state, data, [{:reply, from, result}]}
+    end
   end
 
   defp handle_down(data, ref) do
@@ -185,7 +229,8 @@ defmodule Redix.Cluster.Manager do
     if node_id do
       [host, port_str] = String.split(node_id, ":")
       port = String.to_integer(port_str)
-      start_and_monitor_connection(data, node_id, host, port)
+      {_result, data} = start_and_monitor_connection(data, node_id, host, port)
+      data
     else
       data
     end
@@ -296,12 +341,16 @@ defmodule Redix.Cluster.Manager do
       Enum.reduce(needed_nodes, data, fn {node_id, host, port}, acc ->
         case Registry.lookup(acc.registry, node_id) do
           [{pid, _}] when is_pid(pid) ->
-            if Process.alive?(pid),
-              do: acc,
-              else: start_and_monitor_connection(acc, node_id, host, port)
+            if Process.alive?(pid) do
+              acc
+            else
+              {_result, acc} = start_and_monitor_connection(acc, node_id, host, port)
+              acc
+            end
 
           [] ->
-            start_and_monitor_connection(acc, node_id, host, port)
+            {_result, acc} = start_and_monitor_connection(acc, node_id, host, port)
+            acc
         end
       end)
 
@@ -319,6 +368,8 @@ defmodule Redix.Cluster.Manager do
     data
   end
 
+  # Returns `{result, data}` where `result` is `{:ok, pid}` or `{:error, reason}`.
+  # Callers that only care about the updated data can discard the result.
   defp start_and_monitor_connection(data, node_id, host, port) do
     case start_connection(
            data.pool_supervisor,
@@ -330,7 +381,12 @@ defmodule Redix.Cluster.Manager do
          ) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
-        %{data | monitors: Map.put(data.monitors, ref, node_id)}
+        {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, node_id)}}
+
+      # A concurrent monitor restart (or the connection's own retry) may have
+      # already registered this node. Treat it as success.
+      {:error, {:already_started, pid}} ->
+        {{:ok, pid}, data}
 
       {:error, reason} ->
         :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
@@ -339,7 +395,7 @@ defmodule Redix.Cluster.Manager do
           reason: reason
         })
 
-        data
+        {{:error, reason}, data}
     end
   end
 

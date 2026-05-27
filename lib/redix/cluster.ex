@@ -522,14 +522,24 @@ defmodule Redix.Cluster do
   defp handle_moved_redirect(cluster, host, port, cmds, opts, remaining) do
     registry = registry_name(cluster)
 
-    case Manager.get_connection_by_node(registry, {host, port}) do
+    # Fast path: the target node is already known. If it isn't (for example a
+    # node added mid-resharding that the topology refresh hasn't caught up to
+    # yet), connect on demand via the Manager — MOVED is authoritative, so we
+    # trust the address rather than surfacing a fake "unreachable" error.
+    conn =
+      case Manager.get_connection_by_node(registry, {host, port}) do
+        {:ok, conn} -> {:ok, conn}
+        :error -> Manager.connect_to_node(manager_name(cluster), {host, port})
+      end
+
+    case conn do
       {:ok, conn} ->
         case execute_and_handle_redirections(cluster, conn, cmds, opts, remaining - 1) do
           {:error, _} = error -> [error]
           results -> results
         end
 
-      :error ->
+      {:error, _reason} ->
         Enum.map(cmds, fn {idx, _cmd} ->
           {idx, %Redix.Error{message: "MOVED to unreachable node #{host}:#{port}"}}
         end)
