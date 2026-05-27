@@ -179,6 +179,16 @@ defmodule Redix.ClusterTest do
       assert {:error, %Redix.Error{message: "CROSSSLOT" <> _}} =
                Redix.Cluster.transaction_pipeline(cluster, commands)
     end
+
+    test "fails with a descriptive error when no command has a key", %{cluster: cluster} do
+      commands = [["PING"], ["PING"]]
+
+      assert {:error, %Redix.Error{message: message}} =
+               Redix.Cluster.transaction_pipeline(cluster, commands)
+
+      assert message =~ "requires at least one command with a key"
+      refute message =~ "CROSSSLOT"
+    end
   end
 
   describe "transaction_pipeline!/3" do

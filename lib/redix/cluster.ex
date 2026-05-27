@@ -301,7 +301,9 @@ defmodule Redix.Cluster do
 
   All commands must target the same hash slot (use hash tags to ensure this).
   Returns `{:error, %Redix.Error{message: "CROSSSLOT" <> _}}` if commands
-  span multiple slots.
+  span multiple slots. At least one command must contain a key to route the
+  transaction on; a pipeline of only keyless commands (such as `PING`) returns
+  an error since there's no slot to send it to.
 
   ## Options
 
@@ -340,7 +342,14 @@ defmodule Redix.Cluster do
             {:error, %Redix.ConnectionError{reason: :closed}}
         end
 
-      _multiple_or_none ->
+      [] ->
+        {:error,
+         %Redix.Error{
+           message:
+             "ERR transaction_pipeline requires at least one command with a key to route on"
+         }}
+
+      _multiple ->
         {:error, %Redix.Error{message: "CROSSSLOT Keys in request don't hash to the same slot"}}
     end
   end
