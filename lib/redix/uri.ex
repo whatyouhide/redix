@@ -54,10 +54,10 @@ defmodule Redix.URI do
   defp username_and_password(%URI{userinfo: userinfo}) do
     case String.split(userinfo, ":", parts: 2) do
       ["", password] ->
-        {nil, password}
+        {nil, URI.decode(password)}
 
       [username, password] ->
-        {username, password}
+        {URI.decode(username), URI.decode(password)}
 
       _other ->
         raise ArgumentError,

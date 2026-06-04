@@ -49,6 +49,18 @@ defmodule Redix.URITest do
       end
     end
 
+    test "percent-encoded username and password are decoded" do
+      opts = to_start_options("redis://us%2Fer:a%2Fb@localhost")
+      assert opts[:host] == "localhost"
+      assert opts[:username] == "us/er"
+      assert opts[:password] == "a/b"
+
+      opts = to_start_options("redis://:a%2Fb@localhost")
+      assert opts[:host] == "localhost"
+      assert opts[:username] == nil
+      assert opts[:password] == "a/b"
+    end
+
     test "database" do
       opts = to_start_options("redis://localhost/2")
       assert opts[:host] == "localhost"
