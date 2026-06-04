@@ -463,68 +463,81 @@ defmodule Redix.Cluster do
     first_error || Enum.map(tasks_with_results, fn {_task, {:ok, res}} -> res end)
   end
 
-  defp execute_and_handle_redirections(_cluster, _conn, _cmds, _opts, 0) do
-    {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
-  end
-
   defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
     commands = Enum.map(cmds, fn {_idx, cmd} -> cmd end)
 
     case Redix.pipeline(conn, commands, opts) do
       {:ok, results} ->
         indexed_results = Enum.zip(cmds, results) |> Enum.map(fn {{idx, _}, r} -> {idx, r} end)
-
-        # Check for MOVED/ASK redirections
-        {redirect_cmds, final_results} =
-          Enum.reduce(indexed_results, {%{}, []}, fn {idx, result}, {redirects, finals} ->
-            case parse_redirection(result) do
-              {type, slot, host, port} when type in [:moved, :ask] ->
-                if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
-
-                :telemetry.execute([:redix, :cluster, :redirection], %{}, %{
-                  cluster: cluster,
-                  type: type,
-                  slot: slot,
-                  target_address: "#{host}:#{port}"
-                })
-
-                redirect_key = {type, host, port}
-                cmd = Enum.find(cmds, fn {i, _} -> i == idx end)
-
-                redirects = Map.update(redirects, redirect_key, [cmd], &[cmd | &1])
-                {redirects, finals}
-
-              nil ->
-                {redirects, [{idx, result} | finals]}
-            end
-          end)
-
-        if map_size(redirect_cmds) == 0 do
-          final_results
-        else
-          registry = registry_name(cluster)
-
-          redirect_results =
-            Enum.flat_map(redirect_cmds, fn {redirect_key, redirect_cmds_list} ->
-              redirect_cmds_list = Enum.reverse(redirect_cmds_list)
-
-              case redirect_key do
-                {:moved, host, port} ->
-                  handle_moved_redirect(cluster, host, port, redirect_cmds_list, opts, remaining)
-
-                {:ask, host, port} ->
-                  handle_ask_redirect(host, port, redirect_cmds_list, opts, registry)
-              end
-            end)
-
-          case Enum.find(redirect_results, &match?({:error, _}, &1)) do
-            nil -> final_results ++ redirect_results
-            {:error, _} = error -> error
-          end
-        end
+        follow_redirections(cluster, cmds, indexed_results, opts, remaining)
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  # Inspects each result for a MOVED/ASK redirection and, for any found, re-issues
+  # the affected commands against their redirect targets, following further hops
+  # recursively. This is the single place the redirection budget (`remaining`) is
+  # decremented, so both MOVED and ASK chains share the same bound. Returns a list
+  # of `{idx, result}` tuples, or `{:error, reason}` if a hop fails.
+  defp follow_redirections(cluster, cmds, indexed_results, opts, remaining) do
+    {redirect_cmds, final_results} =
+      Enum.reduce(indexed_results, {%{}, []}, fn {idx, result}, {redirects, finals} ->
+        case parse_redirection(result) do
+          {type, slot, host, port} when type in [:moved, :ask] ->
+            if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
+
+            :telemetry.execute([:redix, :cluster, :redirection], %{}, %{
+              cluster: cluster,
+              type: type,
+              slot: slot,
+              target_address: "#{host}:#{port}"
+            })
+
+            redirect_key = {type, host, port}
+            cmd = Enum.find(cmds, fn {i, _} -> i == idx end)
+
+            redirects = Map.update(redirects, redirect_key, [cmd], &[cmd | &1])
+            {redirects, finals}
+
+          nil ->
+            {redirects, [{idx, result} | finals]}
+        end
+      end)
+
+    cond do
+      map_size(redirect_cmds) == 0 ->
+        final_results
+
+      remaining <= 0 ->
+        {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
+
+      true ->
+        redirect_results =
+          Enum.flat_map(redirect_cmds, fn {redirect_key, redirect_cmds_list} ->
+            redirect_cmds_list = Enum.reverse(redirect_cmds_list)
+
+            case redirect_key do
+              {:moved, host, port} ->
+                handle_moved_redirect(
+                  cluster,
+                  host,
+                  port,
+                  redirect_cmds_list,
+                  opts,
+                  remaining - 1
+                )
+
+              {:ask, host, port} ->
+                handle_ask_redirect(cluster, host, port, redirect_cmds_list, opts, remaining - 1)
+            end
+          end)
+
+        case Enum.find(redirect_results, &match?({:error, _}, &1)) do
+          nil -> final_results ++ redirect_results
+          {:error, _} = error -> error
+        end
     end
   end
 
@@ -543,7 +556,7 @@ defmodule Redix.Cluster do
 
     case conn do
       {:ok, conn} ->
-        case execute_and_handle_redirections(cluster, conn, cmds, opts, remaining - 1) do
+        case execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
           {:error, _} = error -> [error]
           results -> results
         end
@@ -555,22 +568,37 @@ defmodule Redix.Cluster do
     end
   end
 
-  defp handle_ask_redirect(host, port, cmds, opts, registry) do
-    case Manager.get_connection_by_node(registry, {host, port}) do
+  defp handle_ask_redirect(cluster, host, port, cmds, opts, remaining) do
+    case Manager.get_connection_by_node(registry_name(cluster), {host, port}) do
       {:ok, conn} ->
-        Enum.map(cmds, fn {idx, cmd} ->
-          asking_pipeline = [["ASKING"], cmd]
-
-          case Redix.pipeline(conn, asking_pipeline, opts) do
-            {:ok, [_asking_ok, result]} -> {idx, result}
-            {:error, reason} -> {:error, reason}
-          end
+        # ASK is a per-command, per-request redirection: each command needs its
+        # own ASKING prefix, and the target may redirect us again (ASK -> ASK or
+        # ASK -> MOVED). Issue each command on its own so we can follow any
+        # further hop through the shared redirection machinery.
+        Enum.map(cmds, fn indexed_cmd ->
+          execute_asking_command(cluster, conn, indexed_cmd, opts, remaining)
         end)
 
       :error ->
         Enum.map(cmds, fn {idx, _cmd} ->
           {idx, %Redix.Error{message: "ASK to unreachable node #{host}:#{port}"}}
         end)
+    end
+  end
+
+  # Issues a single command behind an ASKING prefix at the redirect target, then
+  # follows any further redirection the target returns. ASKING only needs to ride
+  # the first request to a given node, so subsequent hops re-issue it themselves.
+  defp execute_asking_command(cluster, conn, {idx, cmd}, opts, remaining) do
+    case Redix.pipeline(conn, [["ASKING"], cmd], opts) do
+      {:ok, [_asking_ok, result]} ->
+        case follow_redirections(cluster, [{idx, cmd}], [{idx, result}], opts, remaining) do
+          {:error, _} = error -> error
+          [single_result] -> single_result
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

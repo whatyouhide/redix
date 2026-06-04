@@ -104,6 +104,14 @@ This eliminates the need for `persistent_term` or any external lookup.
   SLOTS` lists it) or terminates it (if not), so a bogus address can't leak connections.
   The async refresh still fires to update the slot table for future routing.
 
+- **Redirect chains are followed, not just single hops.** `MOVED` and `ASK` both
+  flow through `follow_redirections/5`, the single place the `@max_redirections`
+  budget is decremented, so a chain like `ASK -> ASK` or `ASK -> MOVED` is followed
+  to completion (bounded) instead of being handed back verbatim. `ASK` is per-command
+  and per-request: `handle_ask_redirect/6` issues each command on its own behind an
+  `ASKING` prefix via `execute_asking_command/5`, then re-feeds the result through
+  `follow_redirections/5` so a further hop re-issues `ASKING` at the new target.
+
 ### Telemetry events
 
 All under `[:redix, :cluster, ...]`:
