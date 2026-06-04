@@ -262,7 +262,9 @@ defmodule Redix.PubSubTest do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
     assert {:ok, mirror_ref} = PubSub.subscribe(pubsub, "foo", mirror)
-    assert_receive {^mirror, {:redix_pubsub, ^pubsub, ^mirror_ref, :subscribed, %{channel: "foo"}}}
+
+    assert_receive {^mirror,
+                    {:redix_pubsub, ^pubsub, ^mirror_ref, :subscribed, %{channel: "foo"}}}
 
     # Disconnect, kill the mirror while disconnected, then let it reconnect.
     Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
@@ -278,6 +280,7 @@ defmodule Redix.PubSubTest do
     end)
 
     Redix.command!(conn, ~w(PUBLISH foo hello))
+
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "foo", payload: "hello"}},
                    1000
   end
