@@ -197,6 +197,29 @@ defmodule Redix.PubSub.Connection do
     {:keep_state_and_data, {:reply, from, reply}}
   end
 
+  # A monitored subscriber can go down while we're disconnected. There's no
+  # socket to send UNSUBSCRIBE on, so we just drop the pid from the (already
+  # :disconnected) subscriptions in memory; the next reconnection resubscribes
+  # only to targets that still have subscribers.
+  def disconnected(:info, {:DOWN, _ref, :process, pid, _reason}, data) do
+    data = update_in(data.monitors, &Map.delete(&1, pid))
+
+    subscriptions =
+      data.subscriptions
+      |> Enum.flat_map(fn {target_key, {:disconnected, subscribers}} ->
+        subscribers = MapSet.delete(subscribers, pid)
+
+        if MapSet.size(subscribers) == 0 do
+          []
+        else
+          [{target_key, {:disconnected, subscribers}}]
+        end
+      end)
+      |> Map.new()
+
+    {:keep_state, %{data | subscriptions: subscriptions}}
+  end
+
   defp update_pubsub_connection(%__MODULE__{} = data, client_id, address, socket) do
     %{
       data

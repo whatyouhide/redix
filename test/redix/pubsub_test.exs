@@ -223,6 +223,65 @@ defmodule Redix.PubSubTest do
     end)
   end
 
+  @tag :capture_log
+  test "a recipient going down while the connection is disconnected does not crash the connection",
+       %{conn: conn} do
+    # Large backoff so that, once disconnected, the connection stays disconnected
+    # for the duration of the test instead of racing us by reconnecting.
+    {:ok, pubsub} = PubSub.start_link(port: port(), backoff_initial: 60_000)
+
+    parent = self()
+    mirror = spawn(fn -> message_mirror(parent) end)
+
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", mirror)
+    assert_receive {^mirror, {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}}
+
+    # Force the connection into the :disconnected state and confirm it's there.
+    Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+    assert_receive {^mirror, {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}}
+    assert {:disconnected, _data} = :sys.get_state(pubsub)
+
+    # Now the recipient dies WHILE the connection is disconnected. The resulting
+    # {:DOWN, ...} message must be handled gracefully, not crash the connection.
+    conn_monitor = Process.monitor(pubsub)
+    Process.exit(mirror, :kill)
+
+    refute_receive {:DOWN, ^conn_monitor, _, _, _}, 200
+    assert {:disconnected, _data} = :sys.get_state(pubsub)
+  end
+
+  @tag :capture_log
+  test "a recipient going down while disconnected does not drop other recipients' subscriptions",
+       %{conn: conn} do
+    {:ok, pubsub} = PubSub.start_link(port: port(), backoff_initial: 100)
+
+    parent = self()
+    mirror = spawn(fn -> message_mirror(parent) end)
+
+    # Two recipients subscribed to "foo": one we'll kill, one that must survive.
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
+    assert {:ok, mirror_ref} = PubSub.subscribe(pubsub, "foo", mirror)
+    assert_receive {^mirror, {:redix_pubsub, ^pubsub, ^mirror_ref, :subscribed, %{channel: "foo"}}}
+
+    # Disconnect, kill the mirror while disconnected, then let it reconnect.
+    Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}
+    assert {:disconnected, _data} = :sys.get_state(pubsub)
+    Process.exit(mirror, :kill)
+
+    # On reconnection, "foo" must be resubscribed because we (self()) are still on it.
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}, 1000
+
+    wait_until_passes(500, fn ->
+      assert subscribed_channels(conn) == MapSet.new(["foo"])
+    end)
+
+    Redix.command!(conn, ~w(PUBLISH foo hello))
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "foo", payload: "hello"}},
+                   1000
+  end
+
   test "disconnections/reconnections", %{pubsub: pubsub, conn: conn} do
     assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}
