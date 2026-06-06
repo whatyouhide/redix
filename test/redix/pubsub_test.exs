@@ -413,6 +413,7 @@ defmodule Redix.PubSubTest do
     assert_receive {:redix_pubsub, ^pubsub, ^pref, :psubscribed, %{pattern: "pat_*"}}, 1000
 
     Redix.command!(conn, ~w(PUBLISH chan hello))
+
     assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "chan", payload: "hello"}},
                    1000
 
@@ -558,7 +559,9 @@ defmodule Redix.PubSubTest do
     end
 
     test "with a Redis URI string and options" do
-      assert {:ok, pid} = PubSub.start_link("redis://localhost:9999", name: :redix_pubsub_uri_opts)
+      assert {:ok, pid} =
+               PubSub.start_link("redis://localhost:9999", name: :redix_pubsub_uri_opts)
+
       assert is_pid(pid)
       assert Process.whereis(:redix_pubsub_uri_opts) == pid
     end

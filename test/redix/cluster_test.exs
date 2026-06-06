@@ -374,7 +374,9 @@ defmodule Redix.ClusterTest do
       registry = :"#{cluster}_registry"
 
       [node_id | _] = Registry.select(registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
-      {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
+
+      {:ok, pid} =
+        Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
 
       monitor = Process.monitor(pid)
       Process.exit(pid, :kill)
