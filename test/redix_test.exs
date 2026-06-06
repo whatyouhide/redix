@@ -423,6 +423,18 @@ defmodule RedixTest do
       assert resp == ["OK", %Error{message: msg}]
     end
 
+    test "a blocking XREAD command is detected and times out cleanly", %{conn: c} do
+      # XREAD with BLOCK is detected as a blocking command (separately from the
+      # statically-known blocking commands like BLPOP). With a short pipeline
+      # timeout it surfaces as a connection timeout rather than hanging.
+      assert {:error, %ConnectionError{reason: :timeout}} =
+               Redix.pipeline(
+                 c,
+                 [["XREAD", "BLOCK", "5000", "STREAMS", "redix_nonexistent_stream", "$"]],
+                 timeout: 50
+               )
+    end
+
     test "passing an empty list of commands raises an error", %{conn: c} do
       msg = "no commands passed to the pipeline"
       assert_raise ArgumentError, msg, fn -> Redix.pipeline(c, []) end

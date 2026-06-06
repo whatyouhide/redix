@@ -155,6 +155,17 @@ defmodule Redix.StartOptionsTest do
     end
   end
 
+  describe "options_docs/1" do
+    test "returns documentation for both connection types" do
+      assert is_binary(StartOptions.options_docs(:redix))
+      assert is_binary(StartOptions.options_docs(:redix_pubsub))
+
+      # :health_check_interval is dropped from the pubsub schema.
+      assert StartOptions.options_docs(:redix) =~ "health_check_interval"
+      refute StartOptions.options_docs(:redix_pubsub) =~ "health_check_interval"
+    end
+  end
+
   defp sanitize(opts) do
     StartOptions.sanitize(:redix_pubsub, opts)
   end

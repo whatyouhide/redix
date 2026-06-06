@@ -394,6 +394,81 @@ defmodule Redix.PubSubTest do
                    1000
   end
 
+  @tag :capture_log
+  test "resubscribes to both channels and patterns on reconnection", %{
+    pubsub: pubsub,
+    conn: conn
+  } do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "chan", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "chan"}}, 1000
+
+    assert {:ok, pref} = PubSub.psubscribe(pubsub, "pat_*", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^pref, :psubscribed, %{pattern: "pat_*"}}, 1000
+
+    Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}, 1000
+
+    # On reconnection, both the channel and the pattern must be resubscribed.
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "chan"}}, 1000
+    assert_receive {:redix_pubsub, ^pubsub, ^pref, :psubscribed, %{pattern: "pat_*"}}, 1000
+
+    Redix.command!(conn, ~w(PUBLISH chan hello))
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :message, %{channel: "chan", payload: "hello"}},
+                   1000
+
+    Redix.command!(conn, ~w(PUBLISH pat_1 world))
+
+    assert_receive {:redix_pubsub, ^pubsub, ^pref, :pmessage,
+                    %{pattern: "pat_*", channel: "pat_1", payload: "world"}},
+                   1000
+  end
+
+  @tag :capture_log
+  test "psubscribing while the connection is down", %{pubsub: pubsub, conn: conn} do
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "foo", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "foo"}}, 1000
+
+    Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}, 1000
+
+    # psubscribe while the connection is down: it's recorded and applied on reconnect.
+    assert {:ok, ^ref} = PubSub.psubscribe(pubsub, "down_pat_*", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :psubscribed, %{pattern: "down_pat_*"}}, 1000
+
+    Redix.command!(conn, ~w(PUBLISH down_pat_1 hey))
+
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :pmessage,
+                    %{pattern: "down_pat_*", channel: "down_pat_1", payload: "hey"}},
+                   1000
+  end
+
+  @tag :capture_log
+  test "unsubscribing and punsubscribing while the connection is down", %{conn: conn} do
+    # Large backoff so the connection stays disconnected while we unsubscribe.
+    {:ok, pubsub} = PubSub.start_link(port: port(), backoff_initial: 60_000)
+
+    assert {:ok, ref} = PubSub.subscribe(pubsub, "udchan", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "udchan"}}, 1000
+
+    assert {:ok, pref} = PubSub.psubscribe(pubsub, "udpat_*", self())
+    assert_receive {:redix_pubsub, ^pubsub, ^pref, :psubscribed, %{pattern: "udpat_*"}}, 1000
+
+    Redix.command!(conn, ~w(CLIENT KILL TYPE pubsub))
+    assert_receive {:redix_pubsub, ^pubsub, ^ref, :disconnected, _properties}, 1000
+    assert {:disconnected, _data} = :sys.get_state(pubsub)
+
+    # Unsubscribing/punsubscribing while disconnected just replies :ok and drops the
+    # subscription from the connection's bookkeeping (no confirmation message is sent).
+    assert PubSub.unsubscribe(pubsub, "udchan", self()) == :ok
+    assert PubSub.punsubscribe(pubsub, "udpat_*", self()) == :ok
+
+    # Unsubscribing from an unknown target while disconnected is a no-op.
+    assert PubSub.unsubscribe(pubsub, "never_subscribed", self()) == :ok
+
+    assert {:disconnected, data} = :sys.get_state(pubsub)
+    assert data.subscriptions == %{}
+  end
+
   test ":exit_on_disconnection option", %{conn: conn} do
     {:ok, pubsub} = PubSub.start_link(port: port(), exit_on_disconnection: true)
 
@@ -468,6 +543,67 @@ defmodule Redix.PubSubTest do
 
       results = Task.await_many(tasks)
       assert Enum.all?(results, &(&1 == :ok))
+    end
+  end
+
+  describe "start_link/1,2" do
+    test "with no arguments connects to the default host and port" do
+      assert {:ok, pid} = PubSub.start_link()
+      assert is_pid(pid)
+    end
+
+    test "with a Redis URI string" do
+      assert {:ok, pid} = PubSub.start_link("redis://localhost:#{port()}")
+      assert is_pid(pid)
+    end
+
+    test "with a Redis URI string and options" do
+      assert {:ok, pid} = PubSub.start_link("redis://localhost:9999", name: :redix_pubsub_uri_opts)
+      assert is_pid(pid)
+      assert Process.whereis(:redix_pubsub_uri_opts) == pid
+    end
+
+    test "with a {:global, term} name" do
+      assert {:ok, pid} =
+               PubSub.start_link(port: port(), name: {:global, :redix_pubsub_global_test})
+
+      assert :global.whereis_name(:redix_pubsub_global_test) == pid
+    end
+
+    test "with a {:via, module, term} name" do
+      Registry.start_link(keys: :unique, name: :redix_pubsub_via_registry)
+
+      assert {:ok, pid} =
+               PubSub.start_link(
+                 port: port(),
+                 name: {:via, Registry, {:redix_pubsub_via_registry, "my_pubsub"}}
+               )
+
+      assert [{^pid, _}] = Registry.lookup(:redix_pubsub_via_registry, "my_pubsub")
+    end
+
+    test "raises with an invalid name" do
+      assert_raise ArgumentError, ~r/expected :name option to be one of/, fn ->
+        PubSub.start_link(port: port(), name: "not a valid name")
+      end
+    end
+  end
+
+  describe "subscribe/2 and friends default to self() as the subscriber" do
+    test "subscribe/2 and unsubscribe/2", %{pubsub: pubsub} do
+      assert {:ok, ref} = PubSub.subscribe(pubsub, "default_sub_chan")
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :subscribed, %{channel: "default_sub_chan"}}
+
+      assert PubSub.unsubscribe(pubsub, "default_sub_chan") == :ok
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :unsubscribed, %{channel: "default_sub_chan"}}
+    end
+
+    test "psubscribe/2 and punsubscribe/2", %{pubsub: pubsub} do
+      assert {:ok, ref} = PubSub.psubscribe(pubsub, "default_pat_*")
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :psubscribed, %{pattern: "default_pat_*"}}
+
+      assert PubSub.punsubscribe(pubsub, "default_pat_*") == :ok
+      assert_receive {:redix_pubsub, ^pubsub, ^ref, :punsubscribed, %{pattern: "default_pat_*"}}
     end
   end
 

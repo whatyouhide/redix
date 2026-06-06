@@ -19,5 +19,19 @@ defmodule Redix.FormatTest do
         assert Format.format_host_and_port({:local, path}, 0) == path
       end
     end
+
+    test "with an IP address tuple as host" do
+      assert Format.format_host_and_port({127, 0, 0, 1}, 6379) == "127.0.0.1:6379"
+    end
+
+    test "with a charlist host" do
+      assert Format.format_host_and_port(~c"example.com", 6379) == "example.com:6379"
+    end
+
+    test "raises on an invalid host tuple" do
+      assert_raise ArgumentError, ~r/invalid host/, fn ->
+        Format.format_host_and_port({1, 2, 3}, 6379)
+      end
+    end
   end
 end
