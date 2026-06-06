@@ -50,6 +50,13 @@ defmodule Redix.SocketOwner do
     end
   end
 
+  # The connection is asking us to tear down because a health check failed (an in-flight
+  # command went unanswered for too long). We stop normally; exiting closes the socket we
+  # own, and the {:stopped, ...} message we send drives the reconnection on the connection.
+  def handle_info({:force_disconnect, conn, reason}, %__MODULE__{conn: conn} = state) do
+    stop(reason, state)
+  end
+
   # The connection is notifying the socket owner that sending failed. If the socket owner
   # gets this, it can stop normally without waiting for the "closed"/"error" network
   # message from the socket.
@@ -115,7 +122,7 @@ defmodule Redix.SocketOwner do
   defp new_data(%{continuation: continuation} = state, data) do
     case continuation.(data) do
       {:ok, resp, rest} ->
-        {_counter, alias_ref, _ncommands} = take_first_in_queue(state.queue_table)
+        {_counter, alias_ref, _ncommands, _blocking?} = take_first_in_queue(state.queue_table)
 
         # `alias_ref` is a process alias (see Redix.Connection.pipeline/4). If the caller
         # already timed out, the alias is deactivated and this reply is silently dropped.

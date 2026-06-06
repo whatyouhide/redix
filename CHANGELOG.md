@@ -12,6 +12,11 @@
     is unchanged.
   * Add a `:readonly` option to `Redix.start_link/1` that issues `READONLY` after every
     (re)connection.
+  * Add a `:health_check_interval` option to `Redix.start_link/1` that detects *half-open*
+    connections (the socket is open but the server stopped replying) and reconnects. This
+    fixes slow recovery after a Sentinel failover where the old primary is paused (for
+    example via `CLIENT PAUSE`): the reconnection re-queries the sentinels and lands on the
+    new primary instead of staying wedged. Defaults to `:infinity` (disabled).
 
 ## v1.5.3
 

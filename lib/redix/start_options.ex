@@ -60,6 +60,27 @@ defmodule Redix.StartOptions do
       connection timeout (in milliseconds) directly passed to the network layer.
       """
     ],
+    health_check_interval: [
+      type: :timeout,
+      default: :infinity,
+      doc: """
+      if set to a number of milliseconds, Redix periodically checks that in-flight commands
+      are making progress. If a command stays in flight (sent to Redis but not yet answered)
+      for longer than this interval, Redix considers the connection broken, even if the
+      underlying socket is still open, then closes it and reconnects. This catches "half-open"
+      connections where the server stops replying without closing the socket, which
+      otherwise leave Redix hanging until eventually the socket goes down. The most
+      common case is a Redis Sentinel failover: the old primary is paused (for example via
+      `CLIENT PAUSE`) while a replica is promoted, so commands time out but the socket stays
+      open. Reconnecting re-runs the connection logic, which for Sentinel means re-querying
+      the sentinels for the *current* primary. Detection happens within one to two intervals.
+      `:infinity` disables the check (the historical behavior). Blocking commands (such as
+      `BLPOP`, `WAIT`, or `XREAD`/`XREADGROUP` with `BLOCK`) are handled automatically: while
+      one of them is at the head of the in-flight queue the check is suspended, so it won't
+      trip on a connection that is legitimately waiting, and it resumes as soon as the
+      blocking command completes. *Available since v1.6.0.*
+      """
+    ],
     sync_connect: [
       type: :boolean,
       default: false,
@@ -252,7 +273,13 @@ defmodule Redix.StartOptions do
   @redix_start_link_opts_schema start_link_opts_schema
                                 |> Keyword.drop([:fetch_client_id_on_connect])
                                 |> NimbleOptions.new!()
-  @redix_pubsub_start_link_opts_schema NimbleOptions.new!(start_link_opts_schema)
+
+  # The health check monitors in-flight command progress, which doesn't map onto
+  # the pub/sub connection (it idles waiting for server-pushed messages), so the
+  # option is only exposed for regular Redix connections.
+  @redix_pubsub_start_link_opts_schema start_link_opts_schema
+                                       |> Keyword.drop([:health_check_interval])
+                                       |> NimbleOptions.new!()
 
   @spec options_docs(:redix | :redix_pubsub) :: String.t()
   def options_docs(:redix), do: NimbleOptions.docs(@redix_start_link_opts_schema)

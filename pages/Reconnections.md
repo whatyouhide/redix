@@ -6,6 +6,18 @@ If there are pending requests to Redix when a disconnection happens, the `Redix`
 
 The first reconnection attempts happens after a backoff interval decided by the `:backoff_initial` option. If this attempt succeeds, then Redix will start to function normally again. If this attempt fails, then subsequent reconnection attempts are made until one of them succeeds. The backoff interval between these subsequent reconnection attempts is increased exponentially (with a fixed factor of `1.5`). This means that the first attempt will be made after `n` milliseconds, the second one after `n * 1.5` milliseconds, the third one after `n * 1.5 * 1.5` milliseconds, and so on. Since this growth is exponential, it won't take many attempts before this backoff interval becomes large: because of this, `Redix.start_link/2` also accepts a `:backoff_max` option. which specifies the maximum backoff interval that should be used. The `:backoff_max` option can be used to simulate constant backoff after some exponential backoff attempts: for example, by passing `backoff_max: 5_000` and `backoff_initial: 5_000`, attempts will be made regularly every 5 seconds.
 
+## Detecting half-open connections
+
+The reconnection logic above kicks in when the TCP socket to Redis actually goes down. Sometimes, though, the socket stays *open* while the server stops replying (a "**half-open**" connection.) The classic example is a Redis Sentinel failover: the old primary is often paused (for example via `CLIENT PAUSE`) while a replica is promoted, so commands sent on the existing socket simply time out instead of failing. Redix can't tell this apart from a slow server, so by default it keeps the connection and your commands return `{:error, %Redix.ConnectionError{reason: :timeout}}` until the OS eventually tears the socket down (which can take a long time).
+
+The `:health_check_interval` option makes Redix proactive about this. When set, Redix periodically checks that in-flight commands are making progress; if a command stays in flight for longer than the interval without a reply, Redix considers the connection broken, closes it, and reconnects. For a Sentinel connection, reconnecting re-runs the full connection logic, including re-querying the sentinels, so Redix lands on the *current* primary rather than staying wedged on the old one. The disconnection is reported through the usual `[:redix, :disconnection]` telemetry event with `reason: %Redix.ConnectionError{reason: :health_check_timeout}`.
+
+```elixir
+Redix.start_link(sentinel: sentinel_config, health_check_interval: 1_000)
+```
+
+Detection happens within one to two intervals. Blocking commands (such as `BLPOP`, `WAIT`, or `XREAD`/`XREADGROUP` with `BLOCK`) are handled automatically: while one of them is at the head of the in-flight queue, the check is suspended so it won't trip on a connection that is legitimately waiting for data, and it resumes as soon as the blocking command completes. The option defaults to `:infinity`, which disables the check entirely.
+
 ## Synchronous or asynchronous connection
 
 The `:sync_connect` option passed to `Redix.start_link/2` decides whether Redix should initiate the TCP connection to the Redis server *before* or *after* `Redix.start_link/2` returns. This option also changes the behaviour of Redix when the TCP connection can't be initiated at all.

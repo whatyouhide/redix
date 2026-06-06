@@ -38,6 +38,10 @@ defmodule Redix.ConnectionError do
 
     * `:timeout`: when Redis doesn't reply to the request in time.
 
+    * `:health_check_timeout`: when the `:health_check_interval` option is set and an
+      in-flight command goes unanswered for longer than that interval, so Redix closes
+      the connection and reconnects.
+
   """
 
   @typedoc """
@@ -72,6 +76,11 @@ defmodule Redix.ConnectionError do
   # Returned during sentinel connections when the server has an
   # unexpected role (for example, "master" instead of "slave").
   defp format_reason({:wrong_role, role}), do: "wrong role: #{role}"
+
+  # Returned when a health check fails: an in-flight command went unanswered for
+  # longer than the :health_check_interval, so Redix tore the connection down.
+  defp format_reason(:health_check_timeout),
+    do: "a command went unanswered for longer than the configured :health_check_interval"
 
   if System.otp_release() >= "26" do
     defp format_reason(reason) when is_atom(reason) do
