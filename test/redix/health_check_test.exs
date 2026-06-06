@@ -93,11 +93,47 @@ defmodule Redix.HealthCheckTest do
     refute_receive :disconnected, 300
   end
 
+  test "does not tear down while a blocking command is in flight", %{listen: listen, port: port} do
+    # The server replies to PING but never to BLPOP (simulating a command legitimately
+    # blocking, waiting for data). The health check must NOT tear the connection down while
+    # a known blocking command sits at the head of the in-flight queue.
+    accept_loop(listen, fn
+      ["PING"] -> "+PONG\r\n"
+      ["BLPOP" | _] -> :no_reply
+    end)
+
+    {test_name, _arity} = __ENV__.function
+    parent = self()
+
+    handler = fn _event, _measurements, meta, _config ->
+      if meta.connection_name == test_name, do: send(parent, :disconnected)
+    end
+
+    :ok = :telemetry.attach(to_string(test_name), [:redix, :disconnection], handler, :no_config)
+    on_exit(fn -> :telemetry.detach(to_string(test_name)) end)
+
+    conn =
+      start_supervised!(
+        {Redix,
+         host: "127.0.0.1",
+         port: port,
+         name: test_name,
+         sync_connect: true,
+         health_check_interval: 50}
+      )
+
+    # Issue BLPOP from a separate task so it can sit in flight indefinitely.
+    Task.async(fn -> Redix.command(conn, ["BLPOP", "key", "0"], timeout: :infinity) end)
+
+    # Across several health-check intervals, the connection must stay up because the
+    # head-of-line command is a recognized blocking command.
+    refute_receive :disconnected, 400
+  end
+
   test "survives a normal disconnection with a health check armed", %{listen: listen, port: port} do
-    # The server answers one PING, then closes the socket. With a health-check interval far
-    # shorter than the reconnect backoff, the (generic) health-check timer is still armed when
-    # we drop into the disconnected/connecting states and will fire there. The connection must
-    # ignore it rather than crash. Regression guard for the leftover-timer case.
+    # The server answers one PING, then closes the socket. A :state_timeout health check is
+    # auto-cancelled by gen_statem when we leave the :connected state, so the reconnection
+    # must proceed cleanly without any stray timer crashing the process.
     pinged = self()
 
     accept_loop(listen, fn ["PING"] ->
@@ -182,20 +218,21 @@ defmodule Redix.HealthCheckTest do
         buffer = buffer <> data
 
         if handler do
+          # A handler returns iodata to send, `:no_reply` to stay silent (simulating a
+          # blocking command), or `:close` to drop the connection. We keep serving unless
+          # we closed.
           {commands, rest} = parse_commands(buffer, [])
 
-          if Enum.any?(commands, &(handler.(&1) == :close)) do
-            # A handler can ask us to drop the connection after replying to the
-            # commands before the one that returned :close.
-            Enum.each(commands, fn command ->
-              case handler.(command) do
-                :close -> :gen_tcp.close(socket)
-                reply -> :gen_tcp.send(socket, reply)
-              end
-            end)
-          else
-            Enum.each(commands, &:gen_tcp.send(socket, handler.(&1)))
+          if Enum.reduce_while(commands, :open, fn command, :open ->
+               case handler.(command) do
+                 :close -> {:halt, :closed}
+                 :no_reply -> {:cont, :open}
+                 reply -> :gen_tcp.send(socket, reply) && {:cont, :open}
+               end
+             end) == :open do
             serve(socket, handler, rest)
+          else
+            :gen_tcp.close(socket)
           end
         else
           # Half-open: read and discard, never reply.

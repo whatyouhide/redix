@@ -189,7 +189,7 @@ defmodule Redix.Connection do
   end
 
   def disconnected(:internal, {:notify_of_disconnection, _reason}, %__MODULE__{table: table}) do
-    fun = fn {_counter, from, _ncommands}, _acc ->
+    fun = fn {_counter, from, _ncommands, _blocking?}, _acc ->
       reply(from, {:error, %ConnectionError{reason: :disconnected}})
     end
 
@@ -201,14 +201,6 @@ defmodule Redix.Connection do
 
   def disconnected(:cast, {:pipeline, _commands, from}, _data) do
     reply(from, {:error, %ConnectionError{reason: :closed}})
-    :keep_state_and_data
-  end
-
-  # A health-check timeout is a *generic* (named) gen_statem timeout, which is not
-  # auto-cancelled when we leave the :connected state. If a normal disconnection happens
-  # with a health check armed, the leftover timer can fire here: ignore it. The next time
-  # we reach :connected we arm a fresh timer (which replaces any leftover by name).
-  def disconnected({:timeout, :health_check}, _timer_info, _data) do
     :keep_state_and_data
   end
 
@@ -254,12 +246,6 @@ defmodule Redix.Connection do
     {:keep_state_and_data, :postpone}
   end
 
-  # See the matching clause in disconnected/3: a leftover health-check timer can fire while
-  # we're reconnecting. Ignore it; it'll be re-armed once we're connected again.
-  def connecting({:timeout, :health_check}, _timer_info, _data) do
-    :keep_state_and_data
-  end
-
   def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     # We log this when the socket owner stopped while connecting.
     :telemetry.execute([:redix, :failed_connection], %{}, %{
@@ -278,7 +264,7 @@ defmodule Redix.Connection do
     if ncommands > 0 do
       {counter, data} = get_and_update_in(data.counter, &{&1, &1 + 1})
 
-      row = {counter, from, ncommands}
+      row = {counter, from, ncommands, blocking_pipeline?(commands)}
       :ets.insert(data.table, row)
 
       case data.transport.send(data.socket, Enum.map(commands, &Protocol.pack/1)) do
@@ -317,20 +303,33 @@ defmodule Redix.Connection do
   # commands queue table as the progress signal: the socket owner deletes a row as soon as
   # it receives the matching reply, and command counters are monotonic, so the smallest key
   # (`:ets.first/1`) is the oldest in-flight command and can never repeat for a different one.
-  def connected({:timeout, :health_check}, _timer_info, %__MODULE__{} = data) do
+  #
+  # We use a :state_timeout (not a generic/named timeout) so gen_statem auto-cancels it when
+  # we leave the :connected state, and (unlike an event timeout) it is *not* reset by incoming
+  # events, so a busy-but-wedged connection that keeps receiving pipeline casts still fires.
+  def connected(:state_timeout, :health_check, %__MODULE__{} = data) do
     case :ets.first(data.table) do
       :"$end_of_table" ->
         # Nothing in flight: the connection is idle, so there's nothing to check.
         {:keep_state, %{data | health_marker: nil}, health_check_actions(data)}
 
       oldest when oldest == data.health_marker ->
-        # The same command has been in flight for a full interval without a reply. The socket
-        # is still open but the server isn't making progress (half-open connection, e.g. an
-        # old primary paused during a Sentinel failover). Tear it down so we reconnect and,
-        # for Sentinel, re-resolve the current primary. We let the socket owner stop (which
-        # closes the socket it owns) and drive the disconnection through {:stopped, ...}.
-        send(data.socket_owner, {:force_disconnect, self(), :health_check_timeout})
-        {:keep_state, %{data | health_marker: nil}}
+        if blocking_row?(data.table, oldest) do
+          # The head-of-line command is a known blocking command (BLPOP, WAIT,
+          # XREAD BLOCK). It is *supposed* to sit there without a reply, so we don't count it
+          # as a stall. Detection resumes automatically once it completes and the queue head
+          # advances to a non-blocking command.
+          {:keep_state_and_data, health_check_actions(data)}
+        else
+          # The same non-blocking command has been in flight for a full interval without a
+          # reply. The socket is still open but the server isn't making progress (half-open
+          # connection, e.g. an old primary paused during a Sentinel failover). Tear it down
+          # so we reconnect and, for Sentinel, re-resolve the current primary. We let the
+          # socket owner stop (which closes the socket it owns) and drive the disconnection
+          # through {:stopped, ...}.
+          send(data.socket_owner, {:force_disconnect, self(), :health_check_timeout})
+          {:keep_state, %{data | health_marker: nil}}
+        end
 
       oldest ->
         # Either progress was made since the last tick or this is the first time we see this
@@ -344,8 +343,48 @@ defmodule Redix.Connection do
   defp health_check_actions(%__MODULE__{opts: opts}) do
     case Keyword.fetch!(opts, :health_check_interval) do
       :infinity -> []
-      interval -> [{{:timeout, :health_check}, interval, nil}]
+      interval -> [{:state_timeout, interval, :health_check}]
     end
+  end
+
+  # The set of Redis commands that intentionally hold a connection open waiting for data,
+  # producing no immediate reply. The health check skips a teardown while one of these is at
+  # the head of the in-flight queue, so it never trips on a legitimately-blocked connection.
+  @blocking_commands MapSet.new(~w(
+    BLPOP BRPOP BLMOVE BRPOPLPUSH BLMPOP
+    BZPOPMIN BZPOPMAX BZMPOP
+    WAIT WAITAOF
+  ))
+
+  # Longest entry above, used to skip upcasing arbitrarily large command names (see #177).
+  @max_blocking_command_size @blocking_commands |> Enum.map(&byte_size/1) |> Enum.max()
+
+  defp blocking_row?(table, key) do
+    case :ets.lookup(table, key) do
+      [{^key, _from, _ncommands, blocking?}] -> blocking?
+      _other -> false
+    end
+  end
+
+  defp blocking_pipeline?(commands) do
+    Enum.any?(commands, fn
+      [name | args] ->
+        if byte_size(name) > @max_blocking_command_size do
+          false
+        else
+          upcased = String.upcase(name)
+
+          name in @blocking_commands or
+            (name in ["XREAD", "XREADGROUP"] and
+               Enum.any?(
+                 args,
+                 &(is_binary(&1) and byte_size(&1) == 5 and String.upcase(&1) == "BLOCK")
+               ))
+        end
+
+      _other ->
+        false
+    end)
   end
 
   # `from` is a process alias (see pipeline/4). Sending to a deactivated alias (e.g. after

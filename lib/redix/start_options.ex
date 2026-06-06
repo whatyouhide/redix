@@ -74,10 +74,11 @@ defmodule Redix.StartOptions do
       `CLIENT PAUSE`) while a replica is promoted, so commands time out but the socket stays
       open. Reconnecting re-runs the connection logic, which for Sentinel means re-querying
       the sentinels for the *current* primary. Detection happens within one to two intervals.
-      `:infinity` disables the check (the historical behavior). Do not
-      enable this on connections that issue blocking commands (such as `BLPOP` or
-      `XREAD BLOCK`), since those legitimately keep a command in flight with no reply.
-      *Available since v1.6.0.*
+      `:infinity` disables the check (the historical behavior). Blocking commands (such as
+      `BLPOP`, `WAIT`, or `XREAD`/`XREADGROUP` with `BLOCK`) are handled automatically: while
+      one of them is at the head of the in-flight queue the check is suspended, so it won't
+      trip on a connection that is legitimately waiting, and it resumes as soon as the
+      blocking command completes. *Available since v1.6.0.*
       """
     ],
     sync_connect: [

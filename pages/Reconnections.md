@@ -16,7 +16,7 @@ The `:health_check_interval` option makes Redix proactive about this. When set, 
 Redix.start_link(sentinel: sentinel_config, health_check_interval: 1_000)
 ```
 
-Detection happens within one to two intervals. Do **not** enable this on connections that issue blocking commands (such as `BLPOP` or `XREAD BLOCK`), since those legitimately keep a command in flight with no reply and would be torn down as false positives. The option defaults to `:infinity`, which disables the check.
+Detection happens within one to two intervals. Blocking commands (such as `BLPOP`, `WAIT`, or `XREAD`/`XREADGROUP` with `BLOCK`) are handled automatically: while one of them is at the head of the in-flight queue, the check is suspended so it won't trip on a connection that is legitimately waiting for data, and it resumes as soon as the blocking command completes. The option defaults to `:infinity`, which disables the check entirely.
 
 ## Synchronous or asynchronous connection
 
