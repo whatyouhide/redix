@@ -50,6 +50,13 @@ defmodule Redix.SocketOwner do
     end
   end
 
+  # The connection is asking us to tear down because a health check failed (an in-flight
+  # command went unanswered for too long). We stop normally; exiting closes the socket we
+  # own, and the {:stopped, ...} message we send drives the reconnection on the connection.
+  def handle_info({:force_disconnect, conn, reason}, %__MODULE__{conn: conn} = state) do
+    stop(reason, state)
+  end
+
   # The connection is notifying the socket owner that sending failed. If the socket owner
   # gets this, it can stop normally without waiting for the "closed"/"error" network
   # message from the socket.

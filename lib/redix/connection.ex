@@ -15,6 +15,7 @@ defmodule Redix.Connection do
     :socket,
     :backoff_current,
     :connected_address,
+    :health_marker,
     counter: 0,
     client_reply: :on
   ]
@@ -157,7 +158,8 @@ defmodule Redix.Connection do
             reconnection: false
           })
 
-          {:ok, :connected, %__MODULE__{data | socket: socket, connected_address: address}}
+          data = %__MODULE__{data | socket: socket, connected_address: address}
+          {:ok, :connected, data, health_check_actions(data)}
 
         {:stopped, ^socket_owner, reason} ->
           {:stop, %Redix.ConnectionError{reason: reason}}
@@ -202,6 +204,14 @@ defmodule Redix.Connection do
     :keep_state_and_data
   end
 
+  # A health-check timeout is a *generic* (named) gen_statem timeout, which is not
+  # auto-cancelled when we leave the :connected state. If a normal disconnection happens
+  # with a health check armed, the leftover timer can fire here: ignore it. The next time
+  # we reach :connected we arm a fresh timer (which replaces any leftover by name).
+  def disconnected({:timeout, :health_check}, _timer_info, _data) do
+    :keep_state_and_data
+  end
+
   # This happens when there's a send error. We close the socket right away, but we wait for
   # the socket owner to die so that it can finish processing the data it's processing. When it's
   # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
@@ -229,12 +239,25 @@ defmodule Redix.Connection do
       reconnection: not is_nil(data.backoff_current)
     })
 
-    data = %{data | socket: socket, backoff_current: nil, connected_address: address}
-    {:next_state, :connected, %{data | socket: socket}}
+    data = %{
+      data
+      | socket: socket,
+        backoff_current: nil,
+        connected_address: address,
+        health_marker: nil
+    }
+
+    {:next_state, :connected, %{data | socket: socket}, health_check_actions(data)}
   end
 
   def connecting(:cast, {:pipeline, _commands, _from}, _data) do
     {:keep_state_and_data, :postpone}
+  end
+
+  # See the matching clause in disconnected/3: a leftover health-check timer can fire while
+  # we're reconnecting. Ignore it; it'll be re-armed once we're connected again.
+  def connecting({:timeout, :health_check}, _timer_info, _data) do
+    :keep_state_and_data
   end
 
   def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
@@ -290,7 +313,40 @@ defmodule Redix.Connection do
     disconnect(data, reason)
   end
 
+  # Periodic liveness check (only armed when :health_check_interval is set). We use the
+  # commands queue table as the progress signal: the socket owner deletes a row as soon as
+  # it receives the matching reply, and command counters are monotonic, so the smallest key
+  # (`:ets.first/1`) is the oldest in-flight command and can never repeat for a different one.
+  def connected({:timeout, :health_check}, _timer_info, %__MODULE__{} = data) do
+    case :ets.first(data.table) do
+      :"$end_of_table" ->
+        # Nothing in flight: the connection is idle, so there's nothing to check.
+        {:keep_state, %{data | health_marker: nil}, health_check_actions(data)}
+
+      oldest when oldest == data.health_marker ->
+        # The same command has been in flight for a full interval without a reply. The socket
+        # is still open but the server isn't making progress (half-open connection, e.g. an
+        # old primary paused during a Sentinel failover). Tear it down so we reconnect and,
+        # for Sentinel, re-resolve the current primary. We let the socket owner stop (which
+        # closes the socket it owns) and drive the disconnection through {:stopped, ...}.
+        send(data.socket_owner, {:force_disconnect, self(), :health_check_timeout})
+        {:keep_state, %{data | health_marker: nil}}
+
+      oldest ->
+        # Either progress was made since the last tick or this is the first time we see this
+        # command. Remember it and re-check next interval.
+        {:keep_state, %{data | health_marker: oldest}, health_check_actions(data)}
+    end
+  end
+
   ## Helpers
+
+  defp health_check_actions(%__MODULE__{opts: opts}) do
+    case Keyword.fetch!(opts, :health_check_interval) do
+      :infinity -> []
+      interval -> [{{:timeout, :health_check}, interval, nil}]
+    end
+  end
 
   # `from` is a process alias (see pipeline/4). Sending to a deactivated alias (e.g. after
   # the caller timed out) is silently dropped, so we never leak late replies.
