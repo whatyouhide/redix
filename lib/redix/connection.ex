@@ -374,8 +374,8 @@ defmodule Redix.Connection do
         else
           upcased = String.upcase(name)
 
-          name in @blocking_commands or
-            (name in ["XREAD", "XREADGROUP"] and
+          upcased in @blocking_commands or
+            (upcased in ["XREAD", "XREADGROUP"] and
                Enum.any?(
                  args,
                  &(is_binary(&1) and byte_size(&1) == 5 and String.upcase(&1) == "BLOCK")
