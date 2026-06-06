@@ -3,7 +3,6 @@ defmodule Redix.Connector do
 
   @socket_opts [:binary, active: false]
   @default_timeout 5000
-  @default_ssl_opts [verify: :verify_peer, depth: 3]
 
   alias Redix.{ConnectionError, Format}
 
@@ -253,33 +252,56 @@ defmodule Redix.Connector do
     end
   end
 
-  defp build_socket_opts(:gen_tcp, user_socket_opts) do
+  # Public for testing: building the final socket options (and especially merging
+  # the SSL defaults with user-provided options) is security-sensitive enough to
+  # warrant direct unit tests.
+  @doc false
+  def build_socket_opts(:gen_tcp, user_socket_opts) do
     @socket_opts ++ user_socket_opts
   end
 
-  defp build_socket_opts(:ssl, user_socket_opts) do
+  def build_socket_opts(:ssl, user_socket_opts) do
     # Needs to be dynamic to avoid compile-time warnings.
     ca_store_mod = CAStore
 
     default_opts =
       if Keyword.has_key?(user_socket_opts, :cacertfile) or
            Keyword.has_key?(user_socket_opts, :cacerts) do
-        @default_ssl_opts
+        default_ssl_opts()
       else
         try do
-          [{:cacerts, :public_key.cacerts_get()} | @default_ssl_opts]
+          [{:cacerts, :public_key.cacerts_get()} | default_ssl_opts()]
         rescue
           _ ->
             if Code.ensure_loaded?(ca_store_mod) do
-              [{:cacertfile, ca_store_mod.file_path()} | @default_ssl_opts]
+              [{:cacertfile, ca_store_mod.file_path()} | default_ssl_opts()]
             else
-              @default_ssl_opts
+              default_ssl_opts()
             end
         end
       end
       |> Keyword.drop(Keyword.keys(user_socket_opts))
 
     @socket_opts ++ user_socket_opts ++ default_opts
+  end
+
+  # The defaults applied to every SSL connection. They're filled in only for keys
+  # the user didn't pass in :socket_opts (see the Keyword.drop/2 above), so any of
+  # them can be overridden per-connection.
+  #
+  # :customize_hostname_check makes the client validate hostnames the same way
+  # browsers do (RFC 6125), which crucially accepts the wildcard certificates used
+  # by servers like Amazon ElastiCache. Without it, the stricter default match
+  # function in :ssl rejects them. Requires OTP 21.0+, always satisfied since we
+  # require Elixir 1.15+ (OTP 24+).
+  defp default_ssl_opts do
+    [
+      verify: :verify_peer,
+      depth: 3,
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ]
   end
 
   # Setups the `:buffer` option of the given socket.

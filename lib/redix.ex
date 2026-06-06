@@ -90,8 +90,11 @@ defmodule Redix do
   testing purposes, disable certificate verification by passing `verify: :verify_none` in
   the socket options.
 
-  Some Redis servers, notably Amazon ElastiCache, use wildcard certificates that require
-  additional socket options for successful verification (requires OTP 21.0 or later):
+  By default, Redix verifies the server hostname the same way browsers do (following
+  RFC 6125), which accepts the wildcard certificates used by servers such as Amazon
+  ElastiCache. This is done by setting `customize_hostname_check` to
+  `[match_fun: :public_key.pkix_verify_hostname_match_fun(:https)]`. You can override
+  this (or any other default SSL option) by passing your own value in `:socket_opts`:
 
       Redix.start_link(
         host: "example.com", port: 9999, ssl: true,

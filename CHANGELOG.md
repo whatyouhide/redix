@@ -13,6 +13,13 @@
   * Add a `:readonly` option to `Redix.start_link/1` that issues `READONLY` after every
     (re)connection.
 
+### Changes
+
+  * Verify SSL server hostnames the way browsers do (RFC 6125) by default, which accepts
+    the **wildcard certificates** used by servers such as Amazon ElastiCache. This sets
+    `customize_hostname_check` automatically; you can still override it (or any other
+    default SSL option) through `:socket_opts`.
+
 ## v1.5.3
 
   * Address warnings with recent Elixir versions.
