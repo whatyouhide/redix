@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### New features
+
+  * Add support for **reading from replicas** in `Redix.Cluster`. Start the cluster with
+    `read_from_replicas: true` to open and supervise a connection to every replica (each
+    one gets a `READONLY` after connecting), then pass `route: :replica` or
+    `route: :prefer_replica` to `Redix.Cluster.command/3` and `Redix.Cluster.pipeline/3`
+    to send reads to replicas. The default routing stays `:primary`, so existing behavior
+    is unchanged.
+  * Add a `:readonly` option to `Redix.start_link/1` that issues `READONLY` after every
+    (re)connection.
+
 ## v1.5.3
 
   * Address warnings with recent Elixir versions.

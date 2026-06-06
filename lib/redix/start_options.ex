@@ -157,6 +157,18 @@ defmodule Redix.StartOptions do
       which is available since Redis 5.0.0. *This option is available since v1.4.1*.
       """
     ],
+    readonly: [
+      type: :boolean,
+      default: false,
+      doc: """
+      if `true`, Redix issues a `READONLY` command right after connecting (and after every
+      reconnection). This makes a connection to a Redis Cluster *replica* serve read-only
+      commands instead of redirecting them to the primary. It has no effect on a primary.
+      `Redix.Cluster` sets this automatically for replica connections when
+      `:read_from_replicas` is enabled, so you rarely need to set it by hand.
+      *Available since v1.6.0.*
+      """
+    ],
     sentinel: [
       type: :keyword_list,
       doc: """

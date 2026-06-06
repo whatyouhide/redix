@@ -13,6 +13,9 @@ defmodule Redix.Cluster.Manager do
     :conn_opts,
     :seed_nodes,
     :refresh_interval,
+    read_from_replicas: false,
+    # Maps a monitor ref to `{node_id, role}` so a crashed connection is
+    # restarted with the same role (and therefore the same READONLY behavior).
     monitors: %{}
   ]
 
@@ -45,15 +48,41 @@ defmodule Redix.Cluster.Manager do
   end
 
   @doc """
-  Looks up the Redix connection PID for a given hash slot.
+  Looks up the **primary** Redix connection PID for a given hash slot.
 
   Reads the slot table from ETS and then looks up the connection in the Registry.
   """
   @spec get_connection(atom(), atom(), non_neg_integer()) :: {:ok, pid()} | :error
   def get_connection(slot_table, registry, slot) when is_integer(slot) do
     case :ets.lookup(slot_table, slot) do
-      [{^slot, node_id}] -> lookup_connection(registry, node_id)
+      [{^slot, primary_id, _replica_ids}] -> lookup_connection(registry, primary_id)
       [] -> :error
+    end
+  end
+
+  @doc """
+  Looks up a **replica** Redix connection PID for a given hash slot.
+
+  Picks a reachable replica at random. Returns `:error` if the slot is unknown or
+  has no reachable replica connection (for example when `:read_from_replicas` is
+  disabled, in which case no replicas are tracked). Callers that want to fall back
+  to the primary should do so explicitly (see `Redix.Cluster`'s `:prefer_replica`).
+  """
+  @spec get_replica_connection(atom(), atom(), non_neg_integer()) :: {:ok, pid()} | :error
+  def get_replica_connection(slot_table, registry, slot) when is_integer(slot) do
+    case :ets.lookup(slot_table, slot) do
+      [{^slot, _primary_id, replica_ids}] when replica_ids != [] ->
+        replica_ids
+        |> Enum.shuffle()
+        |> Enum.find_value(:error, fn replica_id ->
+          case lookup_connection(registry, replica_id) do
+            {:ok, pid} -> {:ok, pid}
+            :error -> false
+          end
+        end)
+
+      _other ->
+        :error
     end
   end
 
@@ -68,15 +97,23 @@ defmodule Redix.Cluster.Manager do
   end
 
   @doc """
-  Returns any available connection PID from the cluster.
+  Returns any available **primary** connection PID from the cluster.
 
-  Used for keyless commands like `PING`, `INFO`, and so on.
+  Used for keyless commands like `PING`, `INFO`, and so on. Primaries are preferred
+  so that keyless *write* commands (such as `FLUSHALL`) don't land on a read-only
+  replica; if no primary is registered yet, it falls back to any connection.
   """
   @spec get_random_connection(atom()) :: {:ok, pid()} | :error
   def get_random_connection(registry) do
-    case Registry.select(registry, [{{:_, :"$1", :_}, [], [:"$1"]}]) do
-      [] -> :error
-      pids -> {:ok, Enum.random(pids)}
+    case Registry.select(registry, [{{:_, :"$1", :primary}, [], [:"$1"]}]) do
+      [_ | _] = pids ->
+        {:ok, Enum.random(pids)}
+
+      [] ->
+        case Registry.select(registry, [{{:_, :"$1", :_}, [], [:"$1"]}]) do
+          [] -> :error
+          pids -> {:ok, Enum.random(pids)}
+        end
     end
   end
 
@@ -124,6 +161,7 @@ defmodule Redix.Cluster.Manager do
     refresh_interval = Keyword.fetch!(opts, :refresh_interval)
     table_name = Keyword.fetch!(opts, :table_name)
     registry = Keyword.fetch!(opts, :registry)
+    read_from_replicas = Keyword.fetch!(opts, :read_from_replicas)
 
     slot_table = :ets.new(table_name, [:named_table, :public, :set, {:read_concurrency, true}])
 
@@ -134,7 +172,8 @@ defmodule Redix.Cluster.Manager do
       pool_supervisor: pool_supervisor,
       conn_opts: conn_opts,
       seed_nodes: seed_nodes,
-      refresh_interval: refresh_interval
+      refresh_interval: refresh_interval,
+      read_from_replicas: read_from_replicas
     }
 
     case do_refresh_topology(data) do
@@ -217,22 +256,26 @@ defmodule Redix.Cluster.Manager do
         {:keep_state_and_data, [{:reply, from, {:ok, pid}}]}
 
       :error ->
-        {result, data} = start_and_monitor_connection(data, node_id, host, port)
+        # MOVED is authoritative and always points at the slot's primary, so an
+        # on-demand connection is registered as a primary.
+        {result, data} = start_and_monitor_connection(data, node_id, host, port, :primary)
         {:keep_state, data, [{:reply, from, result}]}
     end
   end
 
   defp handle_down(data, ref) do
-    {node_id, monitors} = Map.pop(data.monitors, ref)
+    {node_info, monitors} = Map.pop(data.monitors, ref)
     data = %{data | monitors: monitors}
 
-    if node_id do
-      [host, port_str] = String.split(node_id, ":")
-      port = String.to_integer(port_str)
-      {_result, data} = start_and_monitor_connection(data, node_id, host, port)
-      data
-    else
-      data
+    case node_info do
+      {node_id, role} ->
+        [host, port_str] = String.split(node_id, ":")
+        port = String.to_integer(port_str)
+        {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
+        data
+
+      nil ->
+        data
     end
   end
 
@@ -322,39 +365,43 @@ defmodule Redix.Cluster.Manager do
 
   defp update_slot_map(data, slots_data) do
     for slot_range <- slots_data do
-      [start_slot, end_slot, [host, port | _] | _replicas] = slot_range
-      node_id = "#{host}:#{port}"
+      [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
+      primary_id = "#{host}:#{port}"
+
+      replica_ids =
+        if data.read_from_replicas do
+          for [r_host, r_port | _] <- replica_entries, do: "#{r_host}:#{r_port}"
+        else
+          []
+        end
 
       for slot <- start_slot..end_slot do
-        :ets.insert(data.slot_table, {slot, node_id})
+        :ets.insert(data.slot_table, {slot, primary_id, replica_ids})
       end
     end
   end
 
   defp ensure_connections(data, slots_data) do
-    needed_nodes =
-      slots_data
-      |> Enum.map(fn [_start, _end, [host, port | _] | _] -> {"#{host}:#{port}", host, port} end)
-      |> Enum.uniq_by(fn {node_id, _, _} -> node_id end)
+    needed_nodes = nodes_to_connect(data, slots_data)
 
     data =
-      Enum.reduce(needed_nodes, data, fn {node_id, host, port}, acc ->
+      Enum.reduce(needed_nodes, data, fn {node_id, host, port, role}, acc ->
         case Registry.lookup(acc.registry, node_id) do
           [{pid, _}] when is_pid(pid) ->
             if Process.alive?(pid) do
               acc
             else
-              {_result, acc} = start_and_monitor_connection(acc, node_id, host, port)
+              {_result, acc} = start_and_monitor_connection(acc, node_id, host, port, role)
               acc
             end
 
           [] ->
-            {_result, acc} = start_and_monitor_connection(acc, node_id, host, port)
+            {_result, acc} = start_and_monitor_connection(acc, node_id, host, port, role)
             acc
         end
       end)
 
-    needed_ids = MapSet.new(needed_nodes, fn {node_id, _, _} -> node_id end)
+    needed_ids = MapSet.new(needed_nodes, fn {node_id, _, _, _} -> node_id end)
 
     registered_nodes =
       Registry.select(data.registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
@@ -368,20 +415,44 @@ defmodule Redix.Cluster.Manager do
     data
   end
 
+  # Builds the list of `{node_id, host, port, role}` tuples the cluster should be
+  # connected to. Primaries always; replicas only when `:read_from_replicas` is on.
+  # Primaries are listed first so `uniq_by` keeps the primary role if a node ever
+  # appears in both lists.
+  defp nodes_to_connect(data, slots_data) do
+    primaries =
+      Enum.map(slots_data, fn [_start, _end, [host, port | _] | _replicas] ->
+        {"#{host}:#{port}", host, port, :primary}
+      end)
+
+    replicas =
+      if data.read_from_replicas do
+        for [_start, _end, _primary | replica_entries] <- slots_data,
+            [host, port | _] <- replica_entries do
+          {"#{host}:#{port}", host, port, :replica}
+        end
+      else
+        []
+      end
+
+    Enum.uniq_by(primaries ++ replicas, fn {node_id, _, _, _} -> node_id end)
+  end
+
   # Returns `{result, data}` where `result` is `{:ok, pid}` or `{:error, reason}`.
   # Callers that only care about the updated data can discard the result.
-  defp start_and_monitor_connection(data, node_id, host, port) do
+  defp start_and_monitor_connection(data, node_id, host, port, role) do
     case start_connection(
            data.pool_supervisor,
            data.registry,
            node_id,
            host,
            port,
-           data.conn_opts
+           data.conn_opts,
+           role
          ) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
-        {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, node_id)}}
+        {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, role})}}
 
       # A concurrent monitor restart (or the connection's own retry) may have
       # already registered this node. Treat it as success.
@@ -399,7 +470,7 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  defp start_connection(pool_supervisor, registry, node_id, host, port, conn_opts) do
+  defp start_connection(pool_supervisor, registry, node_id, host, port, conn_opts, role) do
     opts =
       conn_opts
       |> Keyword.delete(:name)
@@ -407,9 +478,16 @@ defmodule Redix.Cluster.Manager do
         host: host,
         port: port,
         sync_connect: false,
-        name: {:via, Registry, {registry, node_id}}
+        # The Registry value records the node's role so keyless commands can be
+        # routed to primaries (see `get_random_connection/1`).
+        name: {:via, Registry, {registry, node_id, role}}
       )
+      |> maybe_put_readonly(role)
 
     DynamicSupervisor.start_child(pool_supervisor, {Redix, opts})
   end
+
+  # Replica connections issue READONLY after connecting so they serve reads.
+  defp maybe_put_readonly(opts, :replica), do: Keyword.put(opts, :readonly, true)
+  defp maybe_put_readonly(opts, :primary), do: opts
 end
