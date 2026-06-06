@@ -49,6 +49,7 @@ defmodule Redix.Connector do
   defp auth_and_select(transport, socket, opts, timeout) do
     with :ok <- maybe_auth(transport, socket, opts, timeout),
          :ok <- maybe_select(transport, socket, opts, timeout),
+         :ok <- maybe_readonly(transport, socket, opts, timeout),
          do: :ok
   end
 
@@ -109,6 +110,18 @@ defmodule Redix.Connector do
   defp maybe_select(transport, socket, opts, timeout) do
     if database = opts[:database] do
       with {:ok, "OK"} <- sync_command(transport, socket, ["SELECT", database], timeout), do: :ok
+    else
+      :ok
+    end
+  end
+
+  # Used for connections to Redis Cluster replicas: READONLY makes the replica
+  # serve read-only commands instead of redirecting them to the primary. It must
+  # be re-issued on every (re)connection, which is why it lives here alongside
+  # AUTH/SELECT rather than being sent once after start_link.
+  defp maybe_readonly(transport, socket, opts, timeout) do
+    if opts[:readonly] do
+      with {:ok, "OK"} <- sync_command(transport, socket, ["READONLY"], timeout), do: :ok
     else
       :ok
     end

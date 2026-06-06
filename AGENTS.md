@@ -37,7 +37,7 @@ Redix.Cluster (Supervisor, public API)
 ├── DynamicSupervisor (supervises Redix connections)
 ├── Task.Supervisor (parallel pipeline execution)
 └── Redix.Cluster.Manager (gen_statem: topology + connection lifecycle)
-    └── ETS: slot_table (slot 0..16383 -> node_id string)
+    └── ETS: slot_table (slot 0..16383 -> {primary_id, [replica_id]})
 ```
 
 All resource names are derived deterministically from the cluster name:
@@ -53,9 +53,11 @@ This eliminates the need for `persistent_term` or any external lookup.
 
 - **`Redix.Cluster.Manager`** (`lib/redix/cluster/manager.ex`) — gen_statem with two
   states: `:ready` and `:cooling_down`. Manages topology via `CLUSTER SLOTS`, starts
-  Redix connections registered in the Registry via `{:via, Registry, {registry, node_id}}`.
-  Uses named timeout `{:timeout, :periodic_refresh}` for periodic refresh and
-  `:state_timeout` for the 1-second cooldown after reactive refreshes.
+  Redix connections registered in the Registry via
+  `{:via, Registry, {registry, node_id, role}}` where `role` is `:primary` or
+  `:replica` (the Registry *value*). Uses named timeout `{:timeout, :periodic_refresh}`
+  for periodic refresh and `:state_timeout` for the 1-second cooldown after reactive
+  refreshes.
 
 - **`Redix.Cluster.Hash`** (`lib/redix/cluster/hash.ex`) — CRC16-XMODEM with
   compile-time lookup table, hash tag extraction, `hash_slot/1`.
@@ -68,9 +70,22 @@ This eliminates the need for `persistent_term` or any external lookup.
 ### Design decisions
 
 - **Registry for connections, ETS for slots.** The slot table is pure data (16384 entries
-  mapping to ~3 node_id strings) — ETS is the right tool. The connection map (node_id ->
-  pid) is process registration — Registry handles auto-cleanup on process death and
-  supports `:via` tuples for transparent naming.
+  mapping to `{primary_id, [replica_id]}`) — ETS is the right tool. The connection map
+  (node_id -> pid) is process registration — Registry handles auto-cleanup on process
+  death and supports `:via` tuples for transparent naming. The Registry *value* records
+  the node's `role` so keyless commands route to primaries (`get_random_connection/1`)
+  and replica lookups stay separate from primary lookups.
+
+- **Replica reads are opt-in** (`read_from_replicas: true`). When off (default), only
+  primaries are connected and the slot table stores `[]` for replicas — behavior is
+  identical to primary-only. When on, the Manager also connects/supervises/monitors one
+  connection per replica `host:port`, passing `readonly: true` so the connector issues
+  `READONLY` after *every* (re)connect (it lives in `Redix.Connector.auth_and_select`
+  alongside AUTH/SELECT, so reconnects redo it automatically). Per-call routing is the
+  `:route` option on `command/3`/`pipeline/3` (`:primary` | `:replica` | `:prefer_replica`),
+  resolved in `Redix.Cluster.resolve_connection/4`. `transaction_pipeline/3` only allows
+  `:primary` (MULTI/EXEC must run on the primary). A write mistakenly routed to a replica
+  comes back as `MOVED` and is followed to the primary by the existing redirect machinery.
 
 - **One Redix connection per node** (multiplexing model, like ioredis/Lettuce). Redix
   already pipelines internally. Users who need more throughput start multiple named
@@ -171,7 +186,11 @@ services need their default host ports free.
 
 ### Known limitations / future work
 
-- Primary-only routing (no READONLY replica reads)
+- Replica reads use a random reachable replica; no read-load balancing strategy,
+  staleness tolerance, or zone/locality awareness yet.
+- After a failover, a promoted replica keeps its `:replica` Registry value until its
+  connection restarts, so `get_random_connection/1` may skip it for keyless commands
+  (slot routing via the slot table is unaffected — it points at the new primary).
 - No cluster PubSub (different semantics — messages broadcast to all nodes)
 - No `noreply_*` functions in cluster mode
 - `COMMAND GETKEYS` fallback for unknown commands not yet implemented

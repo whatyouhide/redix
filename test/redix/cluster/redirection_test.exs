@@ -94,7 +94,7 @@ defmodule Redix.Cluster.RedirectionTest do
   ## Helpers
 
   defp route_slot(cluster, slot, node_id) do
-    :ets.insert(:"#{cluster}_slots", {slot, node_id})
+    :ets.insert(:"#{cluster}_slots", {slot, node_id, _replicas = []})
   end
 
   # Starts a fake node and a Redix connection to it, registered under its node_id

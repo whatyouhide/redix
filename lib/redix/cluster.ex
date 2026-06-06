@@ -47,10 +47,30 @@ defmodule Redix.Cluster do
         ["SET", "{user:1}.email", "alice@example.com"]
       ])
 
+  ### Reading from replicas
+
+  By default all commands are routed to primaries. To allow reads from replicas,
+  start the cluster with `read_from_replicas: true` (which opens and supervises a
+  connection to each replica, issuing `READONLY` on it) and pass a `:route` option
+  **per call**:
+
+      Redix.Cluster.start_link(
+        name: :my_cluster,
+        nodes: ["redis://localhost:7000"],
+        read_from_replicas: true
+      )
+
+      # Read from a replica for the key's slot, failing if none is reachable.
+      Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :replica)
+
+      # Prefer a replica but fall back to the primary if none is reachable.
+      Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :prefer_replica)
+
+  See `command/3` for the full list of `:route` values.
+
   ### Limitations
 
     * Only database `0` is supported (Redis Cluster does not support `SELECT`).
-    * Only primary nodes are used for reads (no replica reads).
     * Pub/Sub is not supported through the cluster interface (*yet*).
     * The `:noreply_*` functions are not supported in cluster mode.
 
@@ -73,6 +93,8 @@ defmodule Redix.Cluster do
   @type endpoint() :: String.t() | [{:host, String.t()} | {:port, :inet.port_number()}]
 
   @max_redirections 5
+
+  @valid_routes [:primary, :replica, :prefer_replica]
 
   node_as_keyword_opts_schema = [
     host: [type: :string, default: "localhost"],
@@ -107,6 +129,16 @@ defmodule Redix.Cluster do
       type: :timeout,
       default: 30_000,
       doc: "How often (in milliseconds) to refresh the cluster topology."
+    ],
+    read_from_replicas: [
+      type: :boolean,
+      default: false,
+      doc: """
+      if `true`, the cluster also opens (and supervises) a connection to every replica
+      node discovered via `CLUSTER SLOTS`, issuing `READONLY` on each so it can serve
+      reads. This is required to use `route: :replica` or `route: :prefer_replica` (see
+      `command/3`). Defaults to `false`, in which case only primaries are connected.
+      """
     ]
   ]
 
@@ -147,6 +179,7 @@ defmodule Redix.Cluster do
     name = Keyword.fetch!(cluster_opts, :name)
     seed_nodes = Keyword.fetch!(cluster_opts, :nodes)
     refresh_interval = Keyword.fetch!(cluster_opts, :topology_refresh_interval)
+    read_from_replicas = Keyword.fetch!(cluster_opts, :read_from_replicas)
 
     if Keyword.has_key?(conn_opts, :sentinel) do
       raise ArgumentError, "Sentinel connections are not supported in cluster mode"
@@ -176,6 +209,7 @@ defmodule Redix.Cluster do
        pool_supervisor: pool_name(name),
        conn_opts: conn_opts,
        refresh_interval: refresh_interval,
+       read_from_replicas: read_from_replicas,
        table_name: slot_table_name(name),
        registry: registry_name(name)}
     ]
@@ -228,12 +262,27 @@ defmodule Redix.Cluster do
 
     * `:timeout` - request timeout in milliseconds. Defaults to `5_000`.
 
+    * `:route` - where to send the command. One of:
+
+      * `:primary` (default) - always route to the slot's primary.
+      * `:replica` - route to a replica for the slot, failing with a connection
+        error if none is reachable.
+      * `:prefer_replica` - route to a replica if one is reachable, otherwise fall
+        back to the primary.
+
+      `:replica` and `:prefer_replica` require the cluster to have been started with
+      `read_from_replicas: true`. Use them only for reads: a write routed to a replica
+      is transparently redirected (via `MOVED`) to the primary.
+
   ## Examples
 
       Redix.Cluster.command(:my_cluster, ["SET", "mykey", "foo"])
       #=> {:ok, "OK"}
 
       Redix.Cluster.command(:my_cluster, ["GET", "mykey"])
+      #=> {:ok, "foo"}
+
+      Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :prefer_replica)
       #=> {:ok, "foo"}
 
   """
@@ -272,6 +321,10 @@ defmodule Redix.Cluster do
 
     * `:timeout` - request timeout in milliseconds. Defaults to `5_000`.
 
+    * `:route` - where to send the pipeline. See `command/3` for the accepted
+      values. The option applies to the whole pipeline: every command uses the
+      same routing choice.
+
   ## Examples
 
       Redix.Cluster.pipeline(:my_cluster, [["SET", "a", "1"], ["SET", "b", "2"]])
@@ -305,6 +358,9 @@ defmodule Redix.Cluster do
   transaction on; a pipeline of only keyless commands (such as `PING`) returns
   an error since there's no slot to send it to.
 
+  Transactions always run on the slot's primary; passing `route:` anything other
+  than `:primary` raises an `ArgumentError`.
+
   ## Options
 
     * `:timeout` - request timeout in milliseconds. Defaults to `5_000`.
@@ -322,6 +378,17 @@ defmodule Redix.Cluster do
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def transaction_pipeline(cluster, [_ | _] = commands, opts \\ []) when is_atom(cluster) do
+    case validate_route!(opts) do
+      :primary ->
+        :ok
+
+      other ->
+        raise ArgumentError,
+              "transaction_pipeline/3 only supports route: :primary, got: #{inspect(other)} " <>
+                "(MULTI/EXEC must run on the slot's primary)"
+    end
+
+    opts = Keyword.delete(opts, :route)
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
 
@@ -370,6 +437,9 @@ defmodule Redix.Cluster do
   ## Pipeline implementation
 
   defp execute_pipeline(cluster, commands, opts) do
+    route = validate_route!(opts)
+    opts = Keyword.delete(opts, :route)
+
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
 
@@ -383,7 +453,7 @@ defmodule Redix.Cluster do
       end)
 
     # Group by slot -> node. Returns a list of {conn, [{idx, cmd}]} tuples.
-    groups = group_by_node(slot_table, registry, indexed_commands)
+    groups = group_by_node(slot_table, registry, indexed_commands, route)
 
     # Execute each group on its target node
     results = execute_groups(cluster, groups, opts)
@@ -404,11 +474,11 @@ defmodule Redix.Cluster do
     end
   end
 
-  defp group_by_node(slot_table, registry, indexed_commands) do
+  defp group_by_node(slot_table, registry, indexed_commands, route) do
     indexed_commands
     |> Enum.group_by(fn
       {_idx, _cmd, :no_slot} -> :random
-      {_idx, _cmd, slot} -> Manager.get_connection(slot_table, registry, slot)
+      {_idx, _cmd, slot} -> resolve_connection(slot_table, registry, slot, route)
     end)
     |> Enum.map(fn {node_key, commands} ->
       conn =
@@ -429,6 +499,13 @@ defmodule Redix.Cluster do
       cmds = Enum.map(commands, fn {idx, cmd, _slot} -> {idx, cmd} end)
       {conn, cmds}
     end)
+  end
+
+  # No connection could be resolved for this group (for example `route: :replica`
+  # when no replica is reachable). Surface a connection error rather than crashing
+  # on `Redix.pipeline(nil, ...)`.
+  defp execute_groups(_cluster, [{nil, _cmds}], _opts) do
+    {:error, %Redix.ConnectionError{reason: :closed}}
   end
 
   # If there's only a single group to execute, we don't need parallel tasks.
@@ -631,6 +708,35 @@ defmodule Redix.Cluster do
   defp parse_redirection(_), do: nil
 
   ## Helpers
+
+  # Resolves the connection for a slot according to the routing choice. Returns
+  # `{:ok, pid}` or `:error` (the same shape `Manager.get_connection/3` returns),
+  # so the grouping/execution path handles a missing connection uniformly.
+  defp resolve_connection(slot_table, registry, slot, :primary) do
+    Manager.get_connection(slot_table, registry, slot)
+  end
+
+  defp resolve_connection(slot_table, registry, slot, :replica) do
+    Manager.get_replica_connection(slot_table, registry, slot)
+  end
+
+  defp resolve_connection(slot_table, registry, slot, :prefer_replica) do
+    case Manager.get_replica_connection(slot_table, registry, slot) do
+      {:ok, _pid} = ok -> ok
+      :error -> Manager.get_connection(slot_table, registry, slot)
+    end
+  end
+
+  defp validate_route!(opts) do
+    case Keyword.get(opts, :route, :primary) do
+      route when route in @valid_routes ->
+        route
+
+      other ->
+        raise ArgumentError,
+              "invalid :route option: #{inspect(other)}, expected one of #{inspect(@valid_routes)}"
+    end
+  end
 
   defp command_slot(command) do
     case CommandParser.key_from_command(command) do

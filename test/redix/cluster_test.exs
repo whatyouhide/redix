@@ -323,6 +323,91 @@ defmodule Redix.ClusterTest do
     end
   end
 
+  describe ":route option (no replicas connected)" do
+    test "route: :replica returns a connection error when no replica is connected", %{
+      cluster: cluster
+    } do
+      Redix.Cluster.command!(cluster, ["SET", "noreplica", "v"])
+
+      assert {:error, %Redix.ConnectionError{}} =
+               Redix.Cluster.command(cluster, ["GET", "noreplica"], route: :replica)
+    end
+
+    test "route: :prefer_replica falls back to the primary when no replica is connected", %{
+      cluster: cluster
+    } do
+      Redix.Cluster.command!(cluster, ["SET", "fallback", "v"])
+
+      assert Redix.Cluster.command(cluster, ["GET", "fallback"], route: :prefer_replica) ==
+               {:ok, "v"}
+    end
+
+    test "an invalid :route raises ArgumentError", %{cluster: cluster} do
+      assert_raise ArgumentError, ~r/invalid :route option/, fn ->
+        Redix.Cluster.command(cluster, ["GET", "k"], route: :bogus)
+      end
+    end
+
+    test "transaction_pipeline rejects non-primary routes", %{cluster: cluster} do
+      assert_raise ArgumentError, ~r/only supports route: :primary/, fn ->
+        Redix.Cluster.transaction_pipeline(cluster, [["SET", "{t}.a", "1"]], route: :replica)
+      end
+    end
+  end
+
+  describe "reading from replicas (read_from_replicas: true)" do
+    setup do
+      name = :"replica_cluster_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Redix.Cluster, nodes: @nodes, name: name, read_from_replicas: true},
+        id: name
+      )
+
+      %{replica_cluster: name}
+    end
+
+    test "connects to replicas and registers them with the :replica role", %{
+      replica_cluster: cluster
+    } do
+      registry = :"#{cluster}_registry"
+
+      # Replica connections are established asynchronously after the cluster starts.
+      assert wait_until(fn -> replica_pids(registry) != [] end)
+      assert Enum.all?(replica_pids(registry), &Process.alive?/1)
+    end
+
+    test "route: :replica reads a value written to the primary", %{replica_cluster: cluster} do
+      assert Redix.Cluster.command!(cluster, ["SET", "replica_key", "v1"]) == "OK"
+
+      # Allow for replica connection setup and replication lag.
+      assert wait_until(fn ->
+               Redix.Cluster.command(cluster, ["GET", "replica_key"], route: :replica) ==
+                 {:ok, "v1"}
+             end)
+    end
+
+    test "route: :prefer_replica reads a value", %{replica_cluster: cluster} do
+      assert Redix.Cluster.command!(cluster, ["SET", "prefer_key", "v2"]) == "OK"
+
+      assert wait_until(fn ->
+               Redix.Cluster.command(cluster, ["GET", "prefer_key"], route: :prefer_replica) ==
+                 {:ok, "v2"}
+             end)
+    end
+
+    test "route: :replica applies to a whole single-slot pipeline", %{replica_cluster: cluster} do
+      Redix.Cluster.command!(cluster, ["SET", "{r}.a", "1"])
+      Redix.Cluster.command!(cluster, ["SET", "{r}.b", "2"])
+
+      assert wait_until(fn ->
+               Redix.Cluster.pipeline(cluster, [["GET", "{r}.a"], ["GET", "{r}.b"]],
+                 route: :replica
+               ) == {:ok, ["1", "2"]}
+             end)
+    end
+  end
+
   describe "telemetry" do
     test "topology_change is emitted on startup", %{cluster: cluster} do
       {test_name, _arity} = __ENV__.function
@@ -409,5 +494,17 @@ defmodule Redix.ClusterTest do
       node_id |> String.split(":") |> List.last() |> String.to_integer()
     end)
     |> MapSet.new()
+  end
+
+  defp replica_pids(registry) do
+    Registry.select(registry, [{{:_, :"$1", :replica}, [], [:"$1"]}])
+  end
+
+  defp wait_until(fun, attempts \\ 50) do
+    cond do
+      fun.() -> true
+      attempts <= 0 -> false
+      true -> Process.sleep(50) && wait_until(fun, attempts - 1)
+    end
   end
 end
