@@ -23,4 +23,19 @@ defmodule Redix.ConnectionErrorTest do
     assert Exception.message(%ConnectionError{reason: {:wrong_role, "slave"}}) ==
              "wrong role: slave"
   end
+
+  test "Exception.message/1 with the :closed reason" do
+    assert Exception.message(%ConnectionError{reason: :closed}) ==
+             "the connection to Redis is closed"
+  end
+
+  test "Exception.message/1 with the :health_check_timeout reason" do
+    assert Exception.message(%ConnectionError{reason: :health_check_timeout}) ==
+             "a command went unanswered for longer than the configured :health_check_interval"
+  end
+
+  test "Exception.message/1 with a non-atom, non-tuple reason falls back to inspect" do
+    assert Exception.message(%ConnectionError{reason: {:some, :other, :tuple}}) ==
+             "{:some, :other, :tuple}"
+  end
 end

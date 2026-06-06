@@ -64,6 +64,64 @@ defmodule Redix.TelemetryTest do
     end
   end
 
+  describe "default handler for cluster events" do
+    test "logs failed topology refreshes" do
+      log =
+        capture_log(fn ->
+          Redix.Telemetry.handle_event(
+            [:redix, :cluster, :failed_topology_refresh],
+            %{},
+            %{cluster: :my_cluster, reason: :no_reachable_node},
+            :no_config
+          )
+        end)
+
+      assert log =~ ~r/Cluster :my_cluster failed to refresh topology: :no_reachable_node/
+    end
+
+    test "logs node connection failures" do
+      log =
+        capture_log(fn ->
+          Redix.Telemetry.handle_event(
+            [:redix, :cluster, :node_connection_failed],
+            %{},
+            %{cluster: :my_cluster, address: "127.0.0.1:7000", reason: :econnrefused},
+            :no_config
+          )
+        end)
+
+      assert log =~ ~r/Cluster :my_cluster failed to connect to node 127.0.0.1:7000/
+    end
+
+    test "logs redirections" do
+      log =
+        capture_log(fn ->
+          Redix.Telemetry.handle_event(
+            [:redix, :cluster, :redirection],
+            %{},
+            %{cluster: :my_cluster, type: :moved, slot: 1234, target_address: "127.0.0.1:7001"},
+            :no_config
+          )
+        end)
+
+      assert log =~ ~r/Cluster :my_cluster moved redirection for slot 1234 to 127.0.0.1:7001/
+    end
+
+    test "ignores topology_change events" do
+      log =
+        capture_log(fn ->
+          assert Redix.Telemetry.handle_event(
+                   [:redix, :cluster, :topology_change],
+                   %{},
+                   %{cluster: :my_cluster, nodes: []},
+                   :no_config
+                 ) == :ok
+        end)
+
+      assert log == ""
+    end
+  end
+
   defp wait_for_reconnection(conn, timeout) do
     case Redix.command(conn, ["PING"]) do
       {:ok, "PONG"} ->

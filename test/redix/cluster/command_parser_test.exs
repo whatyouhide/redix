@@ -133,6 +133,52 @@ defmodule Redix.Cluster.CommandParserTest do
       assert key_from_command(["GEOADD", "geo", "1", "2", "m"]) == {:ok, "geo"}
       assert key_from_command(["GEOPOS", "geo", "m"]) == {:ok, "geo"}
     end
+
+    test "OBJECT command extracts the key after the subcommand" do
+      assert key_from_command(["OBJECT", "ENCODING", "mykey"]) == {:ok, "mykey"}
+      assert key_from_command(["OBJECT", "REFCOUNT", "mykey"]) == {:ok, "mykey"}
+    end
+
+    test "OBJECT command without a key returns :no_key" do
+      assert key_from_command(["OBJECT", "HELP"]) == :no_key
+      assert key_from_command(["OBJECT"]) == :no_key
+    end
+
+    test "key-at-position-1 command with no arguments returns :no_key" do
+      assert key_from_command(["GET"]) == :no_key
+      assert key_from_command(["DEL"]) == :no_key
+    end
+
+    test "EVAL with non-zero numkeys but no keys returns :no_key" do
+      assert key_from_command(["EVAL", "return 1", "2"]) == :no_key
+    end
+
+    test "EVAL with unparseable numkeys returns :no_key" do
+      assert key_from_command(["EVAL", "return 1", "notanumber", "k1"]) == :no_key
+    end
+
+    test "EVAL with too few arguments returns :no_key" do
+      assert key_from_command(["EVAL"]) == :no_key
+      assert key_from_command(["EVAL", "return 1"]) == :no_key
+    end
+
+    test "XREAD without a STREAMS keyword returns :no_key" do
+      assert key_from_command(["XREAD", "COUNT", "10"]) == :no_key
+      assert key_from_command(["XREAD"]) == :no_key
+    end
+
+    test "XREAD with STREAMS but no keys returns :no_key" do
+      assert key_from_command(["XREAD", "STREAMS"]) == :no_key
+    end
+
+    test "XREADGROUP without a STREAMS keyword returns :no_key" do
+      assert key_from_command(["XREADGROUP", "GROUP", "g", "c", "COUNT", "10"]) == :no_key
+    end
+
+    test "XREADGROUP with too few arguments returns :no_key" do
+      assert key_from_command(["XREADGROUP", "GROUP"]) == :no_key
+      assert key_from_command(["XREADGROUP"]) == :no_key
+    end
   end
 
   describe "key_from_command/1 properties" do

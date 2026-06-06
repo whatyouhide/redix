@@ -98,6 +98,13 @@ defmodule Redix.ClusterTest do
     test "keyless commands (PING)", %{cluster: cluster} do
       assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
     end
+
+    test "commands unknown to the parser are routed to a random node", %{cluster: cluster} do
+      # The command parser returns :unknown for this command, so it has no slot
+      # and is routed to a random node, where Redis rejects it.
+      assert {:error, %Redix.Error{message: "ERR" <> _}} =
+               Redix.Cluster.command(cluster, ["SOMEFUTURECOMMAND", "arg"])
+    end
   end
 
   describe "command!/3" do
@@ -269,6 +276,45 @@ defmodule Redix.ClusterTest do
         Redix.Cluster.start_link(name: :db_test, nodes: @nodes, database: 1)
       end
     end
+
+    test "database 0 is allowed" do
+      assert {:ok, _pid} =
+               Redix.Cluster.start_link(name: :db_zero_test, nodes: @nodes, database: 0)
+
+      Redix.Cluster.stop(:db_zero_test)
+    end
+
+    test "sentinel connections are not supported in cluster mode" do
+      assert_raise ArgumentError, ~r/Sentinel connections are not supported/, fn ->
+        Redix.Cluster.start_link(
+          name: :sentinel_cluster_test,
+          nodes: @nodes,
+          sentinel: [sentinels: ["redis://localhost:9999"], group: "main"]
+        )
+      end
+    end
+  end
+
+  describe "__parse_node__/1" do
+    test "parses a URI string" do
+      assert Redix.Cluster.__parse_node__("redis://example.com:7000") ==
+               {:ok, {"example.com", 7000}}
+    end
+
+    test "parses a host/port keyword list" do
+      assert Redix.Cluster.__parse_node__(host: "example.com", port: 7000) ==
+               {:ok, {"example.com", 7000}}
+    end
+
+    test "returns an error for an invalid keyword list" do
+      assert {:error, message} = Redix.Cluster.__parse_node__(port: "not a port")
+      assert is_binary(message)
+    end
+
+    test "returns an error for an unexpected value" do
+      assert {:error, message} = Redix.Cluster.__parse_node__(123)
+      assert message =~ "expected a Redis URI or a :host/:port keyword list"
+    end
   end
 
   describe "MOVED to a node not yet in the registry (issue #293)" do
@@ -320,6 +366,32 @@ defmodule Redix.ClusterTest do
       # surfaces the connection failure.
       assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, {"127.0.0.1", 9999})
       assert {:error, %Redix.ConnectionError{}} = Redix.command(pid, ["PING"])
+    end
+  end
+
+  describe "node connection lifecycle" do
+    test "the manager re-establishes a node connection when it dies", %{cluster: cluster} do
+      registry = :"#{cluster}_registry"
+
+      [node_id | _] = Registry.select(registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+
+      {:ok, pid} =
+        Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
+
+      monitor = Process.monitor(pid)
+      Process.exit(pid, :kill)
+      assert_receive {:DOWN, ^monitor, :process, ^pid, _reason}, 1000
+
+      # The manager (and supervisor) bring the node back, registered under the same node id.
+      assert wait_until(fn ->
+               match?(
+                 {:ok, new_pid} when new_pid != pid,
+                 Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
+               )
+             end)
+
+      # And the cluster is usable again.
+      assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
     end
   end
 
@@ -485,6 +557,11 @@ defmodule Redix.ClusterTest do
 
       assert log =~ ~r/Cluster.*failed to refresh topology/
     end
+  end
+
+  defp node_id_address(node_id) do
+    [host, port_str] = String.split(node_id, ":")
+    {host, String.to_integer(port_str)}
   end
 
   defp registered_ports(registry) do
