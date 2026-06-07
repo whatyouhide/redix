@@ -269,8 +269,7 @@ defmodule Redix.Cluster.Manager do
 
     case node_info do
       {node_id, role} ->
-        [host, port_str] = String.split(node_id, ":")
-        port = String.to_integer(port_str)
+        {host, port} = split_host_port(node_id)
         {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
         data
 
@@ -320,10 +319,18 @@ defmodule Redix.Cluster.Manager do
   defp get_known_nodes(data) do
     data.registry
     |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
-    |> Enum.map(fn node_id ->
-      [host, port_str] = String.split(node_id, ":")
-      {host, String.to_integer(port_str)}
-    end)
+    |> Enum.map(&split_host_port/1)
+  end
+
+  # Splits a "host:port" address on its *last* colon. IPv6 hosts contain colons of
+  # their own (e.g. "::1:7000"), so splitting on every colon and matching
+  # [host, port] breaks on them (see issue #306). This is the single place that
+  # turns the internal "host:port" node-id / redirection address format back into
+  # {host, port}; Redix.Cluster.parse_redirection/1 reuses it.
+  @spec split_host_port(String.t()) :: {String.t(), :inet.port_number()}
+  def split_host_port(address) do
+    [host, port_str] = :string.split(address, ":", :trailing)
+    {host, String.to_integer(port_str)}
   end
 
   defp fetch_cluster_slots(_all_nodes = [], _conn_opts) do

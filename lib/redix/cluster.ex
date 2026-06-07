@@ -683,8 +683,7 @@ defmodule Redix.Cluster do
     case String.split(rest, " ") do
       [slot_str, address] ->
         {slot, ""} = Integer.parse(slot_str)
-        [host, port_str] = String.split(address, ":")
-        {port, ""} = Integer.parse(port_str)
+        {host, port} = Manager.split_host_port(address)
         {:moved, slot, host, port}
 
       _ ->
@@ -696,8 +695,7 @@ defmodule Redix.Cluster do
     case String.split(rest, " ") do
       [slot_str, address] ->
         {slot, ""} = Integer.parse(slot_str)
-        [host, port_str] = String.split(address, ":")
-        {port, ""} = Integer.parse(port_str)
+        {host, port} = Manager.split_host_port(address)
         {:ask, slot, host, port}
 
       _ ->

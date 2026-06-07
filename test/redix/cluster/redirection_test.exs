@@ -91,6 +91,24 @@ defmodule Redix.Cluster.RedirectionTest do
              {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
   end
 
+  # Reproduces issue #306: the cluster code splits a "host:port" node id on every
+  # colon and matches `[host, port_str]`, which blows up on IPv6 addresses. Redis
+  # emits MOVED/ASK targets unbracketed (e.g. "MOVED 866 ::1:7000"), so following
+  # such a redirect raises a MatchError in Redix.Cluster.parse_redirection/1 and
+  # crashes the caller. Here the slot owner redirects to a real IPv6 node, which
+  # the redirection machinery should follow to completion instead of crashing.
+  @tag :ipv6
+  test "follows a MOVED redirect to an IPv6 node", %{cluster: cluster} do
+    slot = Hash.hash_slot("x")
+
+    {_listen_c, node_c} = listen_ipv6(cluster, fn ["GET", _] -> "$5\r\nhello\r\n" end)
+    node_a = start_node(cluster, fn ["GET", _] -> "-MOVED #{slot} #{node_c}\r\n" end)
+
+    route_slot(cluster, slot, node_a)
+
+    assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "hello"}
+  end
+
   ## Helpers
 
   defp route_slot(cluster, slot, node_id) do
@@ -121,6 +139,30 @@ defmodule Redix.Cluster.RedirectionTest do
       id: {:conn, node_id}
     )
 
+    {listen, node_id}
+  end
+
+  # Like listen/1 + serve/2, but binds the fake node on the IPv6 loopback. The
+  # node id is the unbracketed "::1:port" form that Redis uses in MOVED/ASK
+  # replies, which is exactly what trips up the colon-splitting parser (#306).
+  defp listen_ipv6(cluster, handler) do
+    {:ok, listen} =
+      :gen_tcp.listen(0, [:binary, :inet6, active: false, reuseaddr: true, packet: :raw])
+
+    {:ok, port} = :inet.port(listen)
+    node_id = "::1:#{port}"
+
+    start_supervised!(
+      {Redix,
+       host: "::1",
+       port: port,
+       socket_opts: [:inet6],
+       sync_connect: true,
+       name: {:via, Registry, {:"#{cluster}_registry", node_id}}},
+      id: {:conn, node_id}
+    )
+
+    serve(listen, handler)
     {listen, node_id}
   end
 
