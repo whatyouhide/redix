@@ -49,8 +49,7 @@ defmodule Redix.Cluster.ManagerTest do
       ])
 
       start_supervised!(
-        {Redix.Cluster,
-         nodes: @nodes, name: short_name, topology_refresh_interval: 500},
+        {Redix.Cluster, nodes: @nodes, name: short_name, topology_refresh_interval: 500},
         id: :short_refresh
       )
 
@@ -73,8 +72,7 @@ defmodule Redix.Cluster.ManagerTest do
       ])
 
       start_supervised!(
-        {Redix.Cluster,
-         nodes: @nodes, name: short_name, topology_refresh_interval: 500},
+        {Redix.Cluster, nodes: @nodes, name: short_name, topology_refresh_interval: 500},
         id: :postpone_refresh
       )
 
@@ -135,7 +133,7 @@ defmodule Redix.Cluster.ManagerTest do
       assert map_size(monitors_before) >= 3
 
       # Pick a node that we know is in the monitors map.
-      {old_ref, node_id} = Enum.at(monitors_before, 0)
+      {old_ref, {node_id, _role}} = Enum.at(monitors_before, 0)
       [{pid, _}] = Registry.lookup(registry, node_id)
 
       Process.exit(pid, :kill)
@@ -157,7 +155,7 @@ defmodule Redix.Cluster.ManagerTest do
       monitors_before = data_before.monitors
 
       # Pick a monitored node and kill its connection.
-      {_old_ref, node_id} = Enum.at(monitors_before, 0)
+      {_old_ref, {node_id, _role}} = Enum.at(monitors_before, 0)
       [{pid, _}] = Registry.lookup(registry, node_id)
 
       Process.exit(pid, :kill)
