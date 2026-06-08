@@ -317,6 +317,61 @@ defmodule Redix.ClusterTest do
     end
   end
 
+  # Regression tests for issue #304: a multi-node pipeline where one node doesn't
+  # respond within the timeout used to crash with a FunctionClauseError instead of
+  # returning an error tuple. These exercise the collection logic directly, feeding it
+  # the exact shapes `Task.yield_many/2` produces.
+  describe "__collect_group_results__/1 (issue #304)" do
+    test "returns a timeout error when a node task is killed on timeout" do
+      tasks = [
+        Task.async(fn -> [{0, "OK"}] end),
+        Task.async(fn -> Process.sleep(:infinity) end)
+      ]
+
+      tasks_with_results = Task.yield_many(tasks, timeout: 100, on_timeout: :kill_task)
+
+      assert Redix.Cluster.__collect_group_results__(tasks_with_results) ==
+               {:error, %Redix.ConnectionError{reason: :timeout}}
+    end
+
+    test "returns the list of per-node result lists when every node responds" do
+      tasks = [
+        Task.async(fn -> [{0, "a"}] end),
+        Task.async(fn -> [{1, "b"}] end)
+      ]
+
+      tasks_with_results = Task.yield_many(tasks, timeout: 1000, on_timeout: :kill_task)
+
+      assert Redix.Cluster.__collect_group_results__(tasks_with_results) ==
+               [[{0, "a"}], [{1, "b"}]]
+    end
+
+    test "surfaces a per-node error returned inside {:ok, {:error, _}}" do
+      error = {:error, %Redix.ConnectionError{reason: :closed}}
+
+      tasks = [
+        Task.async(fn -> [{0, "a"}] end),
+        Task.async(fn -> error end)
+      ]
+
+      tasks_with_results = Task.yield_many(tasks, timeout: 1000, on_timeout: :kill_task)
+
+      assert Redix.Cluster.__collect_group_results__(tasks_with_results) == error
+    end
+
+    test "maps a crashed task's exit reason to a connection error" do
+      tasks_with_results = [
+        {%Task{ref: make_ref(), owner: self(), pid: self(), mfa: {:erlang, :apply, 2}},
+         {:ok, [{0, "a"}]}},
+        {%Task{ref: make_ref(), owner: self(), pid: self(), mfa: {:erlang, :apply, 2}},
+         {:exit, :boom}}
+      ]
+
+      assert Redix.Cluster.__collect_group_results__(tasks_with_results) ==
+               {:error, %Redix.ConnectionError{reason: :boom}}
+    end
+  end
+
   describe "MOVED to a node not yet in the registry (issue #293)" do
     test "Manager.connect_to_node connects to a reachable target on demand", %{cluster: cluster} do
       registry = :"#{cluster}_registry"

@@ -527,17 +527,37 @@ defmodule Redix.Cluster do
         end
       end)
 
-    tasks_with_results =
-      Task.yield_many(tasks, timeout: Keyword.get(opts, :timeout, 5_000), on_timeout: :kill_task)
+    tasks
+    |> Task.yield_many(timeout: Keyword.get(opts, :timeout, 5_000), on_timeout: :kill_task)
+    |> __collect_group_results__()
+  end
 
-    first_error =
-      Enum.find(tasks_with_results, fn
-        {_task, {:error, _} = res} -> res
-        {_task, {:exit, reason}} -> {:error, reason}
-        {_task, _other} -> nil
-      end)
-
-    first_error || Enum.map(tasks_with_results, fn {_task, {:ok, res}} -> res end)
+  # Collapses the `Task.yield_many/2` output into either the first `{:error, _}` (if any
+  # group failed) or the list of per-group result lists. Normalizes the three shapes
+  # `yield_many` can report for each task:
+  #
+  #   * `{task, {:ok, result}}` — the group finished; `result` is its result list or an
+  #     `{:error, _}` tuple returned by `execute_and_handle_redirections/5`.
+  #   * `{task, {:exit, reason}}` — the group's task crashed.
+  #   * `{task, nil}` — the group timed out and was killed (`on_timeout: :kill_task`).
+  #
+  # Public (with a name-mangled name) only so it can be unit-tested without a live
+  # cluster; see issue #304.
+  @doc false
+  def __collect_group_results__(tasks_with_results) do
+    tasks_with_results
+    |> Enum.reduce_while([], fn entry, acc ->
+      case entry do
+        {_task, {:ok, {:error, _} = error}} -> {:halt, error}
+        {_task, {:ok, result}} -> {:cont, [result | acc]}
+        {_task, {:exit, reason}} -> {:halt, {:error, %Redix.ConnectionError{reason: reason}}}
+        {_task, nil} -> {:halt, {:error, %Redix.ConnectionError{reason: :timeout}}}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      results -> Enum.reverse(results)
+    end
   end
 
   defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
