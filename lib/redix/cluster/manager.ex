@@ -278,6 +278,29 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
+  # Demonitors and drops every monitor entry tracking `node_id`. Called before a
+  # deliberate `terminate_child` so the resulting DOWN doesn't restart the node.
+  # `[:flush]` removes any DOWN already sitting in the mailbox.
+  defp demonitor_node(data, node_id) do
+    monitors =
+      data.monitors
+      |> Enum.filter(fn {ref, {id, _role}} ->
+        if id == node_id do
+          Process.demonitor(ref, [:flush])
+          false
+        else
+          true
+        end
+      end)
+      |> Map.new()
+
+    %{data | monitors: monitors}
+  end
+
+  defp monitoring_node?(data, node_id) do
+    Enum.any?(data.monitors, fn {_ref, {id, _role}} -> id == node_id end)
+  end
+
   defp lookup_connection(registry, node_id) do
     case Registry.lookup(registry, node_id) do
       [{pid, _value}] -> {:ok, pid}
@@ -413,13 +436,22 @@ defmodule Redix.Cluster.Manager do
     registered_nodes =
       Registry.select(data.registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
 
-    for {node_id, pid} <- registered_nodes, not MapSet.member?(needed_ids, node_id) do
-      if Process.alive?(pid) do
-        DynamicSupervisor.terminate_child(data.pool_supervisor, pid)
-      end
-    end
+    Enum.reduce(registered_nodes, data, fn {node_id, pid}, acc ->
+      if node_id in needed_ids do
+        acc
+      else
+        # Demonitor *before* terminating so the deliberate `terminate_child` DOWN
+        # doesn't land in `handle_down/2` and immediately resurrect a node that
+        # just left the cluster (see issue #305).
+        acc = demonitor_node(acc, node_id)
 
-    data
+        if Process.alive?(pid) do
+          DynamicSupervisor.terminate_child(acc.pool_supervisor, pid)
+        end
+
+        acc
+      end
+    end)
   end
 
   # Builds the list of `{node_id, host, port, role}` tuples the cluster should be
@@ -462,9 +494,16 @@ defmodule Redix.Cluster.Manager do
         {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, role})}}
 
       # A concurrent monitor restart (or the connection's own retry) may have
-      # already registered this node. Treat it as success.
+      # already registered this node. Treat it as success — but make sure we're
+      # monitoring the live pid, otherwise the Manager would silently stop
+      # tracking the node for restart (see issue #305).
       {:error, {:already_started, pid}} ->
-        {{:ok, pid}, data}
+        if monitoring_node?(data, node_id) do
+          {{:ok, pid}, data}
+        else
+          ref = Process.monitor(pid)
+          {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, role})}}
+        end
 
       {:error, reason} ->
         :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{

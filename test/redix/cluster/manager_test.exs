@@ -169,6 +169,49 @@ defmodule Redix.Cluster.ManagerTest do
     end
   end
 
+  describe "node removal" do
+    test "a removed node is terminated and not resurrected on refresh (#305)", %{
+      registry: registry,
+      manager: manager
+    } do
+      # Simulate a node that the Manager tracks (connected + monitored) but that is
+      # not part of `CLUSTER SLOTS` — e.g. a node that just left the cluster.
+      # `connect_to_node/2` registers and monitors it exactly like a real node, and
+      # `sync_connect: false` means the connection starts even if 7099 is refused.
+      fake_node = {"127.0.0.1", 7099}
+      fake_id = "127.0.0.1:7099"
+
+      {:ok, fake_pid} = Redix.Cluster.Manager.connect_to_node(manager, fake_node)
+      ref = Process.monitor(fake_pid)
+      assert [{^fake_pid, _}] = Registry.lookup(registry, fake_id)
+
+      # The Manager should be monitoring it.
+      {_state, data} = :sys.get_state(manager)
+      assert Enum.any?(data.monitors, fn {_ref, {id, _role}} -> id == fake_id end)
+
+      :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
+
+      # A refresh: the fake node is absent from `CLUSTER SLOTS`, so
+      # `ensure_connections/2` must terminate it — and must NOT bring it back.
+      Redix.Cluster.Manager.refresh_topology(manager)
+
+      # The fake connection is terminated...
+      assert_receive {:DOWN, ^ref, :process, ^fake_pid, _reason}, 2_000
+
+      # ...and the refresh finishes.
+      assert_receive {[:redix, :cluster, :topology_change], _ref, %{}, _meta}, 2_000
+
+      # With the bug, the deliberate `terminate_child` DOWN lands in `handle_down/2`
+      # and resurrects the node. Give the Manager time to process that DOWN, then
+      # assert it stayed gone — both from the registry and the monitors map.
+      Process.sleep(200)
+      assert Registry.lookup(registry, fake_id) == []
+
+      {_state, data} = :sys.get_state(manager)
+      refute Enum.any?(data.monitors, fn {_ref, {id, _role}} -> id == fake_id end)
+    end
+  end
+
   defp wait_until_passes(timeout, fun) when timeout <= 0, do: fun.()
 
   defp wait_until_passes(timeout, fun) do
