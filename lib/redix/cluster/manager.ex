@@ -8,6 +8,7 @@ defmodule Redix.Cluster.Manager do
   defstruct [
     :cluster_name,
     :slot_table,
+    :command_cache,
     :registry,
     :pool_supervisor,
     :conn_opts,
@@ -160,14 +161,28 @@ defmodule Redix.Cluster.Manager do
     conn_opts = Keyword.fetch!(opts, :conn_opts)
     refresh_interval = Keyword.fetch!(opts, :refresh_interval)
     table_name = Keyword.fetch!(opts, :table_name)
+    command_cache_name = Keyword.fetch!(opts, :command_cache_table)
     registry = Keyword.fetch!(opts, :registry)
     read_from_replicas = Keyword.fetch!(opts, :read_from_replicas)
 
     slot_table = :ets.new(table_name, [:named_table, :public, :set, {:read_concurrency, true}])
 
+    # Caches the key specification (first-key position / movable / no-key) of commands
+    # outside CommandParser's static table, learned via COMMAND INFO. Written from
+    # arbitrary caller processes, so it's public with write concurrency.
+    command_cache =
+      :ets.new(command_cache_name, [
+        :named_table,
+        :public,
+        :set,
+        {:read_concurrency, true},
+        {:write_concurrency, true}
+      ])
+
     data = %__MODULE__{
       cluster_name: cluster_name,
       slot_table: slot_table,
+      command_cache: command_cache,
       registry: registry,
       pool_supervisor: pool_supervisor,
       conn_opts: conn_opts,
