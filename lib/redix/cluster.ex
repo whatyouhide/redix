@@ -545,16 +545,18 @@ defmodule Redix.Cluster do
   # cluster; see issue #304.
   @doc false
   def __collect_group_results__(tasks_with_results) do
-    results =
-      Enum.map(tasks_with_results, fn
-        {_task, {:ok, result}} -> result
-        {_task, {:exit, reason}} -> {:error, %Redix.ConnectionError{reason: reason}}
-        {_task, nil} -> {:error, %Redix.ConnectionError{reason: :timeout}}
-      end)
-
-    case Enum.find(results, &match?({:error, _}, &1)) do
-      nil -> results
-      error -> error
+    tasks_with_results
+    |> Enum.reduce_while([], fn entry, acc ->
+      case entry do
+        {_task, {:ok, {:error, _} = error}} -> {:halt, error}
+        {_task, {:ok, result}} -> {:cont, [result | acc]}
+        {_task, {:exit, reason}} -> {:halt, {:error, %Redix.ConnectionError{reason: reason}}}
+        {_task, nil} -> {:halt, {:error, %Redix.ConnectionError{reason: :timeout}}}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      results -> Enum.reverse(results)
     end
   end
 
