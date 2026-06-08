@@ -37,12 +37,14 @@ Redix.Cluster (Supervisor, public API)
 ├── DynamicSupervisor (supervises Redix connections)
 ├── Task.Supervisor (parallel pipeline execution)
 └── Redix.Cluster.Manager (gen_statem: topology + connection lifecycle)
-    └── ETS: slot_table (slot 0..16383 -> {primary_id, [replica_id]})
+    ├── ETS: slot_table (slot 0..16383 -> {primary_id, [replica_id]})
+    └── ETS: command_cache (command name -> key spec, for commands outside the table)
 ```
 
 All resource names are derived deterministically from the cluster name:
-`:my_cluster` -> `:"my_cluster_slots"`, `:"my_cluster_registry"`,
-`:"my_cluster_manager"`, `:"my_cluster_pool"`, `:"my_cluster_task_supervisor"`.
+`:my_cluster` -> `:"my_cluster_slots"`, `:"my_cluster_command_cache"`,
+`:"my_cluster_registry"`, `:"my_cluster_manager"`, `:"my_cluster_pool"`,
+`:"my_cluster_task_supervisor"`.
 This eliminates the need for `persistent_term` or any external lookup.
 
 ### Key modules
@@ -63,9 +65,10 @@ This eliminates the need for `persistent_term` or any external lookup.
   compile-time lookup table, hash tag extraction, `hash_slot/1`.
 
 - **`Redix.Cluster.CommandParser`** (`lib/redix/cluster/command_parser.ex`) — Static
-  lookup table (~150 commands) mapping command names to first key position. Handles
-  EVAL/EVALSHA numkeys parsing, XREAD/XREADGROUP STREAMS keyword scanning.
-  Returns `{:ok, key}`, `:no_key`, or `:unknown`.
+  lookup table (~180 commands) mapping command names to first key position. Handles
+  EVAL/EVALSHA numkeys parsing, XREAD/XREADGROUP STREAMS keyword scanning, and the
+  position-2 commands OBJECT/BITOP. Returns `{:ok, key}`, `:no_key`, or `:unknown`
+  (the last resolved at runtime by `Redix.Cluster` via COMMAND INFO/GETKEYS).
 
 ### Design decisions
 
@@ -105,6 +108,22 @@ This eliminates the need for `persistent_term` or any external lookup.
 - **Transparent pipeline splitting.** Pipelines spanning multiple nodes are grouped by
   target node, executed in parallel via `Task.Supervisor`, and results reassembled in
   original order. Single-node pipelines skip the task overhead.
+
+- **Server-assisted routing for commands outside the static table.** Commands not in
+  CommandParser's static table return `:unknown` (not `:no_key`).
+  `Redix.Cluster.resolve_unknown_slots/3` resolves them by asking the server and **caching
+  the answer** in a per-cluster ETS table (`:"#{cluster}_command_cache"`, owned by the
+  Manager). A command's key specification (first-key position, or "movable") is stable, so
+  it's learned once via `COMMAND INFO` (`keyspec_from_info/1` reads `first_key` + the
+  `movablekeys` flag) and cached per command name; later calls resolve locally with no
+  round-trip. Commands the server reports as having *movable* keys (e.g. `MIGRATE`,
+  `BLMPOP`) can't be pinned to a fixed position and fall back to a per-call `COMMAND
+  GETKEYS`, but are still cached as `:movable` so `COMMAND INFO` isn't re-issued. Anything
+  that can't be resolved (unknown to the server, no node reachable) becomes `:no_slot` —
+  random-node routing, the prior behavior. This runs in both `command/3`/`pipeline/3` and
+  `transaction_pipeline/3`, so a transaction of such commands still computes its single
+  target slot. The static table itself was expanded (bit commands, blocking `B*` pops,
+  hash-field TTL, `XSETID`, `BITOP`) so the fallback only fires for the long tail.
 
 - **`:name` is required.** All internal resource names derive from it. No `persistent_term`
   or PID-based lookups needed. Callers always use the atom name.
@@ -193,5 +212,3 @@ services need their default host ports free.
   (slot routing via the slot table is unaffected — it points at the new primary).
 - No cluster PubSub (different semantics — messages broadcast to all nodes)
 - No `noreply_*` functions in cluster mode
-- `COMMAND GETKEYS` fallback for unknown commands not yet implemented
-  (returns `:unknown` from CommandParser, treated as keyless)

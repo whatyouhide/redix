@@ -10,6 +10,13 @@
     `route: :prefer_replica` to `Redix.Cluster.command/3` and `Redix.Cluster.pipeline/3`
     to send reads to replicas. The default routing stays `:primary`, so existing behavior
     is unchanged.
+  * Route commands outside `Redix.Cluster`'s built-in command table to the correct node.
+    Previously commands the driver didn't recognize were treated as keyless and sent to a
+    random node; now their keys are resolved against the server (via `COMMAND INFO`, with a
+    `COMMAND GETKEYS` fallback for commands with movable keys) and the result is cached per
+    command name, so repeated calls add no extra round-trips. The built-in table also grew
+    to cover more commands directly (bit commands, the blocking `B*` list/sorted-set pops,
+    hash-field expiration commands, `XSETID`, and `BITOP`).
   * Add a `:readonly` option to `Redix.start_link/1` that issues `READONLY` after every
     (re)connection.
   * Add a `:health_check_interval` option to `Redix.start_link/1` that detects *half-open*

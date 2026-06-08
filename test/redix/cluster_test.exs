@@ -214,6 +214,86 @@ defmodule Redix.ClusterTest do
     end
   end
 
+  # Commands outside CommandParser's static table (here BLMPOP, a movable-key command)
+  # are routed by asking the server via COMMAND INFO / COMMAND GETKEYS, and the key
+  # specification is cached per command name.
+  describe "routing commands outside the static table (issue #307)" do
+    test "command/3 routes an unknown command to the key's node", %{cluster: cluster} do
+      assert Redix.Cluster.command!(cluster, ["RPUSH", "mylist", "a", "b", "c"]) == 3
+
+      # BLMPOP (unknown, movable keys) must hit the same node as the list.
+      assert Redix.Cluster.command(cluster, ["BLMPOP", "0.1", "1", "mylist", "LEFT"]) ==
+               {:ok, ["mylist", ["a"]]}
+    end
+
+    test "pipeline/3 splits unknown commands across slots", %{cluster: cluster} do
+      Redix.Cluster.command!(cluster, ["RPUSH", "foo", "1"])
+      Redix.Cluster.command!(cluster, ["RPUSH", "bar", "2"])
+
+      commands = [
+        ["BLMPOP", "0.1", "1", "foo", "LEFT"],
+        ["BLMPOP", "0.1", "1", "bar", "LEFT"]
+      ]
+
+      assert {:ok, [["foo", ["1"]], ["bar", ["2"]]]} = Redix.Cluster.pipeline(cluster, commands)
+    end
+
+    test "pipeline/3 mixes known and unknown commands", %{cluster: cluster} do
+      commands = [
+        ["RPUSH", "{tag}.k", "v"],
+        ["BLMPOP", "0.1", "1", "{tag}.k", "LEFT"],
+        ["EXISTS", "{tag}.k"]
+      ]
+
+      assert {:ok, [1, ["{tag}.k", ["v"]], 0]} = Redix.Cluster.pipeline(cluster, commands)
+    end
+
+    test "transaction_pipeline/3 of only unknown commands resolves the slot", %{cluster: cluster} do
+      # Without resolving the key, these would all be :no_slot and the transaction would
+      # fail with "requires at least one command with a key".
+      commands = [
+        ["BLMPOP", "0.01", "1", "{bt}.a", "LEFT"],
+        ["BLMPOP", "0.01", "1", "{bt}.b", "LEFT"]
+      ]
+
+      assert {:ok, [nil, nil]} = Redix.Cluster.transaction_pipeline(cluster, commands)
+    end
+
+    test "transaction_pipeline/3 of unknown commands across slots fails with CROSSSLOT",
+         %{cluster: cluster} do
+      commands = [
+        ["BLMPOP", "0.01", "1", "key_in_slot_a", "LEFT"],
+        ["BLMPOP", "0.01", "1", "key_in_slot_b", "LEFT"]
+      ]
+
+      assert {:error, %Redix.Error{message: "CROSSSLOT" <> _}} =
+               Redix.Cluster.transaction_pipeline(cluster, commands)
+    end
+
+    test "the command's key specification is cached after the first call", %{cluster: cluster} do
+      cache = :"#{cluster}_command_cache"
+
+      # Movable-key command: cached as :movable (still needs COMMAND GETKEYS per call).
+      Redix.Cluster.command!(cluster, ["RPUSH", "cachelist", "v"])
+      Redix.Cluster.command(cluster, ["BLMPOP", "0.1", "1", "cachelist", "LEFT"])
+      assert :ets.lookup(cache, "BLMPOP") == [{"BLMPOP", :movable}]
+
+      # Static first-key-position command: cached as a position and resolved locally
+      # (no further network round-trip). PFDEBUG's first key is at position 2.
+      Redix.Cluster.command(cluster, ["PFDEBUG", "GETREG", "somekey"])
+      assert :ets.lookup(cache, "PFDEBUG") == [{"PFDEBUG", {:first_key, 2}}]
+    end
+
+    test "a genuinely unknown command falls back to random routing", %{cluster: cluster} do
+      # COMMAND INFO returns nil for an unrecognized command, so we fall back to :no_slot
+      # (random node) and surface Redis's own error rather than crashing.
+      assert {:error, %Redix.Error{message: message}} =
+               Redix.Cluster.command(cluster, ["NOTACOMMAND", "arg"])
+
+      assert message =~ "unknown command"
+    end
+  end
+
   describe "hash tags" do
     test "keys with same hash tag go to same slot", %{cluster: cluster} do
       Redix.Cluster.command!(cluster, ["SET", "{user:1000}.name", "Alice"])

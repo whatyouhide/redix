@@ -211,6 +211,7 @@ defmodule Redix.Cluster do
        refresh_interval: refresh_interval,
        read_from_replicas: read_from_replicas,
        table_name: slot_table_name(name),
+       command_cache_table: command_cache_name(name),
        registry: registry_name(name)}
     ]
 
@@ -395,7 +396,10 @@ defmodule Redix.Cluster do
     # All commands in a transaction must target the same slot
     slots =
       commands
-      |> Enum.map(&command_slot/1)
+      |> Enum.with_index()
+      |> Enum.map(fn {cmd, idx} -> {idx, cmd, command_slot(cmd)} end)
+      |> resolve_unknown_slots(registry, command_cache_name(cluster))
+      |> Enum.map(fn {_idx, _cmd, slot} -> slot end)
       |> Enum.reject(&(&1 == :no_slot))
       |> Enum.uniq()
 
@@ -451,6 +455,7 @@ defmodule Redix.Cluster do
         slot = command_slot(cmd)
         {idx, cmd, slot}
       end)
+      |> resolve_unknown_slots(registry, command_cache_name(cluster))
 
     # Group by slot -> node. Returns a list of {conn, [{idx, cmd}]} tuples.
     groups = group_by_node(slot_table, registry, indexed_commands, route)
@@ -760,12 +765,149 @@ defmodule Redix.Cluster do
     case CommandParser.key_from_command(command) do
       {:ok, key} -> Hash.hash_slot(key)
       :no_key -> :no_slot
-      :unknown -> :no_slot
+      :unknown -> :unknown
     end
   end
 
+  # Commands outside CommandParser's static table come back as :unknown. Rather than
+  # blindly routing them to a random node, we ask the server how it routes them and
+  # cache the answer. Each :unknown entry is replaced with an integer slot (when a key
+  # is found) or :no_slot (no key, or the lookup itself failed — a genuinely unknown
+  # command, or no reachable node). On :no_slot the command keeps the prior behavior of
+  # being sent to a random node.
+  defp resolve_unknown_slots(indexed_commands, registry, command_cache) do
+    unknowns = for {idx, cmd, :unknown} <- indexed_commands, do: {idx, cmd}
+
+    if unknowns == [] do
+      indexed_commands
+    else
+      slots_by_index = resolve_unknowns(unknowns, registry, command_cache)
+
+      Enum.map(indexed_commands, fn
+        {idx, cmd, :unknown} -> {idx, cmd, Map.fetch!(slots_by_index, idx)}
+        {_idx, _cmd, _slot} = resolved -> resolved
+      end)
+    end
+  end
+
+  # Resolves a list of `{idx, command}` unknowns to a `%{idx => slot | :no_slot}` map.
+  #
+  # The key specification of a command (first-key position, or "movable" keys) is stable,
+  # so we learn it once via COMMAND INFO and cache it per command name. Subsequent calls
+  # to the same command resolve locally with no network round-trip. Commands Redis reports
+  # as having *movable* keys (e.g. MIGRATE, BLMPOP) can't be pinned to a fixed position, so
+  # those fall back to a per-call COMMAND GETKEYS — but they're rare and still cached as
+  # "movable" so we don't re-issue COMMAND INFO for them.
+  defp resolve_unknowns(unknowns, registry, command_cache) do
+    case Manager.get_random_connection(registry) do
+      {:ok, conn} ->
+        cache_missing_keyspecs(conn, command_cache, unknowns)
+        slots_from_keyspecs(conn, command_cache, unknowns)
+
+      :error ->
+        Map.new(unknowns, fn {idx, _cmd} -> {idx, :no_slot} end)
+    end
+  end
+
+  # Fetches and caches the key specification for any command name not already cached.
+  defp cache_missing_keyspecs(conn, command_cache, unknowns) do
+    missing =
+      unknowns
+      |> Enum.map(fn {_idx, cmd} -> command_name(cmd) end)
+      |> Enum.uniq()
+      |> Enum.reject(&(:ets.lookup(command_cache, &1) != []))
+
+    if missing != [] do
+      case Redix.command(conn, ["COMMAND", "INFO" | missing]) do
+        {:ok, infos} when length(infos) == length(missing) ->
+          missing
+          |> Enum.zip(infos)
+          |> Enum.each(fn {name, info} ->
+            :ets.insert(command_cache, {name, keyspec_from_info(info)})
+          end)
+
+        # On a malformed reply or connection error we simply don't cache; the commands
+        # resolve to :no_slot for this call and we retry COMMAND INFO next time.
+        _other ->
+          :ok
+      end
+    end
+  end
+
+  # COMMAND INFO reply per command: [name, arity, flags, first_key, last_key, step | _].
+  # We route on the first key, so we only need first_key (1-based, command name at 0) and
+  # whether the keys are movable. `nil` means the server doesn't know the command.
+  defp keyspec_from_info([_name, _arity, flags, first_key, _last_key, _step | _]) do
+    cond do
+      "movablekeys" in flags -> :movable
+      first_key >= 1 -> {:first_key, first_key}
+      true -> :no_key
+    end
+  end
+
+  defp keyspec_from_info(_other), do: :no_key
+
+  defp slots_from_keyspecs(conn, command_cache, unknowns) do
+    # Static-position and keyless commands resolve locally; movable ones need a per-call
+    # COMMAND GETKEYS, which we batch into a single pipeline.
+    {movable, local} =
+      Enum.split_with(unknowns, fn {_idx, cmd} ->
+        cached_keyspec(command_cache, cmd) == :movable
+      end)
+
+    local_slots =
+      Map.new(local, fn {idx, cmd} ->
+        {idx, slot_from_keyspec(cached_keyspec(command_cache, cmd), cmd)}
+      end)
+
+    Map.merge(local_slots, getkeys_slots(conn, movable))
+  end
+
+  defp cached_keyspec(command_cache, cmd) do
+    case :ets.lookup(command_cache, command_name(cmd)) do
+      [{_name, keyspec}] -> keyspec
+      [] -> :no_key
+    end
+  end
+
+  defp slot_from_keyspec({:first_key, position}, cmd) do
+    # first_key counts the command name as position 0, so it indexes straight into cmd.
+    case Enum.at(cmd, position) do
+      nil -> :no_slot
+      key -> Hash.hash_slot(to_string(key))
+    end
+  end
+
+  defp slot_from_keyspec(_no_key_or_unknown, _cmd), do: :no_slot
+
+  # Per-call COMMAND GETKEYS for movable-key commands, batched into one pipeline.
+  defp getkeys_slots(_conn, []), do: %{}
+
+  defp getkeys_slots(conn, movable) do
+    getkeys = Enum.map(movable, fn {_idx, cmd} -> ["COMMAND", "GETKEYS" | cmd] end)
+
+    case Redix.pipeline(conn, getkeys) do
+      {:ok, results} ->
+        movable
+        |> Enum.zip(results)
+        |> Map.new(fn {{idx, _cmd}, result} -> {idx, slot_from_getkeys(result)} end)
+
+      {:error, _reason} ->
+        Map.new(movable, fn {idx, _cmd} -> {idx, :no_slot} end)
+    end
+  end
+
+  # COMMAND GETKEYS returns the list of keys for a command. We route on the first one. A
+  # command with no keys comes back as a Redix.Error, which falls through to :no_slot.
+  defp slot_from_getkeys([key | _]) when is_binary(key), do: Hash.hash_slot(key)
+  defp slot_from_getkeys(_other), do: :no_slot
+
+  defp command_name([name | _]), do: name |> to_string() |> String.upcase()
+  defp command_name([]), do: ""
+
   # Deterministic resource names derived from the cluster name.
   defp slot_table_name(cluster), do: :"#{cluster}_slots"
+  defp command_cache_name(cluster), do: :"#{cluster}_command_cache"
   defp registry_name(cluster), do: :"#{cluster}_registry"
   defp manager_name(cluster), do: :"#{cluster}_manager"
   defp pool_name(cluster), do: :"#{cluster}_pool"

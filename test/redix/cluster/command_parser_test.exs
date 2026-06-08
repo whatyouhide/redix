@@ -108,8 +108,47 @@ defmodule Redix.Cluster.CommandParserTest do
       assert key_from_command([]) == :no_key
     end
 
+    test "bit commands" do
+      assert key_from_command(["SETBIT", "mykey", "7", "1"]) == {:ok, "mykey"}
+      assert key_from_command(["GETBIT", "mykey", "7"]) == {:ok, "mykey"}
+    end
+
+    test "BITOP extracts the destination key (position 2)" do
+      assert key_from_command(["BITOP", "AND", "dest", "src1", "src2"]) == {:ok, "dest"}
+      assert key_from_command(["BITOP", "NOT", "dest", "src"]) == {:ok, "dest"}
+    end
+
+    test "BITOP without a destination key returns :no_key" do
+      assert key_from_command(["BITOP", "AND"]) == :no_key
+      assert key_from_command(["BITOP"]) == :no_key
+    end
+
+    test "blocking list/zset commands" do
+      assert key_from_command(["BLPOP", "mylist", "0"]) == {:ok, "mylist"}
+      assert key_from_command(["BRPOP", "mylist", "0"]) == {:ok, "mylist"}
+      assert key_from_command(["BLMOVE", "src", "dst", "LEFT", "RIGHT", "0"]) == {:ok, "src"}
+      assert key_from_command(["BRPOPLPUSH", "src", "dst", "0"]) == {:ok, "src"}
+      assert key_from_command(["BZPOPMAX", "myzset", "0"]) == {:ok, "myzset"}
+      assert key_from_command(["BZPOPMIN", "myzset", "0"]) == {:ok, "myzset"}
+    end
+
+    test "hash field expiration commands" do
+      assert key_from_command(["HEXPIRE", "h", "100", "FIELDS", "1", "f"]) == {:ok, "h"}
+      assert key_from_command(["HTTL", "h", "FIELDS", "1", "f"]) == {:ok, "h"}
+      assert key_from_command(["HPERSIST", "h", "FIELDS", "1", "f"]) == {:ok, "h"}
+      assert key_from_command(["HPEXPIRETIME", "h", "FIELDS", "1", "f"]) == {:ok, "h"}
+    end
+
+    test "XSETID" do
+      assert key_from_command(["XSETID", "mystream", "1-1"]) == {:ok, "mystream"}
+    end
+
     test "unknown commands return :unknown" do
       assert key_from_command(["SOMEFUTURECOMMAND", "arg"]) == :unknown
+      # Movable-key commands are not in the static table (their first-key position can
+      # vary), so the cluster resolves them via COMMAND GETKEYS at runtime.
+      assert key_from_command(["BLMPOP", "0", "1", "mylist", "LEFT"]) == :unknown
+      assert key_from_command(["MIGRATE", "host", "6379", "key", "0", "1000"]) == :unknown
     end
 
     test "String.Chars arguments are converted" do
