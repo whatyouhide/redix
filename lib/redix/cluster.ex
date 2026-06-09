@@ -321,6 +321,21 @@ defmodule Redix.Cluster do
   If `commands` is an empty list (`[]`) then an `ArgumentError` exception is
   raised right away, matching `Redix.pipeline/3`.
 
+  ## Partial failures across nodes
+
+  When a pipeline spans multiple nodes and only *some* of those nodes fail (for example, it times out or its task crashes), the call still returns `{:ok, results}`.
+  The positions of the commands routed to a failed node are filled with the relevant
+  error *value* (a `%Redix.ConnectionError{}`, or a `%Redix.Error{}` for a Redis-level
+  error) at their original indices, while the results from nodes that succeeded stay
+  visible. This extends Redix's "errors are values" philosophy to the cross-node connection-error case, so a failure
+  affecting one node no longer discards the work that committed on the others.
+
+  This is a deliberate extension of `Redix.pipeline/3`, which fails the whole call
+  with `{:error, reason}` on a connection error. There is no partial-failure analog
+  for a single node, so a pipeline that targets a single node (all keys in one slot
+  group) still returns `{:error, reason}` on a connection error, matching
+  `Redix.pipeline/3`.
+
   ## Options
 
     * `:timeout` - request timeout in milliseconds. Defaults to `5_000`.
@@ -528,48 +543,66 @@ defmodule Redix.Cluster do
   defp execute_groups(cluster, groups, opts) do
     task_supervisor = task_supervisor_name(cluster)
 
-    tasks =
+    groups_with_tasks =
       Enum.map(groups, fn {conn, cmds} ->
-        if conn == nil do
-          Task.completed({:error, %Redix.ConnectionError{reason: :closed}})
-        else
-          Task.Supervisor.async(task_supervisor, fn ->
-            execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
-          end)
-        end
+        task =
+          if conn == nil do
+            Task.completed({:error, %Redix.ConnectionError{reason: :closed}})
+          else
+            Task.Supervisor.async(task_supervisor, fn ->
+              execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
+            end)
+          end
+
+        {cmds, task}
       end)
+
+    {group_cmds, tasks} = Enum.unzip(groups_with_tasks)
 
     tasks
     |> Task.yield_many(timeout: Keyword.get(opts, :timeout, 5_000), on_timeout: :kill_task)
+    |> Enum.zip(group_cmds)
     |> __collect_group_results__()
   end
 
-  # Collapses the `Task.yield_many/2` output into either the first `{:error, _}` (if any
-  # group failed) or the list of per-group result lists. Normalizes the three shapes
-  # `yield_many` can report for each task:
+  # Collapses the `Task.yield_many/2` output into a list of per-group result lists
+  # (issue #316). A failing group does *not* discard the whole pipeline: its commands'
+  # positions are filled with the relevant error *value* (a `%Redix.ConnectionError{}`
+  # or `%Redix.Error{}`) at their original indices. Successful groups'
+  # results stay visible. Each entry pairs a `Task.yield_many/2` result with the group's
+  # `[{idx, cmd}]` list (so failures can be mapped back to the right indices) and is one
+  # of the shapes `yield_many` reports per task:
   #
-  #   * `{task, {:ok, result}}` — the group finished; `result` is its result list or an
-  #     `{:error, _}` tuple returned by `execute_and_handle_redirections/5`.
+  #   * `{task, {:ok, result}}` — the group finished; `result` is its `[{idx, value}]`
+  #     list or an `{:error, _}` tuple returned by `execute_and_handle_redirections/5`.
   #   * `{task, {:exit, reason}}` — the group's task crashed.
   #   * `{task, nil}` — the group timed out and was killed (`on_timeout: :kill_task`).
   #
   # Public (with a name-mangled name) only so it can be unit-tested without a live
-  # cluster; see issue #304.
+  # cluster; see issues #304 and #316.
   @doc false
-  def __collect_group_results__(tasks_with_results) do
-    tasks_with_results
-    |> Enum.reduce_while([], fn entry, acc ->
+  def __collect_group_results__(results_with_cmds) do
+    Enum.map(results_with_cmds, fn {entry, cmds} ->
       case entry do
-        {_task, {:ok, {:error, _} = error}} -> {:halt, error}
-        {_task, {:ok, result}} -> {:cont, [result | acc]}
-        {_task, {:exit, reason}} -> {:halt, {:error, %Redix.ConnectionError{reason: reason}}}
-        {_task, nil} -> {:halt, {:error, %Redix.ConnectionError{reason: :timeout}}}
+        {_task, {:ok, {:error, error}}} ->
+          fill_group_with_error(cmds, error)
+
+        {_task, {:ok, results}} ->
+          results
+
+        {_task, {:exit, reason}} ->
+          fill_group_with_error(cmds, %Redix.ConnectionError{reason: reason})
+
+        {_task, nil} ->
+          fill_group_with_error(cmds, %Redix.ConnectionError{reason: :timeout})
       end
     end)
-    |> case do
-      {:error, _} = error -> error
-      results -> Enum.reverse(results)
-    end
+  end
+
+  # Turns a failed group into `[{idx, error}]`, so the error surfaces as a per-command
+  # value at each of the group's original indices instead of failing the whole pipeline.
+  defp fill_group_with_error(cmds, error) do
+    Enum.map(cmds, fn {idx, _cmd} -> {idx, error} end)
   end
 
   defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do

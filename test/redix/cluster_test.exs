@@ -164,6 +164,53 @@ defmodule Redix.ClusterTest do
         Redix.Cluster.pipeline(cluster, [])
       end
     end
+
+    # Issue #316: a partial failure (one node unresponsive) must not discard the
+    # results of the nodes that succeeded. The failed node's positions are filled
+    # with an error value at their original indices.
+    test "partial node failure fills only the failed node's positions, keeps the rest",
+         %{cluster: cluster} do
+      slot_table = :"#{cluster}_slots"
+      registry = :"#{cluster}_registry"
+
+      # Enough distinct keys to be confident they span at least two nodes.
+      keys = for i <- 1..16, do: "k#{i}"
+      for k <- keys, do: Redix.Cluster.command!(cluster, ["SET", k, "v-#{k}"])
+
+      conn_for = fn key ->
+        slot = Redix.Cluster.Hash.hash_slot(key)
+        {:ok, conn} = Redix.Cluster.Manager.get_connection(slot_table, registry, slot)
+        conn
+      end
+
+      key_conns = Map.new(keys, fn k -> {k, conn_for.(k)} end)
+
+      assert key_conns |> Map.values() |> Enum.uniq() |> length() >= 2,
+             "test needs keys spanning at least two nodes"
+
+      # Knock out one node by suspending its connection so its group times out while
+      # the other nodes still respond.
+      victim = key_conns |> Map.values() |> Enum.min()
+      victim_keys = for {k, c} <- key_conns, c == victim, into: MapSet.new(), do: k
+
+      commands = for k <- keys, do: ["GET", k]
+
+      :sys.suspend(victim)
+
+      try do
+        assert {:ok, results} = Redix.Cluster.pipeline(cluster, commands, timeout: 200)
+
+        for {k, result} <- Enum.zip(keys, results) do
+          if MapSet.member?(victim_keys, k) do
+            assert %Redix.ConnectionError{reason: :timeout} = result
+          else
+            assert result == "v-#{k}"
+          end
+        end
+      after
+        :sys.resume(victim)
+      end
+    end
   end
 
   describe "pipeline!/3" do
@@ -410,21 +457,24 @@ defmodule Redix.ClusterTest do
     end
   end
 
-  # Regression tests for issue #304: a multi-node pipeline where one node doesn't
-  # respond within the timeout used to crash with a FunctionClauseError instead of
-  # returning an error tuple. These exercise the collection logic directly, feeding it
-  # the exact shapes `Task.yield_many/2` produces.
-  describe "__collect_group_results__/1 (issue #304)" do
-    test "returns a timeout error when a node task is killed on timeout" do
+  # Regression tests for issue #304 (a multi-node pipeline where one node doesn't
+  # respond within the timeout used to crash with a FunctionClauseError) and issue #316
+  # (a single failing group used to discard the results of the groups that succeeded).
+  # These exercise the collection logic directly, feeding it the exact shapes
+  # `Task.yield_many/2` produces, zipped with each group's `[{idx, cmd}]` list (as
+  # `execute_groups/3` does).
+  describe "__collect_group_results__/1 (issues #304 and #316)" do
+    test "fills a timed-out group's positions with a timeout error, keeping successes" do
       tasks = [
         Task.async(fn -> [{0, "OK"}] end),
         Task.async(fn -> Process.sleep(:infinity) end)
       ]
 
-      tasks_with_results = Task.yield_many(tasks, timeout: 100, on_timeout: :kill_task)
+      results = Task.yield_many(tasks, timeout: 100, on_timeout: :kill_task)
+      group_cmds = [[{0, ["GET", "a"]}], [{1, ["GET", "b"]}]]
 
-      assert Redix.Cluster.__collect_group_results__(tasks_with_results) ==
-               {:error, %Redix.ConnectionError{reason: :timeout}}
+      assert Redix.Cluster.__collect_group_results__(Enum.zip(results, group_cmds)) ==
+               [[{0, "OK"}], [{1, %Redix.ConnectionError{reason: :timeout}}]]
     end
 
     test "returns the list of per-node result lists when every node responds" do
@@ -433,35 +483,40 @@ defmodule Redix.ClusterTest do
         Task.async(fn -> [{1, "b"}] end)
       ]
 
-      tasks_with_results = Task.yield_many(tasks, timeout: 1000, on_timeout: :kill_task)
+      results = Task.yield_many(tasks, timeout: 1000, on_timeout: :kill_task)
+      group_cmds = [[{0, ["GET", "a"]}], [{1, ["GET", "b"]}]]
 
-      assert Redix.Cluster.__collect_group_results__(tasks_with_results) ==
+      assert Redix.Cluster.__collect_group_results__(Enum.zip(results, group_cmds)) ==
                [[{0, "a"}], [{1, "b"}]]
     end
 
-    test "surfaces a per-node error returned inside {:ok, {:error, _}}" do
-      error = {:error, %Redix.ConnectionError{reason: :closed}}
+    test "fills a failing group's positions with the inline error value, keeping successes" do
+      error = %Redix.ConnectionError{reason: :closed}
 
       tasks = [
         Task.async(fn -> [{0, "a"}] end),
-        Task.async(fn -> error end)
+        Task.async(fn -> {:error, error} end)
       ]
 
-      tasks_with_results = Task.yield_many(tasks, timeout: 1000, on_timeout: :kill_task)
+      results = Task.yield_many(tasks, timeout: 1000, on_timeout: :kill_task)
+      group_cmds = [[{0, ["GET", "a"]}], [{1, ["GET", "b"]}, {2, ["GET", "c"]}]]
 
-      assert Redix.Cluster.__collect_group_results__(tasks_with_results) == error
+      assert Redix.Cluster.__collect_group_results__(Enum.zip(results, group_cmds)) ==
+               [[{0, "a"}], [{1, error}, {2, error}]]
     end
 
-    test "maps a crashed task's exit reason to a connection error" do
-      tasks_with_results = [
+    test "maps a crashed task's exit reason to a connection error value at its indices" do
+      results = [
         {%Task{ref: make_ref(), owner: self(), pid: self(), mfa: {:erlang, :apply, 2}},
          {:ok, [{0, "a"}]}},
         {%Task{ref: make_ref(), owner: self(), pid: self(), mfa: {:erlang, :apply, 2}},
          {:exit, :boom}}
       ]
 
-      assert Redix.Cluster.__collect_group_results__(tasks_with_results) ==
-               {:error, %Redix.ConnectionError{reason: :boom}}
+      group_cmds = [[{0, ["GET", "a"]}], [{1, ["GET", "b"]}]]
+
+      assert Redix.Cluster.__collect_group_results__(Enum.zip(results, group_cmds)) ==
+               [[{0, "a"}], [{1, %Redix.ConnectionError{reason: :boom}}]]
     end
   end
 
