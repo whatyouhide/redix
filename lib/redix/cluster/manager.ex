@@ -332,9 +332,7 @@ defmodule Redix.Cluster.Manager do
         data = ensure_connections(data, slots_data)
 
         node_addresses =
-          slots_data
-          |> Enum.map(fn [_start, _end, [host, port | _] | _] -> "#{host}:#{port}" end)
-          |> Enum.uniq()
+          for {node_id, _host, _port, _role} <- nodes_to_connect(data, slots_data), do: node_id
 
         :telemetry.execute([:redix, :cluster, :topology_change], %{}, %{
           cluster: data.cluster_name,

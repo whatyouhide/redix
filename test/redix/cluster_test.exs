@@ -626,6 +626,29 @@ defmodule Redix.ClusterTest do
                ) == {:ok, ["1", "2"]}
              end)
     end
+
+    test "topology_change includes replica addresses", %{replica_cluster: cluster} do
+      {test_name, _arity} = __ENV__.function
+      parent = self()
+      ref = make_ref()
+
+      handler = fn _event, _measurements, meta, _config ->
+        if meta.cluster == cluster, do: send(parent, {ref, meta})
+      end
+
+      :telemetry.attach("#{test_name}", [:redix, :cluster, :topology_change], handler, :no_config)
+
+      Redix.Cluster.Manager.refresh_topology(:"#{cluster}_manager")
+
+      assert_receive {^ref, meta}, 5_000
+
+      # The Docker cluster has 3 primaries + 3 replicas, so with replica reads
+      # enabled every node (not just the primaries) shows up in the event.
+      assert length(meta.nodes) == 6
+      assert Enum.all?(meta.nodes, &String.contains?(&1, ":"))
+
+      :telemetry.detach("#{test_name}")
+    end
   end
 
   describe "telemetry" do
