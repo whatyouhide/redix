@@ -16,34 +16,43 @@ defmodule Redix.Cluster.CommandParser do
     HRANDFIELD HSCAN HSET HSETNX HSTRLEN HVALS
     INCR INCRBY INCRBYFLOAT
     BLMOVE BLPOP BRPOP BRPOPLPUSH
-    LINDEX LINSERT LLEN LMOVE LMPOP LPOP LPOS LPUSH LPUSHX LRANGE LREM LSET LTRIM
+    LINDEX LINSERT LLEN LMOVE LPOP LPOS LPUSH LPUSHX LRANGE LREM LSET LTRIM
     MGET MSET MSETNX MOVE
     PERSIST PEXPIRE PEXPIREAT PEXPIRETIME PSETEX PTTL PUBLISH
     RPOP RPOPLPUSH RPUSH RPUSHX
-    SADD SCARD SDIFF SDIFFSTORE SET SETBIT SETEX SETNX SETRANGE SINTER SINTERCARD
+    SADD SCARD SDIFF SDIFFSTORE SET SETBIT SETEX SETNX SETRANGE SINTER
     SINTERSTORE SISMEMBER SMEMBERS SMISMEMBER SMOVE SORT SORT_RO SPOP SRANDMEMBER
     SREM SSCAN STRLEN SUBSTR SUNION SUNIONSTORE
     TOUCH TTL TYPE UNLINK
     WATCH
-    XACK XADD XAUTOCLAIM XCLAIM XDEL XGROUP XINFO XLEN XPENDING XRANGE
+    XACK XADD XAUTOCLAIM XCLAIM XDEL XLEN XPENDING XRANGE
     XREVRANGE XSETID XTRIM
     BZPOPMAX BZPOPMIN
-    ZADD ZCARD ZCOUNT ZDIFF ZDIFFSTORE ZINCRBY ZINTER ZINTERCARD ZINTERSTORE
-    ZLEXCOUNT ZMPOP ZMSCORE ZPOPMAX ZPOPMIN ZRANDMEMBER ZRANGE ZRANGEBYLEX
+    ZADD ZCARD ZCOUNT ZDIFFSTORE ZINCRBY ZINTERSTORE
+    ZLEXCOUNT ZMSCORE ZPOPMAX ZPOPMIN ZRANDMEMBER ZRANGE ZRANGEBYLEX
     ZRANGEBYSCORE ZRANGESTORE ZRANK ZREM ZREMRANGEBYLEX ZREMRANGEBYSCORE
     ZREMRANGEBYRANK ZREVRANGE ZREVRANGEBYLEX ZREVRANGEBYSCORE ZREVRANK ZSCAN
-    ZSCORE ZUNION ZUNIONSTORE
+    ZSCORE ZUNIONSTORE
     PFADD PFCOUNT PFMERGE
     RENAME RENAMENX
     RESTORE
     LCS
   ))
 
+  # Commands whose first key is at position 2 because position 1 is a `numkeys` count.
+  # Syntax: `CMD numkeys key [key ...] [...]`. The blocking variants (BLMPOP/BZMPOP) and
+  # the STORE variants (ZUNIONSTORE/ZINTERSTORE/ZDIFFSTORE) are deliberately NOT here:
+  # the former have a movable key (resolved via COMMAND GETKEYS), the latter have their
+  # destination key at position 1.
+  @numkeys_pos_2 MapSet.new(~w(
+    LMPOP ZMPOP SINTERCARD ZINTERCARD ZDIFF ZINTER ZUNION
+  ))
+
   # Commands that take no keys (keyless commands).
   @keyless MapSet.new(~w(
     AUTH BGSAVE BGREWRITEAOF CLIENT CLUSTER COMMAND CONFIG
-    DBSIZE DEBUG DISCARD ECHO EXEC FLUSHALL FLUSHDB
-    INFO LASTSAVE LATENCY MEMORY MONITOR MULTI
+    DBSIZE DISCARD ECHO EXEC FLUSHALL FLUSHDB
+    INFO LASTSAVE LATENCY MONITOR MULTI
     PING PSUBSCRIBE PUNSUBSCRIBE QUIT RANDOMKEY READONLY READWRITE
     REPLICAOF RESET ROLE SAVE SCAN SELECT SHUTDOWN SLAVEOF
     SLOWLOG SUBSCRIBE SWAPDB TIME UNSUBSCRIBE UNWATCH WAIT WAITAOF
@@ -79,10 +88,36 @@ defmodule Redix.Cluster.CommandParser do
       upcased == "XREADGROUP" ->
         key_from_xreadgroup(args)
 
-      upcased == "OBJECT" ->
+      # OBJECT <subcommand> key, XINFO <subcommand> key, XGROUP <subcommand> key — the
+      # key sits at position 2, after a subcommand. Keyless subcommands (OBJECT HELP,
+      # XINFO HELP, XGROUP HELP) have no following argument, so the two-element pattern
+      # naturally falls through to :no_key.
+      upcased in ["OBJECT", "XINFO", "XGROUP"] ->
         case args do
           [_subcommand, key | _] -> {:ok, key}
           _ -> :no_key
+        end
+
+      # MEMORY USAGE key — the only MEMORY subcommand that takes a key. Everything else
+      # (DOCTOR, STATS, MALLOC-STATS, PURGE, HELP) is keyless.
+      upcased == "MEMORY" ->
+        case args do
+          [subcommand, key | _] ->
+            if String.upcase(subcommand) == "USAGE", do: {:ok, key}, else: :no_key
+
+          _ ->
+            :no_key
+        end
+
+      # DEBUG OBJECT key — the only DEBUG subcommand that takes a key. Everything else
+      # (SLEEP, JMAP, SET-ACTIVE-EXPIRE, ...) is keyless.
+      upcased == "DEBUG" ->
+        case args do
+          [subcommand, key | _] ->
+            if String.upcase(subcommand) == "OBJECT", do: {:ok, key}, else: :no_key
+
+          _ ->
+            :no_key
         end
 
       # BITOP operation destkey srckey [srckey ...] — the first key is the destination,
@@ -90,6 +125,13 @@ defmodule Redix.Cluster.CommandParser do
       upcased == "BITOP" ->
         case args do
           [_operation, destkey | _] -> {:ok, destkey}
+          _ -> :no_key
+        end
+
+      # numkeys-first commands: CMD numkeys key [key ...]. First key is at position 2.
+      upcased in @numkeys_pos_2 ->
+        case args do
+          [_numkeys, key | _] -> {:ok, key}
           _ -> :no_key
         end
 

@@ -183,6 +183,91 @@ defmodule Redix.Cluster.CommandParserTest do
       assert key_from_command(["OBJECT"]) == :no_key
     end
 
+    test "numkeys-first commands extract the key at position 2" do
+      assert key_from_command(["LMPOP", "2", "k1", "k2", "LEFT"]) == {:ok, "k1"}
+      assert key_from_command(["ZMPOP", "2", "k1", "k2", "MIN"]) == {:ok, "k1"}
+      assert key_from_command(["SINTERCARD", "2", "k1", "k2"]) == {:ok, "k1"}
+      assert key_from_command(["ZINTERCARD", "2", "k1", "k2"]) == {:ok, "k1"}
+      assert key_from_command(["ZDIFF", "2", "k1", "k2"]) == {:ok, "k1"}
+      assert key_from_command(["ZINTER", "2", "k1", "k2"]) == {:ok, "k1"}
+      assert key_from_command(["ZUNION", "2", "k1", "k2"]) == {:ok, "k1"}
+    end
+
+    test "numkeys-first commands are case-insensitive" do
+      assert key_from_command(["lmpop", "1", "k1", "LEFT"]) == {:ok, "k1"}
+      assert key_from_command(["ZuNiOn", "1", "k1"]) == {:ok, "k1"}
+    end
+
+    test "numkeys-first commands without a key return :no_key" do
+      assert key_from_command(["LMPOP", "0"]) == :no_key
+      assert key_from_command(["ZMPOP"]) == :no_key
+      assert key_from_command(["SINTERCARD"]) == :no_key
+    end
+
+    test "STORE variants keep their destination key at position 1" do
+      assert key_from_command(["ZUNIONSTORE", "dest", "2", "k1", "k2"]) == {:ok, "dest"}
+      assert key_from_command(["ZINTERSTORE", "dest", "2", "k1", "k2"]) == {:ok, "dest"}
+      assert key_from_command(["ZDIFFSTORE", "dest", "2", "k1", "k2"]) == {:ok, "dest"}
+    end
+
+    test "blocking numkeys-first variants fall through to :unknown" do
+      assert key_from_command(["BLMPOP", "0", "1", "mylist", "LEFT"]) == :unknown
+      assert key_from_command(["BZMPOP", "0", "1", "myzset", "MIN"]) == :unknown
+    end
+
+    test "XINFO extracts the key after the subcommand" do
+      assert key_from_command(["XINFO", "STREAM", "mystream"]) == {:ok, "mystream"}
+      assert key_from_command(["XINFO", "GROUPS", "mystream"]) == {:ok, "mystream"}
+      assert key_from_command(["XINFO", "CONSUMERS", "mystream", "mygroup"]) == {:ok, "mystream"}
+    end
+
+    test "XINFO HELP returns :no_key" do
+      assert key_from_command(["XINFO", "HELP"]) == :no_key
+      assert key_from_command(["XINFO"]) == :no_key
+    end
+
+    test "XGROUP extracts the key after the subcommand" do
+      assert key_from_command(["XGROUP", "CREATE", "mystream", "mygroup", "$"]) ==
+               {:ok, "mystream"}
+
+      assert key_from_command(["XGROUP", "DESTROY", "mystream", "mygroup"]) == {:ok, "mystream"}
+
+      assert key_from_command(["XGROUP", "CREATECONSUMER", "mystream", "mygroup", "c"]) ==
+               {:ok, "mystream"}
+    end
+
+    test "XGROUP HELP returns :no_key" do
+      assert key_from_command(["XGROUP", "HELP"]) == :no_key
+      assert key_from_command(["XGROUP"]) == :no_key
+    end
+
+    test "MEMORY USAGE extracts the key at position 2" do
+      assert key_from_command(["MEMORY", "USAGE", "mykey"]) == {:ok, "mykey"}
+      assert key_from_command(["MEMORY", "USAGE", "mykey", "SAMPLES", "5"]) == {:ok, "mykey"}
+      assert key_from_command(["memory", "usage", "mykey"]) == {:ok, "mykey"}
+    end
+
+    test "other MEMORY subcommands are keyless" do
+      assert key_from_command(["MEMORY", "DOCTOR"]) == :no_key
+      assert key_from_command(["MEMORY", "STATS"]) == :no_key
+      assert key_from_command(["MEMORY", "MALLOC-STATS"]) == :no_key
+      assert key_from_command(["MEMORY", "PURGE"]) == :no_key
+      assert key_from_command(["MEMORY", "HELP"]) == :no_key
+      assert key_from_command(["MEMORY"]) == :no_key
+    end
+
+    test "DEBUG OBJECT extracts the key at position 2" do
+      assert key_from_command(["DEBUG", "OBJECT", "mykey"]) == {:ok, "mykey"}
+      assert key_from_command(["debug", "object", "mykey"]) == {:ok, "mykey"}
+    end
+
+    test "other DEBUG subcommands are keyless" do
+      assert key_from_command(["DEBUG", "SLEEP", "0"]) == :no_key
+      assert key_from_command(["DEBUG", "JMAP"]) == :no_key
+      assert key_from_command(["DEBUG", "SET-ACTIVE-EXPIRE", "0"]) == :no_key
+      assert key_from_command(["DEBUG"]) == :no_key
+    end
+
     test "key-at-position-1 command with no arguments returns :no_key" do
       assert key_from_command(["GET"]) == :no_key
       assert key_from_command(["DEL"]) == :no_key
@@ -275,6 +360,30 @@ defmodule Redix.Cluster.CommandParserTest do
 
         assert {:ok, ^first_key} =
                  key_from_command([command_name, script, to_string(numkeys)] ++ keys ++ args)
+      end
+    end
+
+    @numkeys_pos_2_commands ~w(
+      LMPOP ZMPOP SINTERCARD ZINTERCARD ZDIFF ZINTER ZUNION
+    )
+
+    property "numkeys-first commands extract the key at position 2 (never the numkeys count)" do
+      check all command_name <- member_of(@numkeys_pos_2_commands),
+                numkeys <- integer(1..5),
+                keys <-
+                  list_of(string(:alphanumeric, min_length: 1, max_length: 20), length: numkeys),
+                casing <- member_of([:up, :down, :mixed]) do
+        cmd =
+          case casing do
+            :up -> String.upcase(command_name)
+            :down -> String.downcase(command_name)
+            :mixed -> mix_case(command_name)
+          end
+
+        first_key = hd(keys)
+
+        assert {:ok, ^first_key} =
+                 key_from_command([cmd, to_string(numkeys)] ++ keys)
       end
     end
 
