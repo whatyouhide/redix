@@ -318,6 +318,9 @@ defmodule Redix.Cluster do
 
   Returns `{:ok, results}` or `{:error, reason}`.
 
+  If `commands` is an empty list (`[]`) then an `ArgumentError` exception is
+  raised right away, matching `Redix.pipeline/3`.
+
   ## Options
 
     * `:timeout` - request timeout in milliseconds. Defaults to `5_000`.
@@ -439,6 +442,10 @@ defmodule Redix.Cluster do
   end
 
   ## Pipeline implementation
+
+  defp execute_pipeline(_cluster, [] = _commands, _opts) do
+    raise ArgumentError, "no commands passed to the pipeline"
+  end
 
   defp execute_pipeline(cluster, commands, opts) do
     route = validate_route!(opts)

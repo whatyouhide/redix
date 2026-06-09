@@ -157,11 +157,24 @@ defmodule Redix.ClusterTest do
 
       assert {:ok, ["a", "b", "c"]} = Redix.Cluster.pipeline(cluster, commands)
     end
+
+    test "raises on an empty command list, like Redix.pipeline/3 (issue #313)",
+         %{cluster: cluster} do
+      assert_raise ArgumentError, "no commands passed to the pipeline", fn ->
+        Redix.Cluster.pipeline(cluster, [])
+      end
+    end
   end
 
   describe "pipeline!/3" do
     test "returns results directly", %{cluster: cluster} do
       assert ["OK"] = Redix.Cluster.pipeline!(cluster, [["SET", "k", "v"]])
+    end
+
+    test "raises on an empty command list (issue #313)", %{cluster: cluster} do
+      assert_raise ArgumentError, "no commands passed to the pipeline", fn ->
+        Redix.Cluster.pipeline!(cluster, [])
+      end
     end
   end
 
