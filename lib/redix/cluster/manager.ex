@@ -391,7 +391,7 @@ defmodule Redix.Cluster.Manager do
       {:ok, socket, _address} ->
         try do
           case Redix.Connector.sync_command(transport, socket, ["CLUSTER", "SLOTS"], timeout) do
-            {:ok, slots} -> {:ok, slots}
+            {:ok, slots} -> {:ok, normalize_slots(slots, host)}
             {:error, _} -> fetch_cluster_slots(rest, conn_opts)
           end
         after
@@ -403,6 +403,30 @@ defmodule Redix.Cluster.Manager do
 
       {:stop, _} ->
         fetch_cluster_slots(rest, conn_opts)
+    end
+  end
+
+  # Redis 7+ returns a null host in CLUSTER SLOTS entries when the node's
+  # "cluster-preferred-endpoint-type" is "unknown-endpoint" (common in managed or
+  # NAT'd deployments), meaning "use the address you connected to". Substitute the
+  # host that answered the topology query so node IDs and connection attempts stay
+  # well-formed (see issue #328). Empty strings are handled the same way for good
+  # measure.
+  defp normalize_slots(slots_data, answering_host) do
+    for [start_slot, end_slot | node_entries] <- slots_data do
+      node_entries =
+        for [host, port | rest] <- node_entries do
+          normalized_host =
+            case host do
+              nil -> answering_host
+              "" -> answering_host
+              _other -> host
+            end
+
+          [normalized_host, port | rest]
+        end
+
+      [start_slot, end_slot | node_entries]
     end
   end
 

@@ -128,6 +128,13 @@ This eliminates the need for `persistent_term` or any external lookup.
 - **`:name` is required.** All internal resource names derive from it. No `persistent_term`
   or PID-based lookups needed. Callers always use the atom name.
 
+- **Null hosts in `CLUSTER SLOTS` resolve to the answering node.** Redis 7+ with
+  `cluster-preferred-endpoint-type unknown-endpoint` (managed/NAT'd deployments) returns
+  a null host meaning "use the address you connected to". `normalize_slots/2` in the
+  Manager substitutes the host that answered the topology query right after the fetch
+  (issue #328), so `update_slot_map/2` and `nodes_to_connect/2` never see nil/empty
+  hosts. Tested via the fake-RESP-node pattern in `slot_map_refresh_test.exs`.
+
 - **The slot table is rewritten, not just upserted, on each refresh.**
   `Redix.Cluster.Manager.update_slot_map/2` overwrites every *covered* slot in place
   (so a reshard/reassignment is seamless and a concurrent lookup never sees a covered slot

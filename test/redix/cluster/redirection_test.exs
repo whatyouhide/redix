@@ -211,7 +211,7 @@ defmodule Redix.Cluster.RedirectionTest do
   defp parse_bulk_strings(count, "$" <> rest, acc) do
     with {:ok, length, rest} <- parse_int_line(rest) do
       case rest do
-        <<value::binary-size(length), "\r\n", rest::binary>> ->
+        <<value::binary-size(^length), "\r\n", rest::binary>> ->
           parse_bulk_strings(count - 1, rest, [value | acc])
 
         _incomplete ->
