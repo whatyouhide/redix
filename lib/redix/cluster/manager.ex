@@ -4,6 +4,7 @@ defmodule Redix.Cluster.Manager do
   @behaviour :gen_statem
 
   @refresh_cooldown 1_000
+  @backoff_exponent 1.5
 
   defstruct [
     :cluster_name,
@@ -14,6 +15,9 @@ defmodule Redix.Cluster.Manager do
     :conn_opts,
     :seed_nodes,
     :refresh_interval,
+    # Tracks the exponential backoff between initial topology fetch attempts
+    # while in the :disconnected state (async connect).
+    :backoff_current,
     read_from_replicas: false,
     # Maps a monitor ref to `{node_id, role}` so a crashed connection is
     # restarted with the same role (and therefore the same READONLY behavior).
@@ -127,6 +131,27 @@ defmodule Redix.Cluster.Manager do
   end
 
   @doc """
+  Blocks until the topology fetch attempt currently in flight (if any) has completed.
+
+  Mirrors how a single Redix connection *postpones* commands while in its
+  `:connecting` state: callers that find the slot table still unpopulated (no
+  `:topology_discovered` marker yet) call this before resolving connections. The
+  call queues behind the fetch the manager is performing, so the reply arrives
+  once that attempt is done; if it succeeded the caller's lookups now find the
+  topology, and if it failed they fall through to the normal "no connection"
+  error, matching single Redix's fail-fast behavior between reconnection attempts.
+
+  The reply carries no information on purpose; exits (caller timeout, dead
+  manager) degrade to `:ok` so callers always just retry their lookups.
+  """
+  @spec await_topology_discovery(:gen_statem.server_ref(), timeout()) :: :ok
+  def await_topology_discovery(manager, timeout) do
+    :gen_statem.call(manager, :await_topology_discovery, timeout)
+  catch
+    :exit, _reason -> :ok
+  end
+
+  @doc """
   Ensures a connection to `{host, port}` exists, starting one **on demand**
   if needed.
 
@@ -164,6 +189,7 @@ defmodule Redix.Cluster.Manager do
     command_cache_name = Keyword.fetch!(opts, :command_cache_table)
     registry = Keyword.fetch!(opts, :registry)
     read_from_replicas = Keyword.fetch!(opts, :read_from_replicas)
+    sync_connect = Keyword.fetch!(opts, :sync_connect)
 
     slot_table = :ets.new(table_name, [:named_table, :public, :set, {:read_concurrency, true}])
 
@@ -191,14 +217,65 @@ defmodule Redix.Cluster.Manager do
       read_from_replicas: read_from_replicas
     }
 
-    case do_refresh_topology(data) do
-      {:ok, data} ->
-        {:ok, :ready, data, [periodic_refresh_action(refresh_interval)]}
+    if sync_connect do
+      case do_refresh_topology(data) do
+        {:ok, data} ->
+          {:ok, :ready, data, [periodic_refresh_action(refresh_interval)]}
 
-      {:error, reason} ->
-        {:stop, reason}
+        {:error, reason} ->
+          {:stop, reason}
+      end
+    else
+      {:ok, :disconnected, data, [{:next_event, :internal, :connect}]}
     end
   end
+
+  ## State: :disconnected. The initial topology fetch hasn't succeeded yet
+  ## (async connect, the default). Retries with exponential backoff until a seed
+  ## node answers, mirroring how a single Redix connection reconnects. Commands
+  ## issued while a fetch attempt is in flight await its completion (see
+  ## await_topology_discovery/2); between retries they fail fast with a
+  ## connection error since the slot table is empty.
+
+  def disconnected(event_type, :connect, data)
+      when event_type in [:internal, :state_timeout] do
+    case do_refresh_topology(data) do
+      {:ok, data} ->
+        data = %{data | backoff_current: nil}
+        {:next_state, :ready, data, [periodic_refresh_action(data.refresh_interval)]}
+
+      {:error, _reason} ->
+        {backoff, data} = next_backoff(data)
+        {:keep_state, data, [{:state_timeout, backoff, :connect}]}
+    end
+  end
+
+  # The backoff retry already drives fetch attempts; honoring reactive refreshes
+  # here would bypass the backoff.
+  def disconnected(:cast, :refresh_topology, _data) do
+    :keep_state_and_data
+  end
+
+  def disconnected(:info, {:DOWN, ref, :process, _pid, _reason}, data) do
+    {:keep_state, handle_down(data, ref)}
+  end
+
+  # On-demand connects are served even before the first topology fetch succeeds:
+  # MOVED is authoritative, so there's no reason to wait for CLUSTER SLOTS.
+  def disconnected({:call, from}, {:connect_to_node, host, port}, data) do
+    handle_connect_to_node(from, host, port, data)
+  end
+
+  # This call is only ever *processed* between fetch attempts (events are atomic,
+  # so a call arriving mid-attempt queues until the attempt is done — that
+  # queueing is the whole point, see await_topology_discovery/2). Replying right
+  # away makes commands fail fast between backoff retries, matching single
+  # Redix's :disconnected state.
+  def disconnected({:call, from}, :await_topology_discovery, _data) do
+    {:keep_state_and_data, [{:reply, from, :ok}]}
+  end
+
+  def disconnected(:info, _msg, _data), do: :keep_state_and_data
 
   ## State: :ready — reactive refreshes are accepted.
 
@@ -231,6 +308,13 @@ defmodule Redix.Cluster.Manager do
     handle_connect_to_node(from, host, port, data)
   end
 
+  # The topology is already discovered; a caller can only land here by racing a
+  # refresh (it checked the marker just before the table was rewritten, which
+  # never removes the marker). Reply right away.
+  def ready({:call, from}, :await_topology_discovery, _data) do
+    {:keep_state_and_data, [{:reply, from, :ok}]}
+  end
+
   ## State: :cooling_down — reactive refreshes are silently dropped.
 
   def cooling_down(:state_timeout, :cooldown_expired, data) do
@@ -255,12 +339,35 @@ defmodule Redix.Cluster.Manager do
     handle_connect_to_node(from, host, port, data)
   end
 
+  def cooling_down({:call, from}, :await_topology_discovery, _data) do
+    {:keep_state_and_data, [{:reply, from, :ok}]}
+  end
+
   def cooling_down(:info, _msg, _data), do: :keep_state_and_data
 
   ## Private helpers
 
   defp periodic_refresh_action(interval) do
     {{:timeout, :periodic_refresh}, interval, :refresh}
+  end
+
+  # Same exponential backoff as Redix.Connection, driven by the :backoff_initial
+  # and :backoff_max options (which `Redix.StartOptions.sanitize/2` always fills in).
+  defp next_backoff(%__MODULE__{backoff_current: nil} = data) do
+    backoff_initial = Keyword.fetch!(data.conn_opts, :backoff_initial)
+    {backoff_initial, %{data | backoff_current: backoff_initial}}
+  end
+
+  defp next_backoff(%__MODULE__{} = data) do
+    next_exponential_backoff = round(data.backoff_current * @backoff_exponent)
+
+    backoff_current =
+      case Keyword.fetch!(data.conn_opts, :backoff_max) do
+        :infinity -> next_exponential_backoff
+        backoff_max -> min(next_exponential_backoff, backoff_max)
+      end
+
+    {backoff_current, %{data | backoff_current: backoff_current}}
   end
 
   defp handle_connect_to_node(from, host, port, data) do
@@ -330,6 +437,15 @@ defmodule Redix.Cluster.Manager do
       {:ok, slots_data} ->
         update_slot_map(data, slots_data)
         data = ensure_connections(data, slots_data)
+
+        # Marks that at least one topology fetch has succeeded. Callers check this
+        # before resolving connections: while it's absent they await the in-flight
+        # fetch via await_topology_discovery/2 instead of failing right away.
+        # Inserted *after* the slot table and Registry are populated, so a caller
+        # that sees the marker also sees a routable topology. A 2-tuple can't
+        # collide with the {slot, primary, replicas} entries or with
+        # update_slot_map/2's 3-tuple select/delete patterns.
+        :ets.insert(data.slot_table, {:topology_discovered, true})
 
         node_addresses =
           for {node_id, _host, _port, _role} <- nodes_to_connect(data, slots_data), do: node_id

@@ -57,7 +57,7 @@ defmodule Redix.ClusterPropertiesTest do
       {:error, _reason} -> flunk("Redis Cluster not available on localhost:7000")
     end
 
-    start_supervised!({Redix.Cluster, nodes: @nodes, name: @cluster})
+    start_supervised!({Redix.Cluster, nodes: @nodes, name: @cluster, sync_connect: true})
 
     # Persistent per-node connections reused to flush between property runs.
     flushers =

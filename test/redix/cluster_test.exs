@@ -17,7 +17,7 @@ defmodule Redix.ClusterTest do
   setup do
     cluster_name = :"cluster_#{System.unique_integer([:positive])}"
 
-    start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name})
+    start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name, sync_connect: true})
 
     # Flush test keys on each node (skip replicas which return READONLY)
     for port <- 7000..7008 do
@@ -374,7 +374,7 @@ defmodule Redix.ClusterTest do
       name = :"single_seed_#{System.unique_integer([:positive])}"
 
       start_supervised!(
-        {Redix.Cluster, nodes: ["redis://localhost:7001"], name: name},
+        {Redix.Cluster, nodes: ["redis://localhost:7001"], name: name, sync_connect: true},
         id: :single_seed
       )
 
@@ -385,7 +385,7 @@ defmodule Redix.ClusterTest do
       name = :"kw_seed_#{System.unique_integer([:positive])}"
 
       start_supervised!(
-        {Redix.Cluster, nodes: [[host: "localhost", port: 7002]], name: name},
+        {Redix.Cluster, nodes: [[host: "localhost", port: 7002]], name: name, sync_connect: true},
         id: :kw_seed
       )
 
@@ -396,7 +396,7 @@ defmodule Redix.ClusterTest do
   describe "stop/2" do
     test "stops the cluster cleanly" do
       name = :"stop_test_#{System.unique_integer([:positive])}"
-      {:ok, pid} = Redix.Cluster.start_link(nodes: @nodes, name: name)
+      {:ok, pid} = Redix.Cluster.start_link(nodes: @nodes, name: name, sync_connect: true)
 
       assert Redix.Cluster.command!(name, ["PING"]) == "PONG"
       assert :ok = Redix.Cluster.stop(name)
@@ -635,7 +635,7 @@ defmodule Redix.ClusterTest do
       name = :"replica_cluster_#{System.unique_integer([:positive])}"
 
       start_supervised!(
-        {Redix.Cluster, nodes: @nodes, name: name, read_from_replicas: true},
+        {Redix.Cluster, nodes: @nodes, name: name, read_from_replicas: true, sync_connect: true},
         id: name
       )
 
@@ -794,9 +794,17 @@ defmodule Redix.ClusterTest do
 
       name = :"failed_topo_#{System.unique_integer([:positive])}"
 
-      # The Supervisor.start_link propagates the EXIT from the Manager's init failure.
+      # With sync_connect: true the Manager fails its init when no node is reachable;
+      # the Supervisor.start_link propagates the EXIT from that failure.
       Process.flag(:trap_exit, true)
-      result = Redix.Cluster.start_link(name: name, nodes: ["redis://localhost:9999"])
+
+      result =
+        Redix.Cluster.start_link(
+          name: name,
+          nodes: ["redis://localhost:9999"],
+          sync_connect: true
+        )
+
       assert {:error, _} = result
 
       assert_receive {^ref, meta}, 5_000

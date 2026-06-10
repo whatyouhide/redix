@@ -24,11 +24,14 @@ defmodule Redix.Cluster.SlotMapRefreshTest do
       _other -> "+OK\r\n"
     end)
 
-    start_supervised!({Redix.Cluster, name: cluster, nodes: ["redis://#{node_id}"]})
+    start_supervised!(
+      {Redix.Cluster, name: cluster, nodes: ["redis://#{node_id}"], sync_connect: true}
+    )
 
     slot_table = :"#{cluster}_slots"
 
-    # The init refresh is synchronous, so full coverage is already in the table.
+    # With sync_connect: true the init refresh is synchronous, so full coverage is
+    # already in the table.
     assert :ets.lookup(slot_table, 0) == [{0, node_id, []}]
     assert :ets.lookup(slot_table, 9_000) == [{9_000, node_id, []}]
     assert :ets.lookup(slot_table, 16_383) == [{16_383, node_id, []}]
@@ -70,7 +73,9 @@ defmodule Redix.Cluster.SlotMapRefreshTest do
       _other -> "+OK\r\n"
     end)
 
-    start_supervised!({Redix.Cluster, name: cluster, nodes: ["redis://#{node_id}"]})
+    start_supervised!(
+      {Redix.Cluster, name: cluster, nodes: ["redis://#{node_id}"], sync_connect: true}
+    )
 
     # The slot table records the address the topology query was answered from.
     assert :ets.lookup(:"#{cluster}_slots", 0) == [{0, node_id, []}]

@@ -17,8 +17,11 @@ defmodule Redix.Cluster.RedirectionTest do
     start_supervised!({Task.Supervisor, name: :"#{cluster}_task_supervisor"})
 
     # The Manager normally owns this table; here we create it directly and route
-    # slots ourselves. It dies with the test process.
+    # slots ourselves. It dies with the test process. The marker mimics a cluster
+    # whose first topology fetch succeeded, so commands don't try to await the
+    # (nonexistent) Manager.
     :ets.new(:"#{cluster}_slots", [:named_table, :public, :set])
+    :ets.insert(:"#{cluster}_slots", {:topology_discovered, true})
 
     %{cluster: cluster}
   end

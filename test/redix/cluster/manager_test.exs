@@ -17,7 +17,7 @@ defmodule Redix.Cluster.ManagerTest do
   setup do
     cluster_name = :"mgr_test_#{System.unique_integer([:positive])}"
 
-    start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name})
+    start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name, sync_connect: true})
 
     %{
       cluster: cluster_name,
@@ -49,7 +49,8 @@ defmodule Redix.Cluster.ManagerTest do
       ])
 
       start_supervised!(
-        {Redix.Cluster, nodes: @nodes, name: short_name, topology_refresh_interval: 500},
+        {Redix.Cluster,
+         nodes: @nodes, name: short_name, topology_refresh_interval: 500, sync_connect: true},
         id: :short_refresh
       )
 
@@ -72,7 +73,8 @@ defmodule Redix.Cluster.ManagerTest do
       ])
 
       start_supervised!(
-        {Redix.Cluster, nodes: @nodes, name: short_name, topology_refresh_interval: 500},
+        {Redix.Cluster,
+         nodes: @nodes, name: short_name, topology_refresh_interval: 500, sync_connect: true},
         id: :postpone_refresh
       )
 

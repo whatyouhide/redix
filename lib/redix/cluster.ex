@@ -23,6 +23,16 @@ defmodule Redix.Cluster do
       Redix.Cluster.command(:my_cluster, ["GET", "mykey"])
       #=> {:ok, "myvalue"}
 
+  Like single-node `Redix` connections, the cluster starts even if no seed node is
+  currently reachable: the topology is discovered in the background, retrying with
+  exponential backoff. Commands issued while a discovery attempt is in flight wait
+  for it to complete (just like a single Redix connection postpones commands while
+  it's connecting), so the common "start the cluster, issue a command right away"
+  pattern works without retries. If discovery fails, commands return
+  `{:error, %Redix.ConnectionError{reason: :closed}}` until a seed node becomes
+  reachable. Pass `sync_connect: true` to `start_link/1` to block until the
+  topology has been discovered instead.
+
   ### Pipelines
 
   Pipelines that span multiple hash slots are transparently split across nodes,
@@ -94,6 +104,8 @@ defmodule Redix.Cluster do
 
   @max_redirections 5
 
+  @default_timeout 5_000
+
   @valid_routes [:primary, :replica, :prefer_replica]
 
   node_as_keyword_opts_schema = [
@@ -117,12 +129,28 @@ defmodule Redix.Cluster do
       """
     ],
     nodes: [
-      type: {:list, {:custom, __MODULE__, :__parse_node__, []}},
-      type_doc: "list of `t:endpoint/0`",
+      type: {:custom, __MODULE__, :__parse_nodes__, []},
+      type_doc: "non-empty list of `t:endpoint/0`",
       required: true,
       doc: """
-      A list of seed nodes to connect to. Only **one reachable node** is needed:
+      A non-empty list of seed nodes to connect to. Only **one reachable node** is needed:
       the full cluster topology is discovered automatically via `CLUSTER SLOTS`.
+      """
+    ],
+    sync_connect: [
+      type: :boolean,
+      default: false,
+      doc: """
+      Whether to discover the initial cluster topology *before* or *after*
+      `start_link/1` returns. When `false` (the default), `start_link/1` returns right
+      away and the topology is fetched in the background, retrying with exponential
+      backoff (driven by the `:backoff_initial` and `:backoff_max` options) until a
+      seed node answers. Commands issued while a discovery attempt is in flight wait
+      for it to complete (up to their `:timeout`); if discovery fails, they return
+      `{:error, %Redix.ConnectionError{reason: :closed}}` until a seed node becomes
+      reachable. When `true`, `start_link/1` blocks until the topology has been
+      fetched, and returns an error if no seed node is reachable. This mirrors the
+      `:sync_connect` option of `Redix.start_link/1`.
       """
     ],
     topology_refresh_interval: [
@@ -180,6 +208,7 @@ defmodule Redix.Cluster do
     seed_nodes = Keyword.fetch!(cluster_opts, :nodes)
     refresh_interval = Keyword.fetch!(cluster_opts, :topology_refresh_interval)
     read_from_replicas = Keyword.fetch!(cluster_opts, :read_from_replicas)
+    sync_connect = Keyword.fetch!(cluster_opts, :sync_connect)
 
     if Keyword.has_key?(conn_opts, :sentinel) do
       raise ArgumentError, "Sentinel connections are not supported in cluster mode"
@@ -210,6 +239,7 @@ defmodule Redix.Cluster do
        conn_opts: conn_opts,
        refresh_interval: refresh_interval,
        read_from_replicas: read_from_replicas,
+       sync_connect: sync_connect,
        table_name: slot_table_name(name),
        command_cache_table: command_cache_name(name),
        registry: registry_name(name)}
@@ -411,6 +441,8 @@ defmodule Redix.Cluster do
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
 
+    await_topology_discovery(cluster, slot_table, opts)
+
     # All commands in a transaction must target the same slot
     slots =
       commands
@@ -468,6 +500,8 @@ defmodule Redix.Cluster do
 
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
+
+    await_topology_discovery(cluster, slot_table, opts)
 
     # Group commands by target node
     indexed_commands =
@@ -571,7 +605,10 @@ defmodule Redix.Cluster do
     {group_cmds, tasks} = Enum.unzip(groups_with_tasks)
 
     tasks
-    |> Task.yield_many(timeout: Keyword.get(opts, :timeout, 5_000), on_timeout: :kill_task)
+    |> Task.yield_many(
+      timeout: Keyword.get(opts, :timeout, @default_timeout),
+      on_timeout: :kill_task
+    )
     |> Enum.zip(group_cmds)
     |> __collect_group_results__()
   end
@@ -780,6 +817,24 @@ defmodule Redix.Cluster do
 
   ## Helpers
 
+  # Mirrors single-node Redix's behavior for commands issued right after an async
+  # start: Redix.Connection *postpones* pipelines while in its :connecting state, so
+  # they wait for the in-flight attempt instead of failing. Here, until the first
+  # topology fetch succeeds (no :topology_discovered marker in the slot table yet),
+  # we block on the Manager — whose call queue makes us wait out exactly the fetch
+  # attempt in flight, if any — and then fall through to normal resolution. If the
+  # fetch failed, resolution finds nothing and the command fails fast with :closed,
+  # like single Redix between reconnection attempts. Once the marker is set this
+  # costs one ETS lookup and is never looked at again.
+  defp await_topology_discovery(cluster, slot_table, opts) do
+    unless :ets.member(slot_table, :topology_discovered) do
+      timeout = Keyword.get(opts, :timeout, @default_timeout)
+      Manager.await_topology_discovery(manager_name(cluster), timeout)
+    end
+
+    :ok
+  end
+
   # Resolves the connection for a slot according to the routing choice. Returns
   # `{:ok, pid}` or `:error` (the same shape `Manager.get_connection/3` returns),
   # so the grouping/execution path handles a missing connection uniformly.
@@ -962,6 +1017,23 @@ defmodule Redix.Cluster do
   defp task_supervisor_name(cluster), do: :"#{cluster}_task_supervisor"
 
   ## NimbleOptions custom validators
+
+  @doc false
+  def __parse_nodes__([_ | _] = nodes) do
+    Enum.map(nodes, fn node ->
+      case __parse_node__(node) do
+        {:ok, parsed} -> parsed
+        {:error, reason} -> throw({:error, reason})
+      end
+    end)
+  catch
+    :throw, {:error, reason} ->
+      {:error, "invalid node in :nodes list: " <> reason}
+  end
+
+  def __parse_nodes__(other) do
+    {:error, "expected a non-empty list of nodes, got: #{inspect(other)}"}
+  end
 
   @doc false
   def __parse_node__(node)

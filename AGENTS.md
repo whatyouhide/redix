@@ -53,8 +53,9 @@ This eliminates the need for `persistent_term` or any external lookup.
   `pipeline/3`, `transaction_pipeline/3`. Handles MOVED/ASK redirections, transparent
   pipeline splitting across nodes. The `:name` option is required.
 
-- **`Redix.Cluster.Manager`** (`lib/redix/cluster/manager.ex`) — gen_statem with two
-  states: `:ready` and `:cooling_down`. Manages topology via `CLUSTER SLOTS`, starts
+- **`Redix.Cluster.Manager`** (`lib/redix/cluster/manager.ex`) — gen_statem with three
+  states: `:disconnected` (no topology yet, async connect), `:ready`, and
+  `:cooling_down`. Manages topology via `CLUSTER SLOTS`, starts
   Redix connections registered in the Registry via
   `{:via, Registry, {registry, node_id, role}}` where `role` is `:primary` or
   `:replica` (the Registry *value*). Uses named timeout `{:timeout, :periodic_refresh}`
@@ -98,6 +99,28 @@ This eliminates the need for `persistent_term` or any external lookup.
   topology refresh is modeled as a state (`:cooling_down`) with a `:state_timeout`,
   not a boolean flag. Periodic refresh uses a named timeout `{:timeout, :periodic_refresh}`
   that restarts itself. The periodic refresh is `:postpone`d during cooldown.
+
+- **Async connect by default, `sync_connect: true` to opt out** (issue #323), matching
+  single-node Redix's lazy connect — a `Redix.Cluster` in a supervision tree doesn't
+  crash-loop the app when Redis comes up after it. By default `Manager.init/1` enters
+  `:disconnected` and triggers the first topology fetch via an internal `:next_event`;
+  failures retry on a `:state_timeout` with the same exponential backoff as
+  `Redix.Connection` (`:backoff_initial`/`:backoff_max` conn opts, exponent 1.5, reset
+  on success). Commands check a `{:topology_discovered, true}` marker in the slot
+  table (one ETS lookup; set on the first successful fetch, after the table and
+  Registry are populated); while it's absent they block on
+  `Manager.await_topology_discovery/2` — a call whose only job is to queue behind
+  the in-flight fetch event, mirroring how `Redix.Connection` postpones pipelines in
+  its `:connecting` state. If the fetch succeeded the caller's lookups now find the
+  topology; between backoff retries the Manager replies immediately, so commands
+  fail fast with `%Redix.ConnectionError{reason: :closed}` (empty slot table, no
+  registered connections), like single Redix in `:disconnected`. Reactive refresh
+  casts are dropped while `:disconnected` (the retry timer is in charge), and
+  `connect_to_node` calls are still served. With `sync_connect: true`, `init/1` fetches
+  synchronously and returns `{:stop, reason}` on failure so `start_link/1` fails fast.
+  Node connections always use `sync_connect: false` regardless: the cluster-level
+  option only covers topology discovery. Relatedly, `:nodes` rejects `[]` at validation
+  time (`__parse_nodes__`) instead of failing later with `:no_reachable_node`.
 
 - **Transient socket for topology fetches.** `try_fetch_slots/4` connects with
   `Redix.Connector.connect/2` against a raw socket, runs `CLUSTER SLOTS` via
