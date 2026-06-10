@@ -109,6 +109,33 @@ defmodule Redix.Cluster.RedirectionTest do
     assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "hello"}
   end
 
+  # Reproduces issue #325: redirect messages are server-controlled input, so a
+  # malformed MOVED/ASK from a buggy or hostile server must come back to the
+  # caller as a plain Redis error instead of crashing the calling process with
+  # a parse error.
+  test "returns malformed redirects to the caller as plain errors", %{cluster: cluster} do
+    slot = Hash.hash_slot("x")
+
+    malformed_redirects = [
+      "MOVED garbage",
+      "MOVED 12x 127.0.0.1:7000",
+      "MOVED 99999 127.0.0.1:7000",
+      "MOVED #{slot} 127.0.0.1",
+      "MOVED #{slot} :7000",
+      "MOVED #{slot} 127.0.0.1:no_port",
+      "ASK garbage",
+      "ASK #{slot} 127.0.0.1:no_port"
+    ]
+
+    for message <- malformed_redirects do
+      node = start_node(cluster, fn ["GET", _] -> "-#{message}\r\n" end)
+      route_slot(cluster, slot, node)
+
+      assert Redix.Cluster.command(cluster, ["GET", "x"]) ==
+               {:error, %Redix.Error{message: message}}
+    end
+  end
+
   ## Helpers
 
   defp route_slot(cluster, slot, node_id) do

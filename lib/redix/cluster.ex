@@ -756,30 +756,27 @@ defmodule Redix.Cluster do
   end
 
   defp parse_redirection(%Redix.Error{message: "MOVED " <> rest}) do
-    case String.split(rest, " ") do
-      [slot_str, address] ->
-        {slot, ""} = Integer.parse(slot_str)
-        {host, port} = Manager.split_host_port(address)
-        {:moved, slot, host, port}
-
-      _ ->
-        nil
-    end
+    parse_redirection_target(:moved, rest)
   end
 
   defp parse_redirection(%Redix.Error{message: "ASK " <> rest}) do
-    case String.split(rest, " ") do
-      [slot_str, address] ->
-        {slot, ""} = Integer.parse(slot_str)
-        {host, port} = Manager.split_host_port(address)
-        {:ask, slot, host, port}
-
-      _ ->
-        nil
-    end
+    parse_redirection_target(:ask, rest)
   end
 
   defp parse_redirection(_), do: nil
+
+  # The slot and address are server-controlled, so parse them defensively: a
+  # malformed redirect is handed back to the caller as a plain Redis error value
+  # instead of crashing the calling process (issue #325).
+  defp parse_redirection_target(type, rest) do
+    with [slot_str, address] <- String.split(rest, " "),
+         {slot, ""} when slot in 0..16383 <- Integer.parse(slot_str),
+         {:ok, host, port} <- Manager.split_host_port(address) do
+      {type, slot, host, port}
+    else
+      _other -> nil
+    end
+  end
 
   ## Helpers
 
