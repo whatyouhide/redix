@@ -406,22 +406,38 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
+  # Rewrites the slot table to reflect `slots_data`. Covered slots are overwritten
+  # in place (so reshards/reassignments are seamless and a concurrent lookup never
+  # sees a covered slot disappear), and slots that are no longer covered by *any*
+  # range — i.e. became unassigned — are deleted so routing can't point at a node
+  # that no longer owns them (see issue #314).
   defp update_slot_map(data, slots_data) do
-    for slot_range <- slots_data do
-      [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
-      primary_id = "#{host}:#{port}"
+    covered_slots =
+      for slot_range <- slots_data, reduce: MapSet.new() do
+        acc ->
+          [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
+          primary_id = "#{host}:#{port}"
 
-      replica_ids =
-        if data.read_from_replicas do
-          for [r_host, r_port | _] <- replica_entries, do: "#{r_host}:#{r_port}"
-        else
-          []
-        end
+          replica_ids =
+            if data.read_from_replicas do
+              for [r_host, r_port | _] <- replica_entries, do: "#{r_host}:#{r_port}"
+            else
+              []
+            end
 
-      for slot <- start_slot..end_slot do
-        :ets.insert(data.slot_table, {slot, primary_id, replica_ids})
+          Enum.reduce(start_slot..end_slot, acc, fn slot, acc ->
+            :ets.insert(data.slot_table, {slot, primary_id, replica_ids})
+            MapSet.put(acc, slot)
+          end)
       end
+
+    existing_slots = :ets.select(data.slot_table, [{{:"$1", :_, :_}, [], [:"$1"]}])
+
+    for slot <- existing_slots, not MapSet.member?(covered_slots, slot) do
+      :ets.delete(data.slot_table, slot)
     end
+
+    :ok
   end
 
   defp ensure_connections(data, slots_data) do

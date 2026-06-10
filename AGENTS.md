@@ -128,6 +128,15 @@ This eliminates the need for `persistent_term` or any external lookup.
 - **`:name` is required.** All internal resource names derive from it. No `persistent_term`
   or PID-based lookups needed. Callers always use the atom name.
 
+- **The slot table is rewritten, not just upserted, on each refresh.**
+  `Redix.Cluster.Manager.update_slot_map/2` overwrites every *covered* slot in place
+  (so a reshard/reassignment is seamless and a concurrent lookup never sees a covered slot
+  vanish) and then deletes any slot the new `CLUSTER SLOTS` response no longer covers. In a
+  fully-covered cluster nothing is ever deleted; the deletion only matters for a partially
+  covered cluster (mid-setup, or one that lost coverage), where a stale `{slot, primary,
+  replicas}` mapping would otherwise route to a node that no longer owns the slot (issue
+  #314). Lookups for a genuinely unassigned slot return `:error`, which is correct.
+
 - **MOVED redirects connect on demand.** When a `MOVED` points at a node not yet in the
   Registry (typical mid-resharding: the topology refresh cast is async and the Manager
   may be `:cooling_down`), `handle_moved_redirect/6` falls back to
