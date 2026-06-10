@@ -10,9 +10,9 @@ defmodule Redix.ClusterPropertiesTest do
 
   @nodes ["redis://localhost:7000", "redis://localhost:7001", "redis://localhost:7002"]
 
-  # All cluster ports (3 primaries + 3 replicas). We flush every node between
+  # All cluster ports (3 primaries + 6 replicas). We flush every node between
   # runs; replicas reject writes with READONLY, which we ignore.
-  @ports 7000..7005
+  @ports 7000..7008
 
   @cluster :redix_cluster_property_test
 

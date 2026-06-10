@@ -6,7 +6,7 @@
 #
 # The sentinel and cluster services bake their port numbers into their internal
 # topology (sentinel.conf references `localhost 6381`; `CLUSTER MEET` uses
-# 127.0.0.1:7000..7005). Remapping their host-side ports would break client
+# 127.0.0.1:7000..7008). Remapping their host-side ports would break client
 # redirection. They are left as fixed mappings on purpose.
 services:
   base:
@@ -86,5 +86,8 @@ services:
       - "7003:7003"
       - "7004:7004"
       - "7005:7005"
+      - "7006:7006"
+      - "7007:7007"
+      - "7008:7008"
     sysctls:
       net.core.somaxconn: 1024

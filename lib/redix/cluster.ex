@@ -502,11 +502,22 @@ defmodule Redix.Cluster do
   end
 
   defp group_by_node(slot_table, registry, indexed_commands, route) do
+    # Resolve a single connection per distinct slot and reuse it for every command
+    # on that slot, so same-slot commands land in one group (and thus one pipeline).
+    # This matters for replica routes: resolve_connection/4 picks a random replica
+    # per call, so without "memoizing", two reads on the same slot could resolve to
+    # different replica pids and be split across parallel tasks (issue #315).
+    resolved_by_slot =
+      indexed_commands
+      |> Enum.map(fn {_idx, _cmd, slot} -> slot end)
+      |> Enum.uniq()
+      |> Map.new(fn
+        :no_slot -> {:no_slot, :random}
+        slot -> {slot, resolve_connection(slot_table, registry, slot, route)}
+      end)
+
     indexed_commands
-    |> Enum.group_by(fn
-      {_idx, _cmd, :no_slot} -> :random
-      {_idx, _cmd, slot} -> resolve_connection(slot_table, registry, slot, route)
-    end)
+    |> Enum.group_by(fn {_idx, _cmd, slot} -> Map.fetch!(resolved_by_slot, slot) end)
     |> Enum.map(fn {node_key, commands} ->
       conn =
         case node_key do

@@ -159,9 +159,11 @@ All under `[:redix, :cluster, ...]`:
 
 ### Docker cluster setup
 
-`test/docker/cluster/` — 6 Redis nodes (ports 7000-7005), 3 masters + 3 replicas.
-The master/replica assignment is NOT deterministic (Redis decides during
-`--cluster create`). Tests must handle READONLY errors when flushing replicas.
+`test/docker/cluster/` — 9 Redis nodes (ports 7000-7008), 3 masters + 6 replicas
+(`--cluster-replicas 2`, so every slot has *two* replicas — needed to exercise
+replica read load-spreading). The master/replica assignment is NOT deterministic
+(Redis decides during `--cluster create`). Tests must handle READONLY errors when
+flushing replicas.
 
 ### Running tests
 
@@ -197,9 +199,9 @@ REDIX_BASE_PORT=6479 mix test
 ```
 
 The `sentinel`, `sentinel_with_auth`, and `cluster` services are **not**
-parameterized. Their ports (`6381`, `6382`, `6383`, `26379-26383`, `7000-7005`)
+parameterized. Their ports (`6381`, `6382`, `6383`, `26379-26383`, `7000-7008`)
 are baked into the container topology — sentinel returns `localhost:6381` to
-clients, and cluster MOVED redirections point at `127.0.0.1:7000..7005`.
+clients, and cluster MOVED redirections point at `127.0.0.1:7000..7008`.
 Remapping their host-side ports would break client redirection, so those
 services need their default host ports free.
 

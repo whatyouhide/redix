@@ -20,7 +20,7 @@ defmodule Redix.ClusterTest do
     start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name})
 
     # Flush test keys on each node (skip replicas which return READONLY)
-    for port <- 7000..7005 do
+    for port <- 7000..7008 do
       flusher_id = :"flusher_#{cluster_name}_#{port}"
 
       conn =
@@ -530,7 +530,7 @@ defmodule Redix.ClusterTest do
       # Replicas are reachable Redis nodes that aren't registered as primaries,
       # so they stand in for a node a MOVED redirect points at before the
       # topology refresh has discovered it.
-      unknown_port = Enum.find(7000..7005, &(&1 not in registered_ports))
+      unknown_port = Enum.find(7000..7008, &(&1 not in registered_ports))
       assert unknown_port, "expected at least one unregistered (replica) cluster port"
 
       address = {"127.0.0.1", unknown_port}
@@ -682,6 +682,47 @@ defmodule Redix.ClusterTest do
              end)
     end
 
+    test "route: :replica batches same-slot reads onto a single replica (issue #315)", %{
+      replica_cluster: cluster
+    } do
+      # `CLUSTER MYID`, run inside a keyed EVAL, routes by the key's hash slot and
+      # returns the id of whichever node actually served it. So a pipeline of
+      # same-slot reads reveals, black-box, how many distinct replicas served it:
+      # the fix groups them onto one connection (one pipeline), so every id is the
+      # same. Without it, get_replica_connection/3 picks a random replica per
+      # command and the reads scatter across the slot's two replicas.
+      whoami = ["EVAL", "return redis.call('CLUSTER','MYID')", "1", "{315}"]
+
+      # Wait for the replica connections to come up (they're established async).
+      assert wait_until(fn ->
+               match?({:ok, _}, Redix.Cluster.command(cluster, whoami, route: :replica))
+             end)
+
+      # The split is random, so repeat: a missing fix scatters reads almost every
+      # run (P(20 reads pick the same replica) = (1/2)^19).
+      per_call_ids =
+        for _ <- 1..30 do
+          {:ok, results} =
+            Redix.Cluster.pipeline(cluster, List.duplicate(whoami, 20), route: :replica)
+
+          Enum.uniq(results)
+        end
+
+      # Each individual pipeline was served by exactly one replica.
+      assert Enum.all?(per_call_ids, &match?([_one], &1))
+
+      # Sanity check on the topology itself: across calls the per-pipeline random
+      # pick exercised *both* of the slot's replicas. If only one replica were
+      # reachable this test couldn't tell the fix from its absence, so assert we
+      # really saw two distinct replicas.
+      replica_ids = per_call_ids |> List.flatten() |> Enum.uniq()
+      assert length(replica_ids) == 2
+
+      # And the reads went to replicas, never the slot's primary.
+      assert {:ok, primary_id} = Redix.Cluster.command(cluster, whoami, route: :primary)
+      refute primary_id in replica_ids
+    end
+
     test "topology_change includes replica addresses", %{replica_cluster: cluster} do
       {test_name, _arity} = __ENV__.function
       parent = self()
@@ -697,9 +738,9 @@ defmodule Redix.ClusterTest do
 
       assert_receive {^ref, meta}, 5_000
 
-      # The Docker cluster has 3 primaries + 3 replicas, so with replica reads
+      # The Docker cluster has 3 primaries + 6 replicas, so with replica reads
       # enabled every node (not just the primaries) shows up in the event.
-      assert length(meta.nodes) == 6
+      assert length(meta.nodes) == 9
       assert Enum.all?(meta.nodes, &String.contains?(&1, ":"))
 
       :telemetry.detach("#{test_name}")
