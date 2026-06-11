@@ -50,7 +50,7 @@ Redix.Cluster.start_link(
 Pipelines that span multiple hash slots are transparently split across nodes, executed in parallel, and reassembled in the original order:
 
 ```elixir
-Redix.Cluster.pipeline(cluster, [
+Redix.Cluster.pipeline(:my_cluster, [
   ["SET", "key1", "a"], # Maybe executes on node 1
   ["SET", "key2", "b"], # Maybe executes on node 2
   ["GET", "key1"],      # Same, node 1
@@ -65,7 +65,7 @@ Redix.Cluster.pipeline(cluster, [
 
 ```elixir
 # These keys all hash to the same slot because only the "{user:1}" part of the key is hashed:
-Redix.Cluster.transaction_pipeline(cluster, [
+Redix.Cluster.transaction_pipeline(:my_cluster, [
   ["SET", "{user:1}.name", "Alice"],
   ["SET", "{user:1}.email", "alice@example.com"]
 ])
@@ -83,9 +83,29 @@ Redis Cluster handles slot migrations transparently:
 
 Up to 5 redirections are followed before returning an error.
 
+## Reading from Replicas
+
+By default, all commands are routed to primary nodes. To read from replicas, start the cluster with `read_from_replicas: true` and pass the `:route` option to `Redix.Cluster.command/3` or `Redix.Cluster.pipeline/3`:
+
+```elixir
+Redix.Cluster.start_link(
+  name: :my_cluster,
+  nodes: ["redis://localhost:7000"],
+  read_from_replicas: true
+)
+
+# Read from a replica for the key's slot, failing if none is reachable.
+Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :replica)
+
+# Prefer a replica but fall back to the primary if none is reachable.
+Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :prefer_replica)
+```
+
+See the `Redix.Cluster` module documentation for details.
+
 ## Limitations
 
   * **Database `0` only**: Redis Cluster does not support the `SELECT` command. Passing a non-zero `:database` option raises an error.
-  * **Primary-only routing**: all commands are routed to primary nodes. Replica reads (`READONLY`) are not yet supported.
+  * **Basic replica reads**: replica reads pick a random reachable replica. There is no read-load balancing strategy, staleness tolerance, or zone/locality awareness yet.
   * **No Pub/Sub**: Redis Cluster Pub/Sub has different semantics (messages broadcast to all nodes). Use `Redix.PubSub` with a direct connection instead.
   * **No `noreply_*` functions**: fire-and-forget commands are not supported in cluster mode.
