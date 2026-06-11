@@ -169,15 +169,19 @@ This eliminates the need for `persistent_term` or any external lookup.
   replicas}` mapping would otherwise route to a node that no longer owns the slot (issue
   #314). Lookups for a genuinely unassigned slot return `:error`, which is correct.
 
-- **MOVED redirects connect on demand.** When a `MOVED` points at a node not yet in the
-  Registry (typical mid-resharding: the topology refresh cast is async and the Manager
-  may be `:cooling_down`), `handle_moved_redirect/6` falls back to
+- **MOVED and ASK redirects connect on demand.** When a redirect points at a node not
+  yet in the Registry, `handle_moved_redirect/6` and `handle_ask_redirect/6` fall back to
   `Manager.connect_to_node/2` — a `:gen_statem.call` served in both `:ready` and
   `:cooling_down` that starts+monitors a connection to the redirect target and returns its
-  pid. `MOVED` is authoritative, so we trust the address rather than returning a fake
-  "unreachable" error. The next `ensure_connections` adopts the connection (if `CLUSTER
-  SLOTS` lists it) or terminates it (if not), so a bogus address can't leak connections.
-  The async refresh still fires to update the slot table for future routing.
+  pid. For `MOVED` the typical case is mid-resharding (the topology refresh cast is async
+  and the Manager may be `:cooling_down`); for `ASK` it's a slot migrating to a
+  *brand-new* node, which serves zero slots and so never appears in `CLUSTER SLOTS` —
+  without the fallback every ASK-redirected command would fail until the first migration
+  completed (issue #319). Redirects are authoritative, so we trust the address rather
+  than returning a fake "unreachable" error. The next `ensure_connections` adopts the
+  connection (if `CLUSTER SLOTS` lists it) or terminates it (if not), so a bogus address
+  can't leak connections. For `MOVED`, the async refresh still fires to update the slot
+  table for future routing.
 
 - **Redirect chains are followed, not just single hops.** `MOVED` and `ASK` both
   flow through `follow_redirections/5`, the single place the `@max_redirections`

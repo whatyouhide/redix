@@ -112,6 +112,43 @@ defmodule Redix.Cluster.RedirectionTest do
     assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "hello"}
   end
 
+  # Reproduces issue #319: the classic ASK scenario is a slot migrating to a
+  # brand-new node. A node serving zero slots doesn't appear in CLUSTER SLOTS at
+  # all, so the cluster has no connection to it and no topology refresh will
+  # create one — the redirection code must connect on demand (as it already does
+  # for MOVED) instead of failing every ASK-redirected command until the first
+  # migration completes. On-demand connects go through the Manager, so unlike
+  # the tests above this one boots a real Redix.Cluster against a fake node
+  # that claims all slots.
+  test "follows an ASK to a brand-new node that isn't in the topology yet" do
+    cluster = :"ask_new_node_#{System.unique_integer([:positive])}"
+    slot = Hash.hash_slot("x")
+
+    # The brand-new node receiving the migrating slot.
+    {listen_new, node_new} = raw_listen()
+
+    serve(listen_new, fn
+      ["ASKING"] -> "+OK\r\n"
+      ["GET", _] -> "$3\r\nbar\r\n"
+    end)
+
+    # The slot owner: answers the topology fetch claiming every slot, then ASKs
+    # the command onward to the new node.
+    {listen_owner, node_owner} = raw_listen()
+
+    serve(listen_owner, fn
+      ["CLUSTER", "SLOTS"] -> cluster_slots_reply(node_owner)
+      ["GET", _] -> "-ASK #{slot} #{node_new}\r\n"
+      _other -> "+OK\r\n"
+    end)
+
+    start_supervised!(
+      {Redix.Cluster, name: cluster, nodes: ["redis://#{node_owner}"], sync_connect: true}
+    )
+
+    assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
+  end
+
   # Reproduces issue #325: redirect messages are server-controlled input, so a
   # malformed MOVED/ASK from a buggy or hostile server must come back to the
   # caller as a plain Redis error instead of crashing the calling process with
@@ -151,6 +188,25 @@ defmodule Redix.Cluster.RedirectionTest do
     {listen, node_id} = listen(cluster)
     serve(listen, handler)
     node_id
+  end
+
+  # Like listen/1, but without starting (or registering) a connection to the
+  # node — for fake nodes the cluster must discover or connect to on its own.
+  defp raw_listen do
+    {:ok, listen} =
+      :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, packet: :raw])
+
+    {:ok, port} = :inet.port(listen)
+    {listen, "127.0.0.1:#{port}"}
+  end
+
+  # Encodes a CLUSTER SLOTS reply with all 16384 slots owned by a single
+  # primary and no replicas: `[[0, 16383, [host, port, node_id]]]`.
+  defp cluster_slots_reply(node_id) do
+    [host, port] = String.split(node_id, ":")
+
+    "*1\r\n*3\r\n:0\r\n:16383\r\n*3\r\n" <>
+      "$#{byte_size(host)}\r\n#{host}\r\n:#{port}\r\n$40\r\n#{String.duplicate("a", 40)}\r\n"
   end
 
   defp listen(cluster) do
@@ -197,14 +253,22 @@ defmodule Redix.Cluster.RedirectionTest do
   end
 
   defp serve(listen, handler) do
-    test_pid = self()
+    spawn_link(fn -> accept_loop(listen, handler) end)
+  end
 
-    spawn_link(fn ->
-      case :gen_tcp.accept(listen, 5_000) do
-        {:ok, socket} -> loop(socket, handler, "")
-        {:error, _reason} -> Process.unlink(test_pid)
-      end
-    end)
+  # Accepts connections until the listen socket closes (when the owning test
+  # exits) or no client shows up for 5s. Some fake nodes get more than one
+  # connection — e.g. the Manager's transient topology-fetch socket plus the
+  # managed Redix connection.
+  defp accept_loop(listen, handler) do
+    case :gen_tcp.accept(listen, 5_000) do
+      {:ok, socket} ->
+        spawn_link(fn -> loop(socket, handler, "") end)
+        accept_loop(listen, handler)
+
+      {:error, _reason} ->
+        :ok
+    end
   end
 
   defp loop(socket, handler, buffer) do

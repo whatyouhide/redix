@@ -770,7 +770,20 @@ defmodule Redix.Cluster do
   end
 
   defp handle_ask_redirect(cluster, host, port, cmds, opts, remaining) do
-    case Manager.get_connection_by_node(registry_name(cluster), {host, port}) do
+    registry = registry_name(cluster)
+
+    # The classic ASK scenario is a slot migrating to a brand-new node: a node
+    # serving zero slots doesn't appear in CLUSTER SLOTS, so it has no Registry
+    # entry and no topology refresh will ever connect it. Like MOVED, fall back
+    # to connecting on demand — ASK targets are cluster members, and the next
+    # `ensure_connections` adopts or terminates the connection (issue #319).
+    conn =
+      case Manager.get_connection_by_node(registry, {host, port}) do
+        {:ok, conn} -> {:ok, conn}
+        :error -> Manager.connect_to_node(manager_name(cluster), {host, port})
+      end
+
+    case conn do
       {:ok, conn} ->
         # ASK is a per-command, per-request redirection: each command needs its
         # own ASKING prefix, and the target may redirect us again (ASK -> ASK or
@@ -780,7 +793,7 @@ defmodule Redix.Cluster do
           execute_asking_command(cluster, conn, indexed_cmd, opts, remaining)
         end)
 
-      :error ->
+      {:error, _reason} ->
         Enum.map(cmds, fn {idx, _cmd} ->
           {idx, %Redix.Error{message: "ASK to unreachable node #{host}:#{port}"}}
         end)
