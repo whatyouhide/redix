@@ -183,7 +183,10 @@ defmodule Redix.Cluster do
   #{NimbleOptions.docs(@start_link_opts_schema)}
 
   All other standard `Redix` connection options (`:password`, `:ssl`, `:socket_opts`,
-  `:timeout`, and so on) are passed through to *each underlying node connection*.
+  `:timeout`, and so on) are passed through to *each underlying node connection*. The
+  exceptions are `:sentinel` and `:exit_on_disconnection`, which are not supported in
+  cluster mode (the cluster supervises node connections and handles disconnections
+  itself).
 
   ## Examples
 
@@ -212,6 +215,14 @@ defmodule Redix.Cluster do
 
     if Keyword.has_key?(conn_opts, :sentinel) do
       raise ArgumentError, "Sentinel connections are not supported in cluster mode"
+    end
+
+    if Keyword.has_key?(conn_opts, :exit_on_disconnection) do
+      raise ArgumentError, """
+      the :exit_on_disconnection option is not supported in cluster mode: node \
+      connections are supervised by the cluster, which handles disconnections and \
+      topology changes itself\
+      """
     end
 
     conn_opts = Redix.StartOptions.sanitize(:redix, conn_opts)
