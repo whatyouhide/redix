@@ -131,15 +131,18 @@ defmodule Redix.Cluster.Manager do
   end
 
   @doc """
-  Blocks until the topology fetch attempt currently in flight (if any) has completed.
+  Blocks until the *initial* topology fetch attempt has completed.
 
-  Mirrors how a single Redix connection *postpones* commands while in its
-  `:connecting` state: callers that find the slot table still unpopulated (no
-  `:topology_discovered` marker yet) call this before resolving connections. The
-  call queues behind the fetch the manager is performing, so the reply arrives
-  once that attempt is done; if it succeeded the caller's lookups now find the
+  Mirrors how a single Redix connection *postpones* commands while its first
+  connection attempt is in flight: callers that find no `:discovery_attempted`
+  marker in the slot table yet call this before resolving connections. The call
+  queues behind the fetch the manager is performing, so the reply arrives once
+  that attempt is done; if it succeeded the caller's lookups now find the
   topology, and if it failed they fall through to the normal "no connection"
-  error, matching single Redix's fail-fast behavior between reconnection attempts.
+  error. The marker is set once the first attempt completes — success or failure —
+  so commands only ever await that one attempt: after a failed first try the
+  cluster might be unreachable for a while, and blocking every caller for each
+  backoff retry wouldn't help.
 
   The reply carries no information on purpose; exits (caller timeout, dead
   manager) degrade to `:ok` so callers always just retry their lookups.
@@ -233,9 +236,10 @@ defmodule Redix.Cluster.Manager do
   ## State: :disconnected. The initial topology fetch hasn't succeeded yet
   ## (async connect, the default). Retries with exponential backoff until a seed
   ## node answers, mirroring how a single Redix connection reconnects. Commands
-  ## issued while a fetch attempt is in flight await its completion (see
-  ## await_topology_discovery/2); between retries they fail fast with a
-  ## connection error since the slot table is empty.
+  ## issued while the *initial* fetch attempt is in flight await its completion
+  ## (see await_topology_discovery/2); once that attempt has completed — success
+  ## or failure — they resolve straight from the slot table, so after a failed
+  ## first attempt they fail fast with a connection error.
 
   def disconnected(event_type, :connect, data)
       when event_type in [:internal, :state_timeout] do
@@ -245,6 +249,11 @@ defmodule Redix.Cluster.Manager do
         {:next_state, :ready, data, [periodic_refresh_action(data.refresh_interval)]}
 
       {:error, _reason} ->
+        # The attempt completed (just unsuccessfully), so set the marker: commands
+        # stop awaiting and fail fast — if we couldn't reach the cluster on the
+        # first try, it might be a while before we can, and blocking every caller
+        # for each retry wouldn't help. do_refresh_topology/1 sets it on success.
+        :ets.insert(data.slot_table, {:discovery_attempted, true})
         {backoff, data} = next_backoff(data)
         {:keep_state, data, [{:state_timeout, backoff, :connect}]}
     end
@@ -266,11 +275,11 @@ defmodule Redix.Cluster.Manager do
     handle_connect_to_node(from, host, port, data)
   end
 
-  # This call is only ever *processed* between fetch attempts (events are atomic,
-  # so a call arriving mid-attempt queues until the attempt is done — that
-  # queueing is the whole point, see await_topology_discovery/2). Replying right
-  # away makes commands fail fast between backoff retries, matching single
-  # Redix's :disconnected state.
+  # This call is only ever *processed* after the initial fetch attempt completed
+  # (events are atomic, so a call arriving mid-attempt queues until the attempt
+  # is done — that queueing is the whole point, see await_topology_discovery/2).
+  # By then the :discovery_attempted marker is set, so replying right away sends
+  # the caller back to a lookup that fails fast.
   def disconnected({:call, from}, :await_topology_discovery, _data) do
     {:keep_state_and_data, [{:reply, from, :ok}]}
   end
@@ -308,9 +317,8 @@ defmodule Redix.Cluster.Manager do
     handle_connect_to_node(from, host, port, data)
   end
 
-  # The topology is already discovered; a caller can only land here by racing a
-  # refresh (it checked the marker just before the table was rewritten, which
-  # never removes the marker). Reply right away.
+  # The initial fetch already completed; a caller can only land here by racing
+  # the marker insert (the marker is never removed). Reply right away.
   def ready({:call, from}, :await_topology_discovery, _data) do
     {:keep_state_and_data, [{:reply, from, :ok}]}
   end
@@ -438,14 +446,15 @@ defmodule Redix.Cluster.Manager do
         update_slot_map(data, slots_data)
         data = ensure_connections(data, slots_data)
 
-        # Marks that at least one topology fetch has succeeded. Callers check this
-        # before resolving connections: while it's absent they await the in-flight
+        # Marks that the initial topology fetch attempt has completed (the
+        # :disconnected state sets the same marker on failure). Callers check this
+        # before resolving connections: while it's absent they await the initial
         # fetch via await_topology_discovery/2 instead of failing right away.
         # Inserted *after* the slot table and Registry are populated, so a caller
         # that sees the marker also sees a routable topology. A 2-tuple can't
         # collide with the {slot, primary, replicas} entries or with
         # update_slot_map/2's 3-tuple select/delete patterns.
-        :ets.insert(data.slot_table, {:topology_discovered, true})
+        :ets.insert(data.slot_table, {:discovery_attempted, true})
 
         node_addresses =
           for {node_id, _host, _port, _role} <- nodes_to_connect(data, slots_data), do: node_id

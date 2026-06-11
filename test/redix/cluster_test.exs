@@ -433,6 +433,16 @@ defmodule Redix.ClusterTest do
         )
       end
     end
+
+    test ":exit_on_disconnection is not supported in cluster mode" do
+      assert_raise ArgumentError, ~r/:exit_on_disconnection option is not supported/, fn ->
+        Redix.Cluster.start_link(
+          name: :exit_on_disconnection_cluster_test,
+          nodes: @nodes,
+          exit_on_disconnection: true
+        )
+      end
+    end
   end
 
   describe "__parse_node__/1" do

@@ -106,16 +106,18 @@ This eliminates the need for `persistent_term` or any external lookup.
   `:disconnected` and triggers the first topology fetch via an internal `:next_event`;
   failures retry on a `:state_timeout` with the same exponential backoff as
   `Redix.Connection` (`:backoff_initial`/`:backoff_max` conn opts, exponent 1.5, reset
-  on success). Commands check a `{:topology_discovered, true}` marker in the slot
-  table (one ETS lookup; set on the first successful fetch, after the table and
-  Registry are populated); while it's absent they block on
+  on success). Commands check a `{:discovery_attempted, true}` marker in the slot
+  table (one ETS lookup; set when the *initial* fetch attempt completes — on
+  success after the table and Registry are populated, on failure right away in the
+  `:disconnected` state); while it's absent they block on
   `Manager.await_topology_discovery/2` — a call whose only job is to queue behind
-  the in-flight fetch event, mirroring how `Redix.Connection` postpones pipelines in
-  its `:connecting` state. If the fetch succeeded the caller's lookups now find the
-  topology; between backoff retries the Manager replies immediately, so commands
-  fail fast with `%Redix.ConnectionError{reason: :closed}` (empty slot table, no
-  registered connections), like single Redix in `:disconnected`. Reactive refresh
-  casts are dropped while `:disconnected` (the retry timer is in charge), and
+  the in-flight fetch event, mirroring how `Redix.Connection` postpones pipelines
+  while connecting. So commands only ever await that one initial attempt: if it
+  succeeded their lookups find the topology, and once it failed they fail fast with
+  `%Redix.ConnectionError{reason: :closed}` (empty slot table, no registered
+  connections) without contacting the Manager again — no blocking callers on every
+  backoff retry when the cluster couldn't be reached on the first try. Reactive
+  refresh casts are dropped while `:disconnected` (the retry timer is in charge), and
   `connect_to_node` calls are still served. With `sync_connect: true`, `init/1` fetches
   synchronously and returns `{:stop, reason}` on failure so `start_link/1` fails fast.
   Node connections always use `sync_connect: false` regardless: the cluster-level

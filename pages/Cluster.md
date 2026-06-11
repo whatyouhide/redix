@@ -33,7 +33,7 @@ Redix.Cluster.command(:my_cluster, ["GET", "mykey"])
 
 Like single-node `Redix` connections, starting a cluster does **not** require any node to be reachable. By default, `Redix.Cluster.start_link/1` returns right away and discovers the cluster topology in the background, retrying with exponential backoff (controlled by the `:backoff_initial` and `:backoff_max` options) until a seed node answers. This means a `Redix.Cluster` in your supervision tree won't crash-loop your application at boot if Redis comes up *after* your app.
 
-Commands issued while a discovery attempt is in flight **wait for it to complete** (up to their `:timeout`), just like a single `Redix` connection postpones commands while it's connecting — so starting a cluster and issuing commands right away works without retries. If discovery fails (no seed node is reachable), commands return `{:error, %Redix.ConnectionError{reason: :closed}}` until a node becomes reachable.
+Commands issued while the *initial* discovery attempt is in flight **wait for it to complete** (up to their `:timeout`), just like a single `Redix` connection postpones commands while it's connecting — so starting a cluster and issuing commands right away works without retries. Once that first attempt fails (no seed node is reachable), commands stop waiting and return `{:error, %Redix.ConnectionError{reason: :closed}}` until a node becomes reachable.
 
 If you prefer to block until the topology has been discovered—and fail fast if no seed node is reachable—pass `sync_connect: true`:
 

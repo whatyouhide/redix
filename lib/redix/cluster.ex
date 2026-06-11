@@ -25,13 +25,13 @@ defmodule Redix.Cluster do
 
   Like single-node `Redix` connections, the cluster starts even if no seed node is
   currently reachable: the topology is discovered in the background, retrying with
-  exponential backoff. Commands issued while a discovery attempt is in flight wait
-  for it to complete (just like a single Redix connection postpones commands while
-  it's connecting), so the common "start the cluster, issue a command right away"
-  pattern works without retries. If discovery fails, commands return
-  `{:error, %Redix.ConnectionError{reason: :closed}}` until a seed node becomes
-  reachable. Pass `sync_connect: true` to `start_link/1` to block until the
-  topology has been discovered instead.
+  exponential backoff. Commands issued while the *initial* discovery attempt is in
+  flight wait for it to complete (just like a single Redix connection postpones
+  commands while it's connecting), so the common "start the cluster, issue a
+  command right away" pattern works without retries. If that first attempt fails,
+  commands return `{:error, %Redix.ConnectionError{reason: :closed}}` until a seed
+  node becomes reachable. Pass `sync_connect: true` to `start_link/1` to block
+  until the topology has been discovered instead.
 
   ### Pipelines
 
@@ -145,10 +145,10 @@ defmodule Redix.Cluster do
       `start_link/1` returns. When `false` (the default), `start_link/1` returns right
       away and the topology is fetched in the background, retrying with exponential
       backoff (driven by the `:backoff_initial` and `:backoff_max` options) until a
-      seed node answers. Commands issued while a discovery attempt is in flight wait
-      for it to complete (up to their `:timeout`); if discovery fails, they return
-      `{:error, %Redix.ConnectionError{reason: :closed}}` until a seed node becomes
-      reachable. When `true`, `start_link/1` blocks until the topology has been
+      seed node answers. Commands issued while the *initial* discovery attempt is in
+      flight wait for it to complete (up to their `:timeout`); once that attempt
+      fails, they return `{:error, %Redix.ConnectionError{reason: :closed}}` until a
+      seed node becomes reachable. When `true`, `start_link/1` blocks until the topology has been
       fetched, and returns an error if no seed node is reachable. This mirrors the
       `:sync_connect` option of `Redix.start_link/1`.
       """
@@ -183,7 +183,10 @@ defmodule Redix.Cluster do
   #{NimbleOptions.docs(@start_link_opts_schema)}
 
   All other standard `Redix` connection options (`:password`, `:ssl`, `:socket_opts`,
-  `:timeout`, and so on) are passed through to *each underlying node connection*.
+  `:timeout`, and so on) are passed through to *each underlying node connection*. The
+  exceptions are `:sentinel` and `:exit_on_disconnection`, which are not supported in
+  cluster mode (the cluster supervises node connections and handles disconnections
+  itself).
 
   ## Examples
 
@@ -212,6 +215,14 @@ defmodule Redix.Cluster do
 
     if Keyword.has_key?(conn_opts, :sentinel) do
       raise ArgumentError, "Sentinel connections are not supported in cluster mode"
+    end
+
+    if Keyword.has_key?(conn_opts, :exit_on_disconnection) do
+      raise ArgumentError, """
+      the :exit_on_disconnection option is not supported in cluster mode: node \
+      connections are supervised by the cluster, which handles disconnections and \
+      topology changes itself\
+      """
     end
 
     conn_opts = Redix.StartOptions.sanitize(:redix, conn_opts)
@@ -818,16 +829,18 @@ defmodule Redix.Cluster do
   ## Helpers
 
   # Mirrors single-node Redix's behavior for commands issued right after an async
-  # start: Redix.Connection *postpones* pipelines while in its :connecting state, so
-  # they wait for the in-flight attempt instead of failing. Here, until the first
-  # topology fetch succeeds (no :topology_discovered marker in the slot table yet),
-  # we block on the Manager — whose call queue makes us wait out exactly the fetch
-  # attempt in flight, if any — and then fall through to normal resolution. If the
-  # fetch failed, resolution finds nothing and the command fails fast with :closed,
-  # like single Redix between reconnection attempts. Once the marker is set this
-  # costs one ETS lookup and is never looked at again.
+  # start: Redix.Connection *postpones* pipelines while its first connection attempt
+  # is in flight, so they wait for it instead of failing. Here, until the *initial*
+  # topology fetch attempt completes (no :discovery_attempted marker in the slot
+  # table yet), we block on the Manager — whose call queue makes us wait out exactly
+  # the attempt in flight — and then fall through to normal resolution. The marker is
+  # set when that first attempt completes, *success or failure*: if it failed,
+  # resolution finds nothing and this and all later commands fail fast with :closed
+  # (if the cluster couldn't be reached on the first try it might be a while before
+  # it can, so blocking callers for every backoff retry wouldn't help). Once the
+  # marker is set this costs one ETS lookup and the Manager is never contacted again.
   defp await_topology_discovery(cluster, slot_table, opts) do
-    unless :ets.member(slot_table, :topology_discovered) do
+    unless :ets.member(slot_table, :discovery_attempted) do
       timeout = Keyword.get(opts, :timeout, @default_timeout)
       Manager.await_topology_discovery(manager_name(cluster), timeout)
     end
@@ -1029,6 +1042,8 @@ defmodule Redix.Cluster do
   catch
     :throw, {:error, reason} ->
       {:error, "invalid node in :nodes list: " <> reason}
+  else
+    parsed_nodes -> {:ok, parsed_nodes}
   end
 
   def __parse_nodes__(other) do
