@@ -40,11 +40,14 @@ defmodule Redix.Cluster.SlotMapRefreshTest do
     Agent.update(topology, fn _ -> cluster_slots([{0, 8_191, node_id}]) end)
     Redix.Cluster.Manager.refresh_topology(:"#{cluster}_manager")
 
-    # The reactive refresh is async; wait for the stale entry to be deleted. With
-    # the bug, slot 9000 keeps pointing at a node that no longer owns it.
-    wait_until(fn -> :ets.lookup(slot_table, 9_000) == [] end)
+    # The reactive refresh is async and stale slots are deleted one at a time,
+    # so wait for both probed slots to be gone (waiting on just one races with
+    # the deletion loop). With the bug, slot 9000 keeps pointing at a node that
+    # no longer owns it.
+    wait_until(fn ->
+      :ets.lookup(slot_table, 9_000) == [] and :ets.lookup(slot_table, 16_383) == []
+    end)
 
-    assert :ets.lookup(slot_table, 16_383) == []
     # Slots still covered are untouched.
     assert :ets.lookup(slot_table, 0) == [{0, node_id, []}]
     assert :ets.lookup(slot_table, 8_191) == [{8_191, node_id, []}]
