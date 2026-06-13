@@ -421,6 +421,13 @@ defmodule Redix.Cluster do
   Transactions always run on the slot's primary; passing `route:` anything other
   than `:primary` raises an `ArgumentError`.
 
+  Like `command/3` and `pipeline/3`, a "transaction" follows `MOVED`/`ASK`
+  redirections: since all commands target one slot, a redirect means the whole
+  transaction belongs on another node, so the entire `MULTI`/`EXEC` is re-run
+  there (bounded by the internal redirection limit). A `MOVED` also triggers a
+  reactive topology refresh, so a transaction-only workload self-heals after a
+  failover instead of failing until the next periodic refresh.
+
   ## Options
 
     * `:timeout` - request timeout in milliseconds. Defaults to `5_000`.
@@ -468,7 +475,14 @@ defmodule Redix.Cluster do
       [slot] ->
         case Manager.get_connection(slot_table, registry, slot) do
           {:ok, conn} ->
-            Redix.transaction_pipeline(conn, commands, opts)
+            execute_transaction(
+              cluster,
+              conn,
+              commands,
+              opts,
+              @max_redirections,
+              _asking? = false
+            )
 
           :error ->
             {:error, %Redix.ConnectionError{reason: :closed}}
@@ -496,6 +510,91 @@ defmodule Redix.Cluster do
     case transaction_pipeline(cluster, commands, opts) do
       {:ok, response} -> response
       {:error, error} -> raise error
+    end
+  end
+
+  ## Transaction implementation
+
+  # Runs a MULTI/EXEC transaction on `conn`, following a MOVED/ASK redirection to
+  # its target. A cluster transaction is pinned to a single slot, so a redirect on
+  # any queued command means the *whole* transaction belongs on one other node —
+  # we re-run the entire MULTI/EXEC there, bounded by the same @max_redirections
+  # budget command/3 and pipeline/3 use. This is what lets a transaction-only
+  # workload self-heal after a failover instead of failing until the next periodic
+  # topology refresh (issue #321). We issue the pipeline directly rather than via
+  # Redix.transaction_pipeline/3 because that only inspects the EXEC reply, while a
+  # redirect surfaces in the (otherwise hidden) queueing replies.
+  defp execute_transaction(cluster, conn, commands, opts, remaining, asking?) do
+    # ASKING must precede MULTI: Redis preserves the ASKING flag for the whole
+    # transaction (it only clears it outside a MULTI), so one ASKING covers every
+    # queued command.
+    prefix = if asking?, do: [["ASKING"], ["MULTI"]], else: [["MULTI"]]
+
+    case Redix.pipeline(conn, prefix ++ commands ++ [["EXEC"]], opts) do
+      {:ok, responses} ->
+        # Replies line up as [prefix..., queueing replies..., EXEC reply]. A
+        # wrong-slot command is rejected with MOVED/ASK at *queue* time (which
+        # aborts EXEC with EXECABORT), so the redirection lives among the queueing
+        # replies, not in the EXEC reply.
+        queue_responses = responses |> Enum.drop(length(prefix)) |> Enum.drop(-1)
+
+        case Enum.find_value(queue_responses, &parse_redirection/1) do
+          {type, slot, host, port} ->
+            follow_transaction_redirect(
+              cluster,
+              type,
+              slot,
+              host,
+              port,
+              commands,
+              opts,
+              remaining
+            )
+
+          nil ->
+            case List.last(responses) do
+              %Redix.Error{} = error -> {:error, error}
+              other -> {:ok, other}
+            end
+        end
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  defp follow_transaction_redirect(_cluster, _type, _slot, _host, _port, _commands, _opts, 0) do
+    {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
+  end
+
+  defp follow_transaction_redirect(cluster, type, slot, host, port, commands, opts, remaining) do
+    # MOVED means the slot's ownership changed (typically a failover); trigger the
+    # same reactive refresh command/3 does so future routing is corrected. ASK is a
+    # transient per-request migration hint and signals no topology change.
+    if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
+
+    :telemetry.execute([:redix, :cluster, :redirection], %{}, %{
+      cluster: cluster,
+      type: type,
+      slot: slot,
+      target_address: "#{host}:#{port}"
+    })
+
+    # The target may not be in the Registry yet (mid-resharding for MOVED, a
+    # brand-new node serving zero slots for ASK), so connect on demand — the
+    # redirect address is authoritative. Mirrors handle_moved_redirect/6.
+    conn =
+      case Manager.get_connection_by_node(registry_name(cluster), {host, port}) do
+        {:ok, conn} -> {:ok, conn}
+        :error -> Manager.connect_to_node(manager_name(cluster), {host, port})
+      end
+
+    case conn do
+      {:ok, conn} ->
+        execute_transaction(cluster, conn, commands, opts, remaining - 1, type == :ask)
+
+      {:error, _reason} ->
+        {:error, %Redix.ConnectionError{reason: :closed}}
     end
   end
 
