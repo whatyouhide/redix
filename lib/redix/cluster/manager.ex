@@ -604,12 +604,25 @@ defmodule Redix.Cluster.Manager do
     data =
       Enum.reduce(needed_nodes, data, fn {node_id, host, port, role}, acc ->
         case Registry.lookup(acc.registry, node_id) do
-          [{pid, _}] when is_pid(pid) ->
-            if Process.alive?(pid) do
-              acc
-            else
-              {_result, acc} = start_and_monitor_connection(acc, node_id, host, port, role)
-              acc
+          [{pid, registered_role}] when is_pid(pid) ->
+            cond do
+              not Process.alive?(pid) ->
+                {_result, acc} = start_and_monitor_connection(acc, node_id, host, port, role)
+                acc
+
+              # The node is still connected but its role changed since we last
+              # connected it (a failover: a primary demoted to replica or a
+              # replica promoted to primary). The live connection can't be reused
+              # as-is — a demoted primary never issued READONLY (so replica reads
+              # bounce back MOVED) and a promoted replica still carries
+              # `readonly: true`, and in both cases the Registry value used for
+              # keyless-command routing is stale. Terminate and restart so the
+              # role, the READONLY state, and routing all reflect reality (#318).
+              registered_role != role ->
+                restart_connection(acc, node_id, pid, host, port, role)
+
+              true ->
+                acc
             end
 
           [] ->
@@ -662,6 +675,18 @@ defmodule Redix.Cluster.Manager do
       end
 
     Enum.uniq_by(primaries ++ replicas, fn {node_id, _, _, _} -> node_id end)
+  end
+
+  # Tears down the connection registered for `node_id` and starts a fresh one with
+  # the given `role`. Used when a node's role changed after a failover (#318).
+  # Demonitors *before* terminating (like the no-longer-needed branch in
+  # `ensure_connections/2`) so the deliberate `terminate_child` DOWN doesn't land
+  # in `handle_down/2` and resurrect the connection under its *old* role.
+  defp restart_connection(data, node_id, pid, host, port, role) do
+    data = demonitor_node(data, node_id)
+    DynamicSupervisor.terminate_child(data.pool_supervisor, pid)
+    {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
+    data
   end
 
   # Returns `{result, data}` where `result` is `{:ok, pid}` or `{:error, reason}`.

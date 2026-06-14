@@ -91,6 +91,18 @@ This eliminates the need for `persistent_term` or any external lookup.
   `:primary` (MULTI/EXEC must run on the primary). A write mistakenly routed to a replica
   comes back as `MOVED` and is followed to the primary by the existing redirect machinery.
 
+- **Node roles are reconciled on every topology refresh.** `ensure_connections/2`
+  compares each live connection's registered role (the Registry *value*) against the
+  role the latest `CLUSTER SLOTS` assigns it, and terminates+restarts on a mismatch
+  (`restart_connection/6`). After a failover a demoted primary's connection never
+  issued `READONLY` (so `route: :replica` reads would bounce back `MOVED` forever) and
+  a promoted replica still carried `readonly: true` and was excluded from keyless-command
+  routing — the stale role survives `DynamicSupervisor`/`handle_down` restarts (the child
+  spec re-uses the original `{:via, Registry, {registry, node_id, role}}` tuple), so only
+  this reconciliation fixes it (issue #318). The restart demonitors before
+  `terminate_child` so the deliberate DOWN doesn't resurrect the old role via
+  `handle_down/2`.
+
 - **One Redix connection per node** (multiplexing model, like ioredis/Lettuce). Redix
   already pipelines internally. Users who need more throughput start multiple named
   `Redix.Cluster` instances.
@@ -254,8 +266,5 @@ services need their default host ports free.
 
 - Replica reads use a random reachable replica; no read-load balancing strategy,
   staleness tolerance, or zone/locality awareness yet.
-- After a failover, a promoted replica keeps its `:replica` Registry value until its
-  connection restarts, so `get_random_connection/1` may skip it for keyless commands
-  (slot routing via the slot table is unaffected — it points at the new primary).
 - No cluster PubSub (different semantics — messages broadcast to all nodes)
 - No `noreply_*` functions in cluster mode
