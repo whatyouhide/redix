@@ -323,6 +323,12 @@ defmodule Redix.Cluster.Manager do
     {:keep_state_and_data, [{:reply, from, :ok}]}
   end
 
+  # Catch-all for stray :info messages (symmetric with :disconnected and
+  # :cooling_down). No source emits them today (sockets are passive throughout_
+  # but without this an unexpected message would raise a FunctionClauseError and
+  # crash the Manager, restarting the whole :one_for_all cluster tree (issue #326).
+  def ready(:info, _msg, _data), do: :keep_state_and_data
+
   ## State: :cooling_down — reactive refreshes are silently dropped.
 
   def cooling_down(:state_timeout, :cooldown_expired, data) do

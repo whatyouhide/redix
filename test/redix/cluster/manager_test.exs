@@ -93,6 +93,21 @@ defmodule Redix.Cluster.ManagerTest do
       assert_receive {[:redix, :cluster, :topology_change], _ref, %{}, %{cluster: ^short_name}},
                      3_000
     end
+
+    test "a stray :info message in :ready does not crash the Manager (#326)", %{
+      manager: manager
+    } do
+      {:ready, _data} = :sys.get_state(manager)
+
+      pid = Process.whereis(manager)
+      ref = Process.monitor(pid)
+
+      send(pid, :some_stray_message)
+
+      # The Manager must absorb it and stay :ready, not crash the whole tree.
+      refute_receive {:DOWN, ^ref, :process, ^pid, _reason}, 200
+      assert {:ready, _data} = :sys.get_state(manager)
+    end
   end
 
   describe "connection lifecycle" do
