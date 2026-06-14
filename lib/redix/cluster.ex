@@ -530,7 +530,7 @@ defmodule Redix.Cluster do
     # queued command.
     prefix = if asking?, do: [["ASKING"], ["MULTI"]], else: [["MULTI"]]
 
-    case Redix.pipeline(conn, prefix ++ commands ++ [["EXEC"]], opts) do
+    case pipeline_catching_exit(conn, prefix ++ commands ++ [["EXEC"]], opts) do
       {:ok, responses} ->
         # Replies line up as [prefix..., queueing replies..., EXEC reply]. A
         # wrong-slot command is rejected with MOVED/ASK at *queue* time (which
@@ -704,7 +704,12 @@ defmodule Redix.Cluster do
           if conn == nil do
             Task.completed({:error, %Redix.ConnectionError{reason: :closed}})
           else
-            Task.Supervisor.async(task_supervisor, fn ->
+            # async_nolink, *not* async: a crashing task must not take the caller down
+            # with it via a link (issue #317). With async_nolink, Task.yield_many/2
+            # reports the crash as {:exit, reason}, which __collect_group_results__
+            # turns into a per-command error value instead of letting the link kill us
+            # before yield_many even returns.
+            Task.Supervisor.async_nolink(task_supervisor, fn ->
               execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
             end)
           end
@@ -763,10 +768,26 @@ defmodule Redix.Cluster do
     Enum.map(cmds, fn {idx, _cmd} -> {idx, error} end)
   end
 
+  # Redix.pipeline/3 *exits* the caller with {:redix_exited_during_call, reason} when the
+  # connection pid is already dead (lib/redix/connection.ex). For single-node Redix the
+  # user owns the pid, so an exit is acceptable; in cluster mode the pid is internal and
+  # its death is a routine topology event — `ensure_connections` terminates the connection
+  # of every node that leaves the cluster. A command that races a scale-in/reshard (the
+  # Registry lookup returns a pid, the Manager terminates it, then we issue the pipeline)
+  # would otherwise exit the *calling* process instead of returning an error value. Catch
+  # that exit and turn it into a connection-error value, matching how every other
+  # unreachable-node case surfaces here (issue #317).
+  defp pipeline_catching_exit(conn, commands, opts) do
+    Redix.pipeline(conn, commands, opts)
+  catch
+    :exit, {:redix_exited_during_call, _reason} ->
+      {:error, %Redix.ConnectionError{reason: :closed}}
+  end
+
   defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
     commands = Enum.map(cmds, fn {_idx, cmd} -> cmd end)
 
-    case Redix.pipeline(conn, commands, opts) do
+    case pipeline_catching_exit(conn, commands, opts) do
       {:ok, results} ->
         indexed_results = Enum.zip(cmds, results) |> Enum.map(fn {{idx, _}, r} -> {idx, r} end)
         follow_redirections(cluster, cmds, indexed_results, opts, remaining)
@@ -903,7 +924,7 @@ defmodule Redix.Cluster do
   # follows any further redirection the target returns. ASKING only needs to ride
   # the first request to a given node, so subsequent hops re-issue it themselves.
   defp execute_asking_command(cluster, conn, {idx, cmd}, opts, remaining) do
-    case Redix.pipeline(conn, [["ASKING"], cmd], opts) do
+    case pipeline_catching_exit(conn, [["ASKING"], cmd], opts) do
       {:ok, [_asking_ok, result]} ->
         case follow_redirections(cluster, [{idx, cmd}], [{idx, result}], opts, remaining) do
           {:error, _} = error -> error
