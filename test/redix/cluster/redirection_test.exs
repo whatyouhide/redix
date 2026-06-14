@@ -176,6 +176,84 @@ defmodule Redix.Cluster.RedirectionTest do
     end
   end
 
+  # Reproduces issue #321: a transaction queued on a stale primary (e.g. right
+  # after a failover) is rejected with MOVED at queue time, aborting EXEC with
+  # EXECABORT. Since a cluster transaction targets a single slot, the whole
+  # MULTI/EXEC is re-run at the redirect target.
+  test "follows a MOVED redirect for a transaction by re-running it at the target", %{
+    cluster: cluster
+  } do
+    slot = Hash.hash_slot("x")
+
+    node_b =
+      start_node(cluster, fn
+        ["MULTI"] -> "+OK\r\n"
+        ["SET", _, _] -> "+QUEUED\r\n"
+        ["EXEC"] -> "*1\r\n+OK\r\n"
+      end)
+
+    node_a =
+      start_node(cluster, fn
+        ["MULTI"] -> "+OK\r\n"
+        ["SET", _, _] -> "-MOVED #{slot} #{node_b}\r\n"
+        ["EXEC"] -> "-EXECABORT Transaction discarded because of previous errors.\r\n"
+      end)
+
+    route_slot(cluster, slot, node_a)
+
+    assert Redix.Cluster.transaction_pipeline(cluster, [["SET", "x", "1"]]) == {:ok, ["OK"]}
+  end
+
+  test "follows an ASK redirect for a transaction with an ASKING-prefixed re-run", %{
+    cluster: cluster
+  } do
+    slot = Hash.hash_slot("x")
+
+    # The importing node accepts a single ASKING that flags the whole MULTI.
+    node_b =
+      start_node(cluster, fn
+        ["ASKING"] -> "+OK\r\n"
+        ["MULTI"] -> "+OK\r\n"
+        ["SET", _, _] -> "+QUEUED\r\n"
+        ["EXEC"] -> "*1\r\n+OK\r\n"
+      end)
+
+    node_a =
+      start_node(cluster, fn
+        ["MULTI"] -> "+OK\r\n"
+        ["SET", _, _] -> "-ASK #{slot} #{node_b}\r\n"
+        ["EXEC"] -> "-EXECABORT Transaction discarded because of previous errors.\r\n"
+      end)
+
+    route_slot(cluster, slot, node_a)
+
+    assert Redix.Cluster.transaction_pipeline(cluster, [["SET", "x", "1"]]) == {:ok, ["OK"]}
+  end
+
+  test "bounds an endless MOVED redirection loop for a transaction", %{cluster: cluster} do
+    slot = Hash.hash_slot("x")
+
+    {listen_a, node_a} = listen(cluster)
+    {listen_b, node_b} = listen(cluster)
+
+    serve(listen_a, fn
+      ["MULTI"] -> "+OK\r\n"
+      ["SET", _, _] -> "-MOVED #{slot} #{node_b}\r\n"
+      ["EXEC"] -> "-EXECABORT Transaction discarded because of previous errors.\r\n"
+    end)
+
+    serve(listen_b, fn
+      ["MULTI"] -> "+OK\r\n"
+      ["SET", _, _] -> "-MOVED #{slot} #{node_a}\r\n"
+      ["EXEC"] -> "-EXECABORT Transaction discarded because of previous errors.\r\n"
+    end)
+
+    route_slot(cluster, slot, node_a)
+
+    assert Redix.Cluster.transaction_pipeline(cluster, [["SET", "x", "1"]]) ==
+             {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
+  end
+
   ## Helpers
 
   defp route_slot(cluster, slot, node_id) do
