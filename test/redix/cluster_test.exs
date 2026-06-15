@@ -549,7 +549,7 @@ defmodule Redix.ClusterTest do
       assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == :error
 
       # On-demand connect succeeds and registers the node.
-      assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, address)
+      assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, address, 5_000)
       assert is_pid(pid)
       assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == {:ok, pid}
 
@@ -557,7 +557,7 @@ defmodule Redix.ClusterTest do
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
 
       # Idempotent: a second call returns the same connection.
-      assert Redix.Cluster.Manager.connect_to_node(manager, address) == {:ok, pid}
+      assert Redix.Cluster.Manager.connect_to_node(manager, address, 5_000) == {:ok, pid}
     end
 
     test "Manager.connect_to_node returns the existing pid for a known node", %{cluster: cluster} do
@@ -569,7 +569,7 @@ defmodule Redix.ClusterTest do
       address = {host, String.to_integer(port_str)}
 
       assert {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, address)
-      assert Redix.Cluster.Manager.connect_to_node(manager, address) == {:ok, pid}
+      assert Redix.Cluster.Manager.connect_to_node(manager, address, 5_000) == {:ok, pid}
     end
 
     test "Manager.connect_to_node returns an error for an unreachable target", %{cluster: cluster} do
@@ -577,8 +577,21 @@ defmodule Redix.ClusterTest do
 
       # sync_connect is false, so the Redix process still starts; PING is what
       # surfaces the connection failure.
-      assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, {"127.0.0.1", 9999})
+      assert {:ok, pid} =
+               Redix.Cluster.Manager.connect_to_node(manager, {"127.0.0.1", 9999}, 5_000)
+
       assert {:error, %Redix.ConnectionError{}} = Redix.command(pid, ["PING"])
+    end
+
+    test "Manager.connect_to_node degrades to an error when the manager is busy (issue #327)" do
+      # A manager stuck in a slow serial topology refresh would otherwise block the
+      # on-demand connect (and thus the MOVED/ASK redirect) for the whole refresh.
+      # A busy manager is stood in for by a process that never replies to the call;
+      # the finite timeout must fire and the caught exit must degrade to an error.
+      busy_manager = spawn(fn -> Process.sleep(:infinity) end)
+
+      assert {:error, _reason} =
+               Redix.Cluster.Manager.connect_to_node(busy_manager, {"127.0.0.1", 7000}, 50)
     end
   end
 

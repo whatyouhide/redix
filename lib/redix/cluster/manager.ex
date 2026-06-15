@@ -165,13 +165,18 @@ defmodule Redix.Cluster.Manager do
   `CLUSTER SLOTS`) or terminates it (if it doesn't), so a bogus address can't
   leak connections.
   """
-  @spec connect_to_node(:gen_statem.server_ref(), {String.t(), :inet.port_number()}) ::
+  @spec connect_to_node(:gen_statem.server_ref(), {String.t(), :inet.port_number()}, timeout()) ::
           {:ok, pid()} | {:error, term()}
-  def connect_to_node(manager, {host, port}) do
+  def connect_to_node(manager, {host, port}, timeout) do
     # This runs in the command hot path, so a Manager that's briefly busy (say,
     # mid-refresh against slow nodes) must not crash the caller: degrade to an
-    # error tuple, which the MOVED handler turns into a normal Redix error.
-    :gen_statem.call(manager, {:connect_to_node, host, port})
+    # error tuple, which the MOVED handler turns into a normal Redix error. The
+    # Manager fetches topology *serially* and each unreachable node can cost up to
+    # the connection `:timeout`, so a finite call timeout is essential, otherwise a
+    # slow refresh against a partially-down cluster blocks every on-demand connect
+    # (and thus every MOVED/ASK redirect) for the whole refresh (issue #327). On
+    # timeout the `:exit` is caught and degrades to the documented error path.
+    :gen_statem.call(manager, {:connect_to_node, host, port}, timeout)
   catch
     :exit, reason -> {:error, reason}
   end

@@ -183,7 +183,7 @@ This eliminates the need for `persistent_term` or any external lookup.
 
 - **MOVED and ASK redirects connect on demand.** When a redirect points at a node not
   yet in the Registry, `handle_moved_redirect/6` and `handle_ask_redirect/6` fall back to
-  `Manager.connect_to_node/2` — a `:gen_statem.call` served in both `:ready` and
+  `Manager.connect_to_node/3` — a `:gen_statem.call` served in both `:ready` and
   `:cooling_down` that starts+monitors a connection to the redirect target and returns its
   pid. For `MOVED` the typical case is mid-resharding (the topology refresh cast is async
   and the Manager may be `:cooling_down`); for `ASK` it's a slot migrating to a
@@ -193,7 +193,12 @@ This eliminates the need for `persistent_term` or any external lookup.
   than returning a fake "unreachable" error. The next `ensure_connections` adopts the
   connection (if `CLUSTER SLOTS` lists it) or terminates it (if not), so a bogus address
   can't leak connections. For `MOVED`, the async refresh still fires to update the slot
-  table for future routing.
+  table for future routing. The call takes a **finite timeout** — the redirected
+  command's `:timeout` (`Redix.Cluster.connect_timeout/1`), not `:infinity`: the Manager
+  fetches topology *serially* and each unreachable node costs up to the connection
+  `:timeout`, so an `:infinity` call would block every on-demand connect for the whole
+  refresh against a partially-down cluster. On timeout the caught `:exit` degrades to the
+  normal "unreachable" error path (issue #327).
 
 - **Redirect chains are followed, not just single hops.** `MOVED` and `ASK` both
   flow through `follow_redirections/5`, the single place the `@max_redirections`

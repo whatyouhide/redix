@@ -585,8 +585,11 @@ defmodule Redix.Cluster do
     # redirect address is authoritative. Mirrors handle_moved_redirect/6.
     conn =
       case Manager.get_connection_by_node(registry_name(cluster), {host, port}) do
-        {:ok, conn} -> {:ok, conn}
-        :error -> Manager.connect_to_node(manager_name(cluster), {host, port})
+        {:ok, conn} ->
+          {:ok, conn}
+
+        :error ->
+          Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
       end
 
     case conn do
@@ -871,8 +874,11 @@ defmodule Redix.Cluster do
     # trust the address rather than surfacing a fake "unreachable" error.
     conn =
       case Manager.get_connection_by_node(registry, {host, port}) do
-        {:ok, conn} -> {:ok, conn}
-        :error -> Manager.connect_to_node(manager_name(cluster), {host, port})
+        {:ok, conn} ->
+          {:ok, conn}
+
+        :error ->
+          Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
       end
 
     case conn do
@@ -899,8 +905,11 @@ defmodule Redix.Cluster do
     # `ensure_connections` adopts or terminates the connection (issue #319).
     conn =
       case Manager.get_connection_by_node(registry, {host, port}) do
-        {:ok, conn} -> {:ok, conn}
-        :error -> Manager.connect_to_node(manager_name(cluster), {host, port})
+        {:ok, conn} ->
+          {:ok, conn}
+
+        :error ->
+          Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
       end
 
     case conn do
@@ -979,6 +988,10 @@ defmodule Redix.Cluster do
     end
 
     :ok
+  end
+
+  defp connect_timeout(opts) do
+    Keyword.get(opts, :timeout, @default_timeout)
   end
 
   # Resolves the connection for a slot according to the routing choice. Returns

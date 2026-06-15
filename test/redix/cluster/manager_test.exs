@@ -193,12 +193,12 @@ defmodule Redix.Cluster.ManagerTest do
     } do
       # Simulate a node that the Manager tracks (connected + monitored) but that is
       # not part of `CLUSTER SLOTS` — e.g. a node that just left the cluster.
-      # `connect_to_node/2` registers and monitors it exactly like a real node, and
+      # `connect_to_node/3` registers and monitors it exactly like a real node, and
       # `sync_connect: false` means the connection starts even if 7099 is refused.
       fake_node = {"127.0.0.1", 7099}
       fake_id = "127.0.0.1:7099"
 
-      {:ok, fake_pid} = Redix.Cluster.Manager.connect_to_node(manager, fake_node)
+      {:ok, fake_pid} = Redix.Cluster.Manager.connect_to_node(manager, fake_node, 5_000)
       ref = Process.monitor(fake_pid)
       assert [{^fake_pid, _}] = Registry.lookup(registry, fake_id)
 
