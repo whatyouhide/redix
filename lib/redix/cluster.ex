@@ -712,6 +712,9 @@ defmodule Redix.Cluster do
     indexed_commands
     |> Enum.group_by(fn {_idx, _cmd, slot} -> Map.fetch!(resolved_by_slot, slot) end)
     |> Enum.map(fn {node_key, commands} ->
+      # When resolution fails, carry the appropriate connection error in the conn slot
+      # (rather than nil) so execute_groups/3 can surface it for both single- and
+      # multi-group pipelines without re-deriving the reason.
       conn =
         case node_key do
           {:ok, pid} ->
@@ -720,11 +723,11 @@ defmodule Redix.Cluster do
           :random ->
             case Manager.get_random_connection(registry) do
               {:ok, pid} -> pid
-              :error -> nil
+              :error -> %Redix.ConnectionError{reason: :closed}
             end
 
           :error ->
-            nil
+            no_connection_error(route)
         end
 
       cmds = Enum.map(commands, fn {idx, cmd, _slot} -> {idx, cmd} end)
@@ -732,15 +735,23 @@ defmodule Redix.Cluster do
     end)
   end
 
+  # The error to surface when no connection can be resolved for a slot. A `:replica`
+  # route that resolves to nothing means no replica was reachable — most often because
+  # the cluster wasn't started with `read_from_replicas: true` — so a descriptive reason
+  # saves debugging time over a bare `:closed`. Any other route resolving to nothing is a
+  # genuinely closed/absent connection.
+  defp no_connection_error(:replica), do: %Redix.ConnectionError{reason: :no_replica_connection}
+  defp no_connection_error(_route), do: %Redix.ConnectionError{reason: :closed}
+
   # No connection could be resolved for this group (for example `route: :replica`
-  # when no replica is reachable). Surface a connection error rather than crashing
-  # on `Redix.pipeline(nil, ...)`.
-  defp execute_groups(_cluster, [{nil, _cmds}], _opts) do
-    {:error, %Redix.ConnectionError{reason: :closed}}
+  # when no replica is reachable). group_by_node/4 put the right `%Redix.ConnectionError{}`
+  # in the conn slot; surface it rather than crashing on `Redix.pipeline(error, ...)`.
+  defp execute_groups(_cluster, [{%Redix.ConnectionError{} = error, _cmds}], _opts) do
+    {:error, error}
   end
 
   # If there's only a single group to execute, we don't need parallel tasks.
-  defp execute_groups(cluster, [{conn, cmds}], opts) do
+  defp execute_groups(cluster, [{conn, cmds}], opts) when is_pid(conn) do
     execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
   end
 
@@ -750,17 +761,19 @@ defmodule Redix.Cluster do
     groups_with_tasks =
       Enum.map(groups, fn {conn, cmds} ->
         task =
-          if conn == nil do
-            Task.completed({:error, %Redix.ConnectionError{reason: :closed}})
-          else
-            # async_nolink, *not* async: a crashing task must not take the caller down
-            # with it via a link (issue #317). With async_nolink, Task.yield_many/2
-            # reports the crash as {:exit, reason}, which __collect_group_results__
-            # turns into a per-command error value instead of letting the link kill us
-            # before yield_many even returns.
-            Task.Supervisor.async_nolink(task_supervisor, fn ->
-              execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
-            end)
+          case conn do
+            %Redix.ConnectionError{} = error ->
+              Task.completed({:error, error})
+
+            conn when is_pid(conn) ->
+              # async_nolink, *not* async: a crashing task must not take the caller down
+              # with it via a link (issue #317). With async_nolink, Task.yield_many/2
+              # reports the crash as {:exit, reason}, which __collect_group_results__
+              # turns into a per-command error value instead of letting the link kill us
+              # before yield_many even returns.
+              Task.Supervisor.async_nolink(task_supervisor, fn ->
+                execute_and_handle_redirections(cluster, conn, cmds, opts, @max_redirections)
+              end)
           end
 
         {cmds, task}

@@ -688,12 +688,12 @@ defmodule Redix.ClusterTest do
   end
 
   describe ":route option (no replicas connected)" do
-    test "route: :replica returns a connection error when no replica is connected", %{
+    test "route: :replica returns a descriptive connection error when no replica is connected", %{
       cluster: cluster
     } do
       Redix.Cluster.command!(cluster, ["SET", "noreplica", "v"])
 
-      assert {:error, %Redix.ConnectionError{}} =
+      assert {:error, %Redix.ConnectionError{reason: :no_replica_connection}} =
                Redix.Cluster.command(cluster, ["GET", "noreplica"], route: :replica)
     end
 

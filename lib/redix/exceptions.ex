@@ -42,6 +42,10 @@ defmodule Redix.ConnectionError do
       in-flight command goes unanswered for longer than that interval, so Redix closes
       the connection and reconnects.
 
+    * `:no_replica_connection`: when a `Redix.Cluster` command with `route: :replica`
+      finds no reachable replica for the slot, most often because the cluster wasn't
+      started with `read_from_replicas: true`.
+
   """
 
   @typedoc """
@@ -72,6 +76,12 @@ defmodule Redix.ConnectionError do
   # Manually returned by us when the connection is closed and someone tries to
   # send a command to Redis.
   defp format_reason(:closed), do: "the connection to Redis is closed"
+
+  # Returned by Redix.Cluster when a `route: :replica` command finds no reachable
+  # replica (often because the cluster wasn't started with read_from_replicas: true).
+  defp format_reason(:no_replica_connection),
+    do:
+      "no replica connection available for the slot (was the cluster started with read_from_replicas: true?)"
 
   # Returned during sentinel connections when the server has an
   # unexpected role (for example, "master" instead of "slave").
