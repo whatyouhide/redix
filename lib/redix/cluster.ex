@@ -1136,8 +1136,11 @@ defmodule Redix.Cluster do
             :ets.insert(command_cache, {name, keyspec_from_info(info)})
           end)
 
-        # On a malformed reply or connection error we simply don't cache; the commands
-        # resolve to :no_slot for this call and we retry COMMAND INFO next time.
+        # A malformed *whole* reply (wrong length) or a connection error isn't cached:
+        # the commands resolve to :no_slot for this call and we retry COMMAND INFO next
+        # time. Note this is only about the whole reply — a well-formed reply whose entry
+        # for a given command is `nil` (a command the server doesn't know) *is* cached as
+        # :no_key by keyspec_from_info/1.
         _other ->
           :ok
       end
@@ -1146,7 +1149,7 @@ defmodule Redix.Cluster do
 
   # COMMAND INFO reply per command: [name, arity, flags, first_key, last_key, step | _].
   # We route on the first key, so we only need first_key (1-based, command name at 0) and
-  # whether the keys are movable. `nil` means the server doesn't know the command.
+  # whether the keys are movable.
   defp keyspec_from_info([_name, _arity, flags, first_key, _last_key, _step | _]) do
     cond do
       "movablekeys" in flags -> :movable
@@ -1155,6 +1158,11 @@ defmodule Redix.Cluster do
     end
   end
 
+  # A command the server doesn't know comes back as `nil` (and any other unparseable
+  # entry lands here too). We cache it as :no_key deliberately: the answer is stable, so
+  # re-issuing COMMAND INFO for it on every call would be wasted work. This per-entry
+  # caching is distinct from the malformed/short *whole* reply that cache_missing_keyspecs/3
+  # leaves uncached.
   defp keyspec_from_info(_other), do: :no_key
 
   defp slots_from_keyspecs(conn, command_cache, unknowns) do
