@@ -199,7 +199,9 @@ defmodule Redix.Cluster.Manager do
     read_from_replicas = Keyword.fetch!(opts, :read_from_replicas)
     sync_connect = Keyword.fetch!(opts, :sync_connect)
 
-    slot_table = :ets.new(table_name, [:named_table, :public, :set, {:read_concurrency, true}])
+    # :protected, not :public: only the Manager (the owner) ever writes the slot
+    # table; callers only read it, so :protected is free hardening.
+    slot_table = :ets.new(table_name, [:named_table, :protected, :set, {:read_concurrency, true}])
 
     # Caches the key specification (first-key position / movable / no-key) of commands
     # outside CommandParser's static table, learned via COMMAND INFO. Written from
