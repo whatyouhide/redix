@@ -111,6 +111,13 @@ defmodule Redix.Cluster do
 
   @default_timeout 5_000
 
+  # Upper bound on the per-cluster command cache (issue #329). Real Redis exposes a
+  # few hundred commands, so genuine traffic never approaches this; the cap only
+  # stops the cache from growing without bound on a pathological stream of distinct
+  # unknown command names. Past the cap, uncached commands keep resolving per-call
+  # (to a random node), exactly as they did before any caching existed.
+  @command_cache_max_size 2048
+
   @valid_routes [:primary, :replica, :prefer_replica]
 
   node_as_keyword_opts_schema = [
@@ -1120,7 +1127,7 @@ defmodule Redix.Cluster do
       |> Enum.uniq()
       |> Enum.reject(&(:ets.lookup(command_cache, &1) != []))
 
-    if missing != [] do
+    if missing != [] and :ets.info(command_cache, :size) < @command_cache_max_size do
       case Redix.command(conn, ["COMMAND", "INFO" | missing]) do
         {:ok, infos} when length(infos) == length(missing) ->
           missing
