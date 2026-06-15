@@ -154,6 +154,16 @@ defmodule Redix.Cluster.CommandParserTest do
     test "String.Chars arguments are converted" do
       assert key_from_command(["GET", :mykey]) == {:ok, "mykey"}
       assert key_from_command(["SET", :mykey, 42]) == {:ok, "mykey"}
+
+      # Non-binary arguments must also work through the helper paths, which extract
+      # the key (and parse numkeys / scan for STREAMS / read a subcommand) lazily
+      # rather than relying on the whole command being stringified up front.
+      assert key_from_command(["EVAL", "return 1", 1, :mykey, "arg"]) == {:ok, "mykey"}
+      assert key_from_command(["LMPOP", 1, :mykey, "LEFT"]) == {:ok, "mykey"}
+      assert key_from_command(["BITOP", :AND, :dest, "src"]) == {:ok, "dest"}
+      assert key_from_command(["OBJECT", :ENCODING, :mykey]) == {:ok, "mykey"}
+      assert key_from_command(["MEMORY", :USAGE, :mykey]) == {:ok, "mykey"}
+      assert key_from_command(["XREAD", "COUNT", 2, "STREAMS", :stream, 0]) == {:ok, "stream"}
     end
 
     test "expiry-related commands" do

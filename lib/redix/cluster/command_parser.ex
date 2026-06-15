@@ -71,9 +71,12 @@ defmodule Redix.Cluster.CommandParser do
     :no_key
   end
 
-  def key_from_command(command) when is_list(command) do
-    [name | args] = Enum.map(command, &to_string/1)
-    upcased = String.upcase(name)
+  # Only the command name (always) and the specific argument we route on are converted
+  # to a string. Mapping `to_string/1` over the *whole* command would walk and reallocate
+  # every argument — wasteful on the hot path for many-argument commands (a large MSET,
+  # MGET, or DEL), which is exactly the common @key_pos_1 case.
+  def key_from_command([name | args]) do
+    upcased = name |> to_string() |> String.upcase()
 
     cond do
       upcased in @keyless ->
@@ -94,7 +97,7 @@ defmodule Redix.Cluster.CommandParser do
       # naturally falls through to :no_key.
       upcased in ["OBJECT", "XINFO", "XGROUP"] ->
         case args do
-          [_subcommand, key | _] -> {:ok, key}
+          [_subcommand, key | _] -> {:ok, to_string(key)}
           _ -> :no_key
         end
 
@@ -103,7 +106,9 @@ defmodule Redix.Cluster.CommandParser do
       upcased == "MEMORY" ->
         case args do
           [subcommand, key | _] ->
-            if String.upcase(subcommand) == "USAGE", do: {:ok, key}, else: :no_key
+            if String.upcase(to_string(subcommand)) == "USAGE",
+              do: {:ok, to_string(key)},
+              else: :no_key
 
           _ ->
             :no_key
@@ -114,7 +119,9 @@ defmodule Redix.Cluster.CommandParser do
       upcased == "DEBUG" ->
         case args do
           [subcommand, key | _] ->
-            if String.upcase(subcommand) == "OBJECT", do: {:ok, key}, else: :no_key
+            if String.upcase(to_string(subcommand)) == "OBJECT",
+              do: {:ok, to_string(key)},
+              else: :no_key
 
           _ ->
             :no_key
@@ -124,20 +131,20 @@ defmodule Redix.Cluster.CommandParser do
       # at position 2 (right after the operation).
       upcased == "BITOP" ->
         case args do
-          [_operation, destkey | _] -> {:ok, destkey}
+          [_operation, destkey | _] -> {:ok, to_string(destkey)}
           _ -> :no_key
         end
 
       # numkeys-first commands: CMD numkeys key [key ...]. First key is at position 2.
       upcased in @numkeys_pos_2 ->
         case args do
-          [_numkeys, key | _] -> {:ok, key}
+          [_numkeys, key | _] -> {:ok, to_string(key)}
           _ -> :no_key
         end
 
       upcased in @key_pos_1 ->
         case args do
-          [key | _] -> {:ok, key}
+          [key | _] -> {:ok, to_string(key)}
           [] -> :no_key
         end
 
@@ -147,10 +154,10 @@ defmodule Redix.Cluster.CommandParser do
   end
 
   # EVAL/EVALSHA: EVAL script numkeys key [key ...] arg [arg ...]
-  defp key_from_eval([_script, numkeys_str | rest]) do
-    case Integer.parse(numkeys_str) do
+  defp key_from_eval([_script, numkeys | rest]) do
+    case Integer.parse(to_string(numkeys)) do
       {0, ""} -> :no_key
-      {_n, ""} when rest != [] -> {:ok, hd(rest)}
+      {_n, ""} when rest != [] -> {:ok, to_string(hd(rest))}
       _other -> :no_key
     end
   end
@@ -178,13 +185,13 @@ defmodule Redix.Cluster.CommandParser do
   defp find_streams_keyword([]), do: nil
 
   defp find_streams_keyword([arg | rest]) do
-    if String.upcase(arg) == "STREAMS" do
+    if String.upcase(to_string(arg)) == "STREAMS" do
       rest
     else
       find_streams_keyword(rest)
     end
   end
 
-  defp extract_first_stream_key([key | _]) when is_binary(key), do: {:ok, key}
-  defp extract_first_stream_key(_), do: :no_key
+  defp extract_first_stream_key([key | _]), do: {:ok, to_string(key)}
+  defp extract_first_stream_key([]), do: :no_key
 end

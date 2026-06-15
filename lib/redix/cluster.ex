@@ -91,7 +91,7 @@ defmodule Redix.Cluster do
   """
   @moduledoc since: "1.6.0"
 
-  alias Redix.Cluster.{CommandParser, Hash, Manager}
+  alias Redix.Cluster.{CommandParser, Hash, KeyResolver, Manager}
 
   @typedoc """
   A node endpoint.
@@ -110,13 +110,6 @@ defmodule Redix.Cluster do
   @max_redirections 5
 
   @default_timeout 5_000
-
-  # Upper bound on the per-cluster command cache (issue #329). Real Redis exposes a
-  # few hundred commands, so genuine traffic never approaches this; the cap only
-  # stops the cache from growing without bound on a pathological stream of distinct
-  # unknown command names. Past the cap, uncached commands keep resolving per-call
-  # (to a random node), exactly as they did before any caching existed.
-  @command_cache_max_size 2048
 
   @valid_routes [:primary, :replica, :prefer_replica]
 
@@ -521,7 +514,7 @@ defmodule Redix.Cluster do
 
     slots =
       indexed_commands
-      |> resolve_unknown_slots(registry, command_cache_name(cluster))
+      |> KeyResolver.resolve_unknown_slots(registry, command_cache_name(cluster))
       |> Enum.map(fn {_idx, _cmd, slot} -> slot end)
       |> Enum.reject(&(&1 == :no_slot))
       |> Enum.uniq()
@@ -647,19 +640,7 @@ defmodule Redix.Cluster do
       target_address: "#{host}:#{port}"
     })
 
-    # The target may not be in the Registry yet (mid-resharding for MOVED, a
-    # brand-new node serving zero slots for ASK), so connect on demand — the
-    # redirect address is authoritative. Mirrors handle_moved_redirect/6.
-    conn =
-      case Manager.get_connection_by_node(registry_name(cluster), {host, port}) do
-        {:ok, conn} ->
-          {:ok, conn}
-
-        :error ->
-          Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
-      end
-
-    case conn do
+    case connect_for_redirect(cluster, host, port, opts) do
       {:ok, conn} ->
         execute_transaction(cluster, conn, commands, opts, remaining - 1, type == :ask)
 
@@ -691,7 +672,7 @@ defmodule Redix.Cluster do
         slot = command_slot(cmd)
         {idx, cmd, slot}
       end)
-      |> resolve_unknown_slots(registry, command_cache_name(cluster))
+      |> KeyResolver.resolve_unknown_slots(registry, command_cache_name(cluster))
 
     # Group by slot -> node. Returns a list of {conn, [{idx, cmd}]} tuples.
     groups = group_by_node(slot_table, registry, indexed_commands, route)
@@ -886,15 +867,6 @@ defmodule Redix.Cluster do
       {:error, %Redix.ConnectionError{reason: :closed}}
   end
 
-  # Same exit guard as pipeline_catching_exit/3, for the single-command COMMAND INFO
-  # issued during unknown-slot resolution (A1).
-  defp command_catching_exit(conn, command) do
-    Redix.command(conn, command)
-  catch
-    :exit, {:redix_exited_during_call, _reason} ->
-      {:error, %Redix.ConnectionError{reason: :closed}}
-  end
-
   defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
     commands = Enum.map(cmds, fn {_idx, cmd} -> cmd end)
 
@@ -973,23 +945,24 @@ defmodule Redix.Cluster do
     end
   end
 
+  # Resolves the connection for a MOVED/ASK redirect target. Fast path: the node is
+  # already in the Registry. Otherwise connect on demand via the Manager — a redirect
+  # address is authoritative (a node added mid-reshard the topology refresh hasn't
+  # caught up to for MOVED; a brand-new node serving zero slots, absent from CLUSTER
+  # SLOTS, for ASK), so we trust it rather than surfacing a fake "unreachable" error.
+  # The next `ensure_connections` adopts the connection or drops it (issues #319, #293).
+  defp connect_for_redirect(cluster, host, port, opts) do
+    case Manager.get_connection_by_node(registry_name(cluster), {host, port}) do
+      {:ok, conn} ->
+        {:ok, conn}
+
+      :error ->
+        Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
+    end
+  end
+
   defp handle_moved_redirect(cluster, host, port, cmds, opts, remaining) do
-    registry = registry_name(cluster)
-
-    # Fast path: the target node is already known. If it isn't (for example a
-    # node added mid-resharding that the topology refresh hasn't caught up to
-    # yet), connect on demand via the Manager — MOVED is authoritative, so we
-    # trust the address rather than surfacing a fake "unreachable" error.
-    conn =
-      case Manager.get_connection_by_node(registry, {host, port}) do
-        {:ok, conn} ->
-          {:ok, conn}
-
-        :error ->
-          Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
-      end
-
-    case conn do
+    case connect_for_redirect(cluster, host, port, opts) do
       {:ok, conn} ->
         case execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
           {:error, _} = error -> [error]
@@ -1007,23 +980,7 @@ defmodule Redix.Cluster do
   end
 
   defp handle_ask_redirect(cluster, host, port, cmds, opts, remaining) do
-    registry = registry_name(cluster)
-
-    # The classic ASK scenario is a slot migrating to a brand-new node: a node
-    # serving zero slots doesn't appear in CLUSTER SLOTS, so it has no Registry
-    # entry and no topology refresh will ever connect it. Like MOVED, fall back
-    # to connecting on demand — ASK targets are cluster members, and the next
-    # `ensure_connections` adopts or terminates the connection (issue #319).
-    conn =
-      case Manager.get_connection_by_node(registry, {host, port}) do
-        {:ok, conn} ->
-          {:ok, conn}
-
-        :error ->
-          Manager.connect_to_node(manager_name(cluster), {host, port}, connect_timeout(opts))
-      end
-
-    case conn do
+    case connect_for_redirect(cluster, host, port, opts) do
       {:ok, conn} ->
         # ASK is a per-command, per-request redirection: each command needs its
         # own ASKING prefix, and the target may redirect us again (ASK -> ASK or
@@ -1143,158 +1100,6 @@ defmodule Redix.Cluster do
       :unknown -> :unknown
     end
   end
-
-  # Commands outside CommandParser's static table come back as :unknown. Rather than
-  # blindly routing them to a random node, we ask the server how it routes them and
-  # cache the answer. Each :unknown entry is replaced with an integer slot (when a key
-  # is found) or :no_slot (no key, or the lookup itself failed — a genuinely unknown
-  # command, or no reachable node). On :no_slot the command keeps the prior behavior of
-  # being sent to a random node.
-  defp resolve_unknown_slots(indexed_commands, registry, command_cache) do
-    unknowns = for {idx, cmd, :unknown} <- indexed_commands, do: {idx, cmd}
-
-    if unknowns == [] do
-      indexed_commands
-    else
-      slots_by_index = resolve_unknowns(unknowns, registry, command_cache)
-
-      Enum.map(indexed_commands, fn
-        {idx, cmd, :unknown} -> {idx, cmd, Map.fetch!(slots_by_index, idx)}
-        {_idx, _cmd, _slot} = resolved -> resolved
-      end)
-    end
-  end
-
-  # Resolves a list of `{idx, command}` unknowns to a `%{idx => slot | :no_slot}` map.
-  #
-  # The key specification of a command (first-key position, or "movable" keys) is stable,
-  # so we learn it once via COMMAND INFO and cache it per command name. Subsequent calls
-  # to the same command resolve locally with no network round-trip. Commands Redis reports
-  # as having *movable* keys (e.g. MIGRATE, BLMPOP) can't be pinned to a fixed position, so
-  # those fall back to a per-call COMMAND GETKEYS — but they're rare and still cached as
-  # "movable" so we don't re-issue COMMAND INFO for them.
-  defp resolve_unknowns(unknowns, registry, command_cache) do
-    case Manager.get_random_connection(registry) do
-      {:ok, conn} ->
-        cache_missing_keyspecs(conn, command_cache, unknowns)
-        slots_from_keyspecs(conn, command_cache, unknowns)
-
-      :error ->
-        Map.new(unknowns, fn {idx, _cmd} -> {idx, :no_slot} end)
-    end
-  end
-
-  # Fetches and caches the key specification for any command name not already cached.
-  defp cache_missing_keyspecs(conn, command_cache, unknowns) do
-    missing =
-      unknowns
-      |> Enum.map(fn {_idx, cmd} -> command_name(cmd) end)
-      |> Enum.uniq()
-      |> Enum.reject(&(:ets.lookup(command_cache, &1) != []))
-
-    if missing != [] and :ets.info(command_cache, :size) < @command_cache_max_size do
-      # command_catching_exit, not Redix.command: a randomly-chosen `conn` that died
-      # mid-flight would otherwise exit the *caller* (A1). The caught exit yields an
-      # `{:error, _}` tuple, which falls through to the `_other` clause (nothing cached,
-      # commands resolve to :no_slot for this call, COMMAND INFO retried next time).
-      case command_catching_exit(conn, ["COMMAND", "INFO" | missing]) do
-        {:ok, infos} when length(infos) == length(missing) ->
-          missing
-          |> Enum.zip(infos)
-          |> Enum.each(fn {name, info} ->
-            :ets.insert(command_cache, {name, keyspec_from_info(info)})
-          end)
-
-        # A malformed *whole* reply (wrong length) or a connection error isn't cached:
-        # the commands resolve to :no_slot for this call and we retry COMMAND INFO next
-        # time. Note this is only about the whole reply — a well-formed reply whose entry
-        # for a given command is `nil` (a command the server doesn't know) *is* cached as
-        # :no_key by keyspec_from_info/1.
-        _other ->
-          :ok
-      end
-    end
-  end
-
-  # COMMAND INFO reply per command: [name, arity, flags, first_key, last_key, step | _].
-  # We route on the first key, so we only need first_key (1-based, command name at 0) and
-  # whether the keys are movable.
-  defp keyspec_from_info([_name, _arity, flags, first_key, _last_key, _step | _]) do
-    cond do
-      "movablekeys" in flags -> :movable
-      first_key >= 1 -> {:first_key, first_key}
-      true -> :no_key
-    end
-  end
-
-  # A command the server doesn't know comes back as `nil` (and any other unparseable
-  # entry lands here too). We cache it as :no_key deliberately: the answer is stable, so
-  # re-issuing COMMAND INFO for it on every call would be wasted work. This per-entry
-  # caching is distinct from the malformed/short *whole* reply that cache_missing_keyspecs/3
-  # leaves uncached.
-  defp keyspec_from_info(_other), do: :no_key
-
-  defp slots_from_keyspecs(conn, command_cache, unknowns) do
-    # Static-position and keyless commands resolve locally; movable ones need a per-call
-    # COMMAND GETKEYS, which we batch into a single pipeline.
-    {movable, local} =
-      Enum.split_with(unknowns, fn {_idx, cmd} ->
-        cached_keyspec(command_cache, cmd) == :movable
-      end)
-
-    local_slots =
-      Map.new(local, fn {idx, cmd} ->
-        {idx, slot_from_keyspec(cached_keyspec(command_cache, cmd), cmd)}
-      end)
-
-    Map.merge(local_slots, getkeys_slots(conn, movable))
-  end
-
-  defp cached_keyspec(command_cache, cmd) do
-    case :ets.lookup(command_cache, command_name(cmd)) do
-      [{_name, keyspec}] -> keyspec
-      [] -> :no_key
-    end
-  end
-
-  defp slot_from_keyspec({:first_key, position}, cmd) do
-    # first_key counts the command name as position 0, so it indexes straight into cmd.
-    case Enum.at(cmd, position) do
-      nil -> :no_slot
-      key -> Hash.hash_slot(to_string(key))
-    end
-  end
-
-  defp slot_from_keyspec(_no_key_or_unknown, _cmd), do: :no_slot
-
-  # Per-call COMMAND GETKEYS for movable-key commands, batched into one pipeline.
-  defp getkeys_slots(_conn, []), do: %{}
-
-  defp getkeys_slots(conn, movable) do
-    getkeys = Enum.map(movable, fn {_idx, cmd} -> ["COMMAND", "GETKEYS" | cmd] end)
-
-    # pipeline_catching_exit, not Redix.pipeline: `conn` is a randomly-chosen node
-    # that may already be dying (topology churn), and an uncaught exit here would
-    # crash the *caller* instead of degrading to :no_slot (A1). The caught exit
-    # surfaces as `{:error, _}`, which the clause below maps to :no_slot.
-    case pipeline_catching_exit(conn, getkeys, []) do
-      {:ok, results} ->
-        movable
-        |> Enum.zip(results)
-        |> Map.new(fn {{idx, _cmd}, result} -> {idx, slot_from_getkeys(result)} end)
-
-      {:error, _reason} ->
-        Map.new(movable, fn {idx, _cmd} -> {idx, :no_slot} end)
-    end
-  end
-
-  # COMMAND GETKEYS returns the list of keys for a command. We route on the first one. A
-  # command with no keys comes back as a Redix.Error, which falls through to :no_slot.
-  defp slot_from_getkeys([key | _]) when is_binary(key), do: Hash.hash_slot(key)
-  defp slot_from_getkeys(_other), do: :no_slot
-
-  defp command_name([name | _]), do: name |> to_string() |> String.upcase()
-  defp command_name([]), do: ""
 
   # Deterministic resource names derived from the cluster name.
   defp slot_table_name(cluster), do: :"#{cluster}_slots"

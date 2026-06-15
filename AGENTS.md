@@ -289,3 +289,14 @@ services need their default host ports free.
   staleness tolerance, or zone/locality awareness yet.
 - No cluster PubSub (different semantics — messages broadcast to all nodes)
 - No `noreply_*` functions in cluster mode
+- **Topology refresh is synchronous on the `Manager` process.** `do_refresh_topology/1`
+  runs inside the gen_statem callback, so while a refresh is in flight the Manager
+  serves no other events. Steady-state commands don't touch the Manager, so this is
+  invisible there; it only delays the on-demand `connect_to_node` path (MOVED/ASK to a
+  not-yet-known node) during a slow refresh against a partially-down cluster, where each
+  unreachable node costs up to the connection `:timeout`. That path uses a finite call
+  timeout and fails fast (issue #327), so it never hangs, but a redirect can spuriously
+  fail mid-refresh. Future work: move `fetch_cluster_slots/2` into a Task and feed the
+  result back as an event so the Manager stays responsive. Deferred because it reworks
+  the `await_topology_discovery/2` handshake, which relies on the initial fetch being
+  synchronous within the callback.

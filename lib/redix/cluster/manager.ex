@@ -6,6 +6,10 @@ defmodule Redix.Cluster.Manager do
   @refresh_cooldown 1_000
   @backoff_exponent 1.5
 
+  # Total number of hash slots in a Redis Cluster. When the slot table covers all of
+  # them, no slot can have become unassigned, so update_slot_map/2 can skip pruning.
+  @hash_slots 16_384
+
   defstruct [
     :cluster_name,
     :slot_table,
@@ -106,7 +110,8 @@ defmodule Redix.Cluster.Manager do
 
   Used for keyless commands like `PING`, `INFO`, and so on. Primaries are preferred
   so that keyless *write* commands (such as `FLUSHALL`) don't land on a read-only
-  replica; if no primary is registered yet, it falls back to any connection.
+  replica; if no primary is registered yet, it falls back to any connection (so in
+  that rare window a keyless write could hit a replica and bounce back `MOVED`).
   """
   @spec get_random_connection(atom()) :: {:ok, pid()} | :error
   def get_random_connection(registry) do
@@ -272,26 +277,12 @@ defmodule Redix.Cluster.Manager do
     :keep_state_and_data
   end
 
-  def disconnected(:info, {:DOWN, ref, :process, _pid, _reason}, data) do
-    {:keep_state, handle_down(data, ref)}
+  # DOWN, on-demand connect_to_node (served even before the first fetch succeeds —
+  # MOVED is authoritative), await_topology_discovery, and stray :info are handled
+  # identically in every state; see handle_common_event/3.
+  def disconnected(event_type, event_content, data) do
+    handle_common_event(event_type, event_content, data)
   end
-
-  # On-demand connects are served even before the first topology fetch succeeds:
-  # MOVED is authoritative, so there's no reason to wait for CLUSTER SLOTS.
-  def disconnected({:call, from}, {:connect_to_node, host, port}, data) do
-    handle_connect_to_node(from, host, port, data)
-  end
-
-  # This call is only ever *processed* after the initial fetch attempt completed
-  # (events are atomic, so a call arriving mid-attempt queues until the attempt
-  # is done — that queueing is the whole point, see await_topology_discovery/2).
-  # By then the :discovery_attempted marker is set, so replying right away sends
-  # the caller back to a lookup that fails fast.
-  def disconnected({:call, from}, :await_topology_discovery, _data) do
-    {:keep_state_and_data, [{:reply, from, :ok}]}
-  end
-
-  def disconnected(:info, _msg, _data), do: :keep_state_and_data
 
   ## State: :ready — reactive refreshes are accepted.
 
@@ -316,25 +307,9 @@ defmodule Redix.Cluster.Manager do
     {:keep_state, data, [periodic_refresh_action(data.refresh_interval)]}
   end
 
-  def ready(:info, {:DOWN, ref, :process, _pid, _reason}, data) do
-    {:keep_state, handle_down(data, ref)}
+  def ready(event_type, event_content, data) do
+    handle_common_event(event_type, event_content, data)
   end
-
-  def ready({:call, from}, {:connect_to_node, host, port}, data) do
-    handle_connect_to_node(from, host, port, data)
-  end
-
-  # The initial fetch already completed; a caller can only land here by racing
-  # the marker insert (the marker is never removed). Reply right away.
-  def ready({:call, from}, :await_topology_discovery, _data) do
-    {:keep_state_and_data, [{:reply, from, :ok}]}
-  end
-
-  # Catch-all for stray :info messages (symmetric with :disconnected and
-  # :cooling_down). No source emits them today (sockets are passive throughout_
-  # but without this an unexpected message would raise a FunctionClauseError and
-  # crash the Manager, restarting the whole :one_for_all cluster tree (issue #326).
-  def ready(:info, _msg, _data), do: :keep_state_and_data
 
   ## State: :cooling_down — reactive refreshes are silently dropped.
 
@@ -351,22 +326,45 @@ defmodule Redix.Cluster.Manager do
     {:keep_state_and_data, :postpone}
   end
 
-  def cooling_down(:info, {:DOWN, ref, :process, _pid, _reason}, data) do
+  def cooling_down(event_type, event_content, data) do
+    handle_common_event(event_type, event_content, data)
+  end
+
+  ## Private helpers
+
+  # Events handled identically in every state, dispatched to from each state's
+  # trailing catch-all clause:
+  #
+  #   * a monitored connection going `:DOWN` — restart it under its tracked role;
+  #   * an on-demand `connect_to_node` call — served regardless of state, since a
+  #     MOVED/ASK redirect address is authoritative (even while :disconnected, and
+  #     during :cooling_down it isn't a refresh so the cooldown doesn't apply);
+  #   * `await_topology_discovery` — only ever processed after the initial fetch
+  #     attempt completed (a call arriving mid-attempt queues behind it, which is
+  #     the whole point), and the :discovery_attempted marker is never removed, so
+  #     replying right away sends the caller back to a lookup that resolves;
+  #   * a stray `:info` message — absorbed so an unexpected message can't raise a
+  #     FunctionClauseError and crash the Manager, restarting the whole
+  #     :one_for_all cluster tree (issue #326). No source emits them today
+  #     (sockets are passive throughout).
+  #
+  # Any other event (an unknown call/cast/timeout) has no clause here and crashes
+  # the Manager, exactly as it did when each state matched events explicitly.
+  defp handle_common_event(:info, {:DOWN, ref, :process, _pid, _reason}, data) do
     {:keep_state, handle_down(data, ref)}
   end
 
-  # On-demand connects are not refreshes, so they're served even during cooldown.
-  def cooling_down({:call, from}, {:connect_to_node, host, port}, data) do
+  defp handle_common_event({:call, from}, {:connect_to_node, host, port}, data) do
     handle_connect_to_node(from, host, port, data)
   end
 
-  def cooling_down({:call, from}, :await_topology_discovery, _data) do
+  defp handle_common_event({:call, from}, :await_topology_discovery, _data) do
     {:keep_state_and_data, [{:reply, from, :ok}]}
   end
 
-  def cooling_down(:info, _msg, _data), do: :keep_state_and_data
-
-  ## Private helpers
+  defp handle_common_event(:info, _msg, _data) do
+    :keep_state_and_data
+  end
 
   defp periodic_refresh_action(interval) do
     {{:timeout, :periodic_refresh}, interval, :refresh}
@@ -396,6 +394,11 @@ defmodule Redix.Cluster.Manager do
 
     case lookup_connection(data.registry, node_id) do
       {:ok, pid} ->
+        # Returns the existing connection whatever role it's registered under. Just
+        # after a failover that role can be stale (a target promoted to primary may
+        # still be registered/connected as a readonly replica), so a write can bounce
+        # back MOVED — but that's bounded by @max_redirections and self-heals once the
+        # MOVED-triggered refresh reconciles roles in ensure_connections/2.
         {:keep_state_and_data, [{:reply, from, {:ok, pid}}]}
 
       :error ->
@@ -451,6 +454,19 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
+  # NOTE (known limitation): this runs *synchronously* inside the gen_statem callback,
+  # so while a refresh is in flight the Manager processes no other events. In steady
+  # state that's invisible — commands read the slot table and Registry directly and
+  # never call the Manager. It only bites the on-demand `connect_to_node` path
+  # (MOVED/ASK redirects to a not-yet-known node): against a partially-down cluster,
+  # `fetch_cluster_slots/2` tries nodes serially and each unreachable one can cost up to
+  # the connection `:timeout`, so a redirect arriving mid-refresh waits behind it. That's
+  # bounded — `connect_to_node/3` uses a finite call timeout and fails fast on expiry
+  # (issue #327) rather than hanging — but a redirect can still spuriously fail during a
+  # slow refresh. The real fix is to move `fetch_cluster_slots/2` (the network-bound part)
+  # into a Task and feed its result back as an event, keeping the Manager responsive;
+  # that's deferred because it reworks the await_topology_discovery/2 handshake (which
+  # relies on the initial fetch being synchronous within this callback).
   defp do_refresh_topology(data) do
     all_nodes = get_known_nodes(data) ++ data.seed_nodes
 
@@ -489,7 +505,11 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  # TODO: should we use the slot_table to get the known nodes?
+  # The Registry (not the slot table) is the source of known nodes on purpose: it
+  # holds *every* connection we currently hold — primaries, replicas, and any node
+  # connected on demand for a MOVED/ASK redirect that isn't in CLUSTER SLOTS yet — so
+  # a topology re-fetch tries every known-good endpoint, not just the ones the last
+  # slot map covered.
   defp get_known_nodes(data) do
     data.registry
     |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
@@ -583,32 +603,54 @@ defmodule Redix.Cluster.Manager do
   # range — i.e. became unassigned — are deleted so routing can't point at a node
   # that no longer owns them (see issue #314).
   defp update_slot_map(data, slots_data) do
-    covered_slots =
-      for slot_range <- slots_data, reduce: MapSet.new() do
-        acc ->
-          [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
-          primary_id = "#{host}:#{port}"
+    ranges =
+      for slot_range <- slots_data do
+        [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
+        primary_id = "#{host}:#{port}"
 
-          replica_ids =
-            if data.read_from_replicas do
-              for [r_host, r_port | _] <- replica_entries, do: "#{r_host}:#{r_port}"
-            else
-              []
-            end
+        replica_ids =
+          if data.read_from_replicas do
+            for [r_host, r_port | _] <- replica_entries, do: "#{r_host}:#{r_port}"
+          else
+            []
+          end
 
-          Enum.reduce(start_slot..end_slot, acc, fn slot, acc ->
-            :ets.insert(data.slot_table, {slot, primary_id, replica_ids})
-            MapSet.put(acc, slot)
-          end)
+        Enum.each(start_slot..end_slot, fn slot ->
+          :ets.insert(data.slot_table, {slot, primary_id, replica_ids})
+        end)
+
+        {start_slot, end_slot}
       end
 
-    existing_slots = :ets.select(data.slot_table, [{{:"$1", :_, :_}, [], [:"$1"]}])
+    # CLUSTER SLOTS ranges are disjoint, so summing their widths is the covered-slot
+    # count. When every slot is covered (the steady state of a healthy cluster) no
+    # slot can have become unassigned, so we skip the full-table scan + per-slot
+    # deletion entirely — and never build a 16384-element set just to delete nothing.
+    # Pruning only matters for a partially-covered cluster (mid-setup, or one that
+    # lost coverage), where a stale mapping would otherwise route to a node that no
+    # longer owns the slot (issue #314).
+    covered_count =
+      Enum.reduce(ranges, 0, fn {start_slot, end_slot}, acc ->
+        acc + (end_slot - start_slot + 1)
+      end)
 
-    for slot <- existing_slots, not MapSet.member?(covered_slots, slot) do
-      :ets.delete(data.slot_table, slot)
+    if covered_count < @hash_slots do
+      prune_uncovered_slots(data.slot_table, ranges)
     end
 
     :ok
+  end
+
+  defp prune_uncovered_slots(slot_table, ranges) do
+    existing_slots = :ets.select(slot_table, [{{:"$1", :_, :_}, [], [:"$1"]}])
+
+    for slot <- existing_slots, not slot_covered?(slot, ranges) do
+      :ets.delete(slot_table, slot)
+    end
+  end
+
+  defp slot_covered?(slot, ranges) do
+    Enum.any?(ranges, fn {start_slot, end_slot} -> slot >= start_slot and slot <= end_slot end)
   end
 
   defp ensure_connections(data, slots_data) do
