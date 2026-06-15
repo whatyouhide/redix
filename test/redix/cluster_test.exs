@@ -581,18 +581,20 @@ defmodule Redix.ClusterTest do
                [[{0, "a"}], [{1, error}, {2, error}]]
     end
 
-    test "maps a crashed task's exit reason to a connection error value at its indices" do
+    test "maps a crashed task to a :disconnected connection error value at its indices" do
+      # The raw exit reason (here a stand-in for the usual {exception, stacktrace})
+      # is normalized to :disconnected rather than stuffed into the typed reason field.
       results = [
         {%Task{ref: make_ref(), owner: self(), pid: self(), mfa: {:erlang, :apply, 2}},
          {:ok, [{0, "a"}]}},
         {%Task{ref: make_ref(), owner: self(), pid: self(), mfa: {:erlang, :apply, 2}},
-         {:exit, :boom}}
+         {:exit, {%RuntimeError{message: "boom"}, []}}}
       ]
 
       group_cmds = [[{0, ["GET", "a"]}], [{1, ["GET", "b"]}]]
 
       assert Redix.Cluster.__collect_group_results__(Enum.zip(results, group_cmds)) ==
-               [[{0, "a"}], [{1, %Redix.ConnectionError{reason: :boom}}]]
+               [[{0, "a"}], [{1, %Redix.ConnectionError{reason: :disconnected}}]]
     end
   end
 

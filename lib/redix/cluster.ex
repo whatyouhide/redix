@@ -507,11 +507,20 @@ defmodule Redix.Cluster do
 
     await_topology_discovery(cluster, slot_table, opts)
 
-    # All commands in a transaction must target the same slot
-    slots =
+    # All commands in a transaction must target the same slot.
+    indexed_commands =
       commands
       |> Enum.with_index()
       |> Enum.map(fn {cmd, idx} -> {idx, cmd, command_slot(cmd)} end)
+
+    # A command outside the static table comes back as :unknown and is resolved
+    # against the server. If that resolution can't reach any node it degrades to
+    # :no_slot—indistinguishable here from a genuinely keyless command—so
+    # remember whether any command *needed* the server before resolving.
+    had_unknown? = Enum.any?(indexed_commands, fn {_idx, _cmd, slot} -> slot == :unknown end)
+
+    slots =
+      indexed_commands
       |> resolve_unknown_slots(registry, command_cache_name(cluster))
       |> Enum.map(fn {_idx, _cmd, slot} -> slot end)
       |> Enum.reject(&(&1 == :no_slot))
@@ -535,14 +544,26 @@ defmodule Redix.Cluster do
         end
 
       [] ->
-        {:error,
-         %Redix.Error{
-           message:
-             "ERR transaction_pipeline requires at least one command with a key to route on"
-         }}
+        empty_transaction_slots_error(had_unknown?, registry)
 
       _multiple ->
         {:error, %Redix.Error{message: "CROSSSLOT Keys in request don't hash to the same slot"}}
+    end
+  end
+
+  # No command in the transaction yielded a slot. If a command needed server-side
+  # resolution (an :unknown command) and no node is currently reachable, the keys
+  # we *do* have just couldn't be resolved — surface that as a connection error
+  # rather than the misleading "requires a key" message (A4). A genuinely keyless
+  # transaction (or one resolved against a reachable cluster) keeps that message.
+  defp empty_transaction_slots_error(had_unknown?, registry) do
+    if had_unknown? and Manager.get_random_connection(registry) == :error do
+      {:error, %Redix.ConnectionError{reason: :closed}}
+    else
+      {:error,
+       %Redix.Error{
+         message: "ERR transaction_pipeline requires at least one command with a key to route on"
+       }}
     end
   end
 
@@ -783,7 +804,7 @@ defmodule Redix.Cluster do
 
     tasks
     |> Task.yield_many(
-      timeout: Keyword.get(opts, :timeout, @default_timeout),
+      timeout: redirect_aware_timeout(Keyword.get(opts, :timeout, @default_timeout)),
       on_timeout: :kill_task
     )
     |> Enum.zip(group_cmds)
@@ -800,7 +821,10 @@ defmodule Redix.Cluster do
   #
   #   * `{task, {:ok, result}}` — the group finished; `result` is its `[{idx, value}]`
   #     list or an `{:error, _}` tuple returned by `execute_and_handle_redirections/5`.
-  #   * `{task, {:exit, reason}}` — the group's task crashed.
+  #   * `{task, {:exit, reason}}` — the group's task crashed. The raw exit reason
+  #     (often `{exception, stacktrace}`) is *not* propagated as the `%Redix.ConnectionError{}`
+  #     reason: that field is typed `atom() | {:wrong_role, binary()}`, so a crashed
+  #     group surfaces as `:disconnected` (the request was in flight when it died).
   #   * `{task, nil}` — the group timed out and was killed (`on_timeout: :kill_task`).
   #
   # Public (with a name-mangled name) only so it can be unit-tested without a live
@@ -815,8 +839,8 @@ defmodule Redix.Cluster do
         {_task, {:ok, results}} ->
           results
 
-        {_task, {:exit, reason}} ->
-          fill_group_with_error(cmds, %Redix.ConnectionError{reason: reason})
+        {_task, {:exit, _reason}} ->
+          fill_group_with_error(cmds, %Redix.ConnectionError{reason: :disconnected})
 
         {_task, nil} ->
           fill_group_with_error(cmds, %Redix.ConnectionError{reason: :timeout})
@@ -830,6 +854,22 @@ defmodule Redix.Cluster do
     Enum.map(cmds, fn {idx, _cmd} -> {idx, error} end)
   end
 
+  # A group's task may issue up to `1 + @max_redirections` sequential pipelines (the
+  # initial request plus a MOVED/ASK chain), each bounded by the per-call `:timeout`.
+  # `Task.yield_many/2` is only a backstop against a wedged task, so it must allow the
+  # whole chain its per-hop timeout: budgeting just `:timeout` would kill a redirected
+  # group even though every hop stayed within it, while the single-node path (which
+  # never goes through yield_many) lets the same chain run to completion (A3). A wedged
+  # task can't actually reach this bound — each inner pipeline times out at `:timeout`
+  # and returns an error value — so this only matters for genuine redirect work.
+  defp redirect_aware_timeout(:infinity) do
+    :infinity
+  end
+
+  defp redirect_aware_timeout(timeout) when is_integer(timeout) do
+    timeout * (@max_redirections + 1)
+  end
+
   # Redix.pipeline/3 *exits* the caller with {:redix_exited_during_call, reason} when the
   # connection pid is already dead (lib/redix/connection.ex). For single-node Redix the
   # user owns the pid, so an exit is acceptable; in cluster mode the pid is internal and
@@ -841,6 +881,15 @@ defmodule Redix.Cluster do
   # unreachable-node case surfaces here (issue #317).
   defp pipeline_catching_exit(conn, commands, opts) do
     Redix.pipeline(conn, commands, opts)
+  catch
+    :exit, {:redix_exited_during_call, _reason} ->
+      {:error, %Redix.ConnectionError{reason: :closed}}
+  end
+
+  # Same exit guard as pipeline_catching_exit/3, for the single-command COMMAND INFO
+  # issued during unknown-slot resolution (A1).
+  defp command_catching_exit(conn, command) do
+    Redix.command(conn, command)
   catch
     :exit, {:redix_exited_during_call, _reason} ->
       {:error, %Redix.ConnectionError{reason: :closed}}
@@ -1144,7 +1193,11 @@ defmodule Redix.Cluster do
       |> Enum.reject(&(:ets.lookup(command_cache, &1) != []))
 
     if missing != [] and :ets.info(command_cache, :size) < @command_cache_max_size do
-      case Redix.command(conn, ["COMMAND", "INFO" | missing]) do
+      # command_catching_exit, not Redix.command: a randomly-chosen `conn` that died
+      # mid-flight would otherwise exit the *caller* (A1). The caught exit yields an
+      # `{:error, _}` tuple, which falls through to the `_other` clause (nothing cached,
+      # commands resolve to :no_slot for this call, COMMAND INFO retried next time).
+      case command_catching_exit(conn, ["COMMAND", "INFO" | missing]) do
         {:ok, infos} when length(infos) == length(missing) ->
           missing
           |> Enum.zip(infos)
@@ -1220,7 +1273,11 @@ defmodule Redix.Cluster do
   defp getkeys_slots(conn, movable) do
     getkeys = Enum.map(movable, fn {_idx, cmd} -> ["COMMAND", "GETKEYS" | cmd] end)
 
-    case Redix.pipeline(conn, getkeys) do
+    # pipeline_catching_exit, not Redix.pipeline: `conn` is a randomly-chosen node
+    # that may already be dying (topology churn), and an uncaught exit here would
+    # crash the *caller* instead of degrading to :no_slot (A1). The caught exit
+    # surfaces as `{:error, _}`, which the clause below maps to :no_slot.
+    case pipeline_catching_exit(conn, getkeys, []) do
       {:ok, results} ->
         movable
         |> Enum.zip(results)
