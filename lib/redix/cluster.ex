@@ -925,8 +925,11 @@ defmodule Redix.Cluster do
         end
 
       {:error, _reason} ->
+        # The redirect target is unreachable. Surface an honest connection error
+        # rather than a fabricated %Redix.Error{} that masquerades as a server reply
+        # (and starts with "MOVED ", which redirect-parsing user code could misread).
         Enum.map(cmds, fn {idx, _cmd} ->
-          {idx, %Redix.Error{message: "MOVED to unreachable node #{host}:#{port}"}}
+          {idx, %Redix.ConnectionError{reason: :closed}}
         end)
     end
   end
@@ -959,8 +962,10 @@ defmodule Redix.Cluster do
         end)
 
       {:error, _reason} ->
+        # See handle_moved_redirect/6: an honest connection error rather than a
+        # fabricated %Redix.Error{} that starts with "ASK ".
         Enum.map(cmds, fn {idx, _cmd} ->
-          {idx, %Redix.Error{message: "ASK to unreachable node #{host}:#{port}"}}
+          {idx, %Redix.ConnectionError{reason: :closed}}
         end)
     end
   end
