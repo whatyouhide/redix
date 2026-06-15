@@ -443,17 +443,76 @@ defmodule Redix.ClusterTest do
         )
       end
     end
+
+    test "a rediss:// seed enables TLS for every node connection (issue #322)" do
+      name = :"rediss_seed_#{System.unique_integer([:positive])}"
+
+      # The Docker cluster speaks plain TCP, so lifting ssl: true into the conn opts
+      # makes the TLS handshake against port 7000 fail — proving the rediss:// scheme
+      # was honored instead of silently downgraded to plain TCP. With sync_connect:
+      # true that failure surfaces as {:error, _} from start_link.
+      Process.flag(:trap_exit, true)
+
+      assert {:error, _reason} =
+               Redix.Cluster.start_link(
+                 name: name,
+                 nodes: ["rediss://localhost:7000"],
+                 sync_connect: true
+               )
+    end
+
+    test "a rediss:// seed together with an explicit ssl: false raises" do
+      assert_raise ArgumentError, ~r/rediss:\/\/ seed node enables TLS, but ssl: false/, fn ->
+        Redix.Cluster.start_link(
+          name: :rediss_ssl_false_test,
+          nodes: ["rediss://localhost:7000"],
+          ssl: false
+        )
+      end
+    end
+
+    test "credentials in a seed URI raise (pass them as options instead)" do
+      assert_raise ArgumentError, ~r/carries credentials in its URI \(password\)/, fn ->
+        Redix.Cluster.start_link(
+          name: :uri_password_test,
+          nodes: ["redis://user:secret@localhost:7000"]
+        )
+      end
+    end
+
+    test "a seed URI with a non-zero database raises" do
+      assert_raise ArgumentError, ~r/database 0/, fn ->
+        Redix.Cluster.start_link(
+          name: :uri_database_test,
+          nodes: ["redis://localhost:7000/3"]
+        )
+      end
+    end
   end
 
   describe "__parse_node__/1" do
-    test "parses a URI string" do
-      assert Redix.Cluster.__parse_node__("redis://example.com:7000") ==
-               {:ok, {"example.com", 7000}}
+    test "parses a URI string into connection options" do
+      assert {:ok, opts} = Redix.Cluster.__parse_node__("redis://example.com:7000")
+      assert Keyword.equal?(opts, host: "example.com", port: 7000)
+    end
+
+    test "keeps TLS and credentials from a URI string" do
+      assert {:ok, opts} =
+               Redix.Cluster.__parse_node__("rediss://user:pass@example.com:7000/0")
+
+      assert Keyword.equal?(opts,
+               ssl: true,
+               username: "user",
+               password: "pass",
+               database: 0,
+               host: "example.com",
+               port: 7000
+             )
     end
 
     test "parses a host/port keyword list" do
-      assert Redix.Cluster.__parse_node__(host: "example.com", port: 7000) ==
-               {:ok, {"example.com", 7000}}
+      assert {:ok, opts} = Redix.Cluster.__parse_node__(host: "example.com", port: 7000)
+      assert Keyword.equal?(opts, host: "example.com", port: 7000)
     end
 
     test "returns an error for an invalid keyword list" do

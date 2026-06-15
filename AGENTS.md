@@ -107,6 +107,22 @@ This eliminates the need for `persistent_term` or any external lookup.
   already pipelines internally. Users who need more throughput start multiple named
   `Redix.Cluster` instances.
 
+- **Only TLS is lifted from a seed URI; credentials/database raise.** `__parse_node__`
+  returns a full set of connection options per seed (`Redix.URI.to_start_options/1` for
+  a URI, the validated keyword list otherwise), not just `{host, port}`. In `start_link/1`
+  the `{host, port}` of each becomes `seed_nodes` (only host/port are used to reach a
+  seed); `merge_seed_node_opts!/2` then handles the rest via `merge_seed_opt!/2`, run
+  *before* `StartOptions.sanitize` so an explicit `ssl:` stays distinguishable from the
+  default. TLS is genuinely cluster-wide (nodes speak TLS to each other or not at all),
+  so a `rediss://` seed is lifted into `conn_opts` as `ssl: true` (a `rediss://` seed
+  plus explicit `ssl: false` raises). Credentials and a non-default database *can't* be
+  lifted — every node is authenticated with the shared `conn_opts`, and seeds may
+  legitimately differ — so userinfo in a seed URI raises (pass `:username`/`:password`
+  as options) and a non-zero database raises (cluster only supports db 0; db 0 is a
+  no-op). This surfaces the dropped-info footgun loudly instead of silently (issue #322).
+  A plain `redis://`/`valkey://` seed carries no `:ssl` key (default scheme, not an
+  assertion of non-TLS), so `redis://` + `ssl: true` is fine.
+
 - **gen_statem with state_functions** for the Manager. The cooldown after a reactive
   topology refresh is modeled as a state (`:cooling_down`) with a `:state_timeout`,
   not a boolean flag. Periodic refresh uses a named timeout `{:timeout, :periodic_refresh}`

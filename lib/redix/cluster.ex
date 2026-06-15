@@ -99,6 +99,11 @@ defmodule Redix.Cluster do
   It can be either a Redis URI string (such as `"redis://localhost:7000"`)
   or a keyword list with `:host` and `:port` keys
   (such as `[host: "localhost", port: 7000]`).
+
+  Only the host and port of a seed are used to discover the cluster, with one
+  exception: the `rediss://` scheme enables TLS for *every* node connection.
+  Credentials (`user:pass@`) and a non-zero database in a seed URI are not
+  supported and raise. See `start_link/1`.
   """
   @type endpoint() :: String.t() | [{:host, String.t()} | {:port, :inet.port_number()}]
 
@@ -188,6 +193,25 @@ defmodule Redix.Cluster do
   cluster mode (the cluster supervises node connections and handles disconnections
   itself).
 
+  ## TLS and credentials in seed URIs
+
+  The full topology is discovered from a seed node, and every node connection
+  (the seeds and the nodes discovered from them) is made with a single shared
+  configuration. Only the host and port of a seed are used to reach it, so the
+  other parts of a seed URI are handled specially rather than silently dropped:
+
+    * The `rediss://` scheme enables TLS for *every* node connection (equivalent
+      to `ssl: true`), since TLS in a cluster is all-or-nothing. Combining a
+      `rediss://` seed with an explicit `ssl: false` raises an error,
+      so a `rediss://` seed is never silently downgraded to plain TCP.
+
+    * Credentials in a seed URI (`redis://user:pass@host`) raise an error: every
+      node is authenticated with the shared configuration, so pass `:username`
+      and `:password` as connection options instead.
+
+    * A non-zero database in a seed URI raises an error, as a cluster
+      only supports database `0`.
+
   ## Examples
 
       Redix.Cluster.start_link(
@@ -208,7 +232,7 @@ defmodule Redix.Cluster do
     cluster_opts = NimbleOptions.validate!(cluster_opts, @start_link_opts_schema)
 
     name = Keyword.fetch!(cluster_opts, :name)
-    seed_nodes = Keyword.fetch!(cluster_opts, :nodes)
+    parsed_nodes = Keyword.fetch!(cluster_opts, :nodes)
     refresh_interval = Keyword.fetch!(cluster_opts, :topology_refresh_interval)
     read_from_replicas = Keyword.fetch!(cluster_opts, :read_from_replicas)
     sync_connect = Keyword.fetch!(cluster_opts, :sync_connect)
@@ -224,6 +248,18 @@ defmodule Redix.Cluster do
       topology changes itself\
       """
     end
+
+    # Each parsed seed is a full set of connection options. :host and :port identify
+    # the individual seed; everything else (the rediss:// scheme, userinfo, database)
+    # is cluster-wide config, since every node connection shares one configuration.
+    # Fold those into conn_opts so a `rediss://` seed isn't silently downgraded to
+    # plain TCP and URI credentials aren't dropped (issue #322).
+    seed_nodes =
+      Enum.map(parsed_nodes, fn opts ->
+        {Keyword.get(opts, :host, "localhost"), Keyword.get(opts, :port, 6379)}
+      end)
+
+    conn_opts = merge_seed_node_opts!(conn_opts, parsed_nodes)
 
     conn_opts = Redix.StartOptions.sanitize(:redix, conn_opts)
 
@@ -1196,17 +1232,61 @@ defmodule Redix.Cluster do
     {:error, "expected a non-empty list of nodes, got: #{inspect(other)}"}
   end
 
+  # Each parsed seed is a full set of connection options, but the cluster derives
+  # `seed_nodes` from only their host/port: every node (the seeds and the nodes
+  # discovered from them) is reached with the *shared* conn_opts. So most options a seed
+  # URI can carry can't be honored per-seed and we handle them here rather than silently
+  # dropping them (issue #322):
+  #
+  #   * TLS is genuinely cluster-wide, so a `rediss://` seed is lifted into conn_opts.
+  #   * Credentials can't be (the shared conn_opts authenticates every node, and seeds
+  #     may legitimately differ), so userinfo in a seed URI raises — pass
+  #     :username/:password as options instead.
+  #   * A cluster only supports database 0, so a non-zero database raises (0 is a no-op).
+  defp merge_seed_node_opts!(conn_opts, parsed_nodes) do
+    parsed_nodes
+    |> Enum.flat_map(&Keyword.drop(&1, [:host, :port]))
+    |> Enum.reduce(conn_opts, &merge_seed_opt!/2)
+  end
+
+  defp merge_seed_opt!({:ssl, true}, conn_opts) do
+    case Keyword.fetch(conn_opts, :ssl) do
+      {:ok, false} ->
+        raise ArgumentError,
+              "a rediss:// seed node enables TLS, but ssl: false was also passed; remove one"
+
+      _ssl_true_or_absent ->
+        Keyword.put(conn_opts, :ssl, true)
+    end
+  end
+
+  defp merge_seed_opt!({:database, 0}, conn_opts) do
+    conn_opts
+  end
+
+  defp merge_seed_opt!({:database, database}, _conn_opts) do
+    raise ArgumentError, "Redis Cluster only supports database 0, got: #{inspect(database)}"
+  end
+
+  defp merge_seed_opt!({credential, _value}, _conn_opts)
+       when credential in [:username, :password] do
+    raise ArgumentError, """
+    a seed node in :nodes carries credentials in its URI (#{credential}), which can't \
+    be honored in cluster mode: every node is authenticated with the shared \
+    configuration, so pass :username and :password as connection options instead\
+    """
+  end
+
   @doc false
   def __parse_node__(node)
 
   def __parse_node__(uri) when is_binary(uri) do
-    parsed = Redix.URI.to_start_options(uri)
-    {:ok, {Keyword.get(parsed, :host, "localhost"), Keyword.get(parsed, :port, 6379)}}
+    {:ok, Redix.URI.to_start_options(uri)}
   end
 
   def __parse_node__(opts) when is_list(opts) do
     case NimbleOptions.validate(opts, @node_as_keyword_opts_schema) do
-      {:ok, opts} -> {:ok, {Keyword.get(opts, :host), Keyword.get(opts, :port)}}
+      {:ok, opts} -> {:ok, opts}
       {:error, reason} -> {:error, Exception.message(reason)}
     end
   end
