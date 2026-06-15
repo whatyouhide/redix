@@ -270,8 +270,11 @@ defmodule Redix.Cluster do
 
     conn_opts = Redix.StartOptions.sanitize(:redix, conn_opts)
 
+    # The :database option type allows both the integer and the string form, so
+    # accept "0" as well as 0 (both mean database 0, which is the only one a cluster
+    # supports) rather than rejecting the string form with a confusing error.
     case Keyword.fetch(conn_opts, :database) do
-      {:ok, db} when db in [0, nil] ->
+      {:ok, db} when db in [0, "0", nil] ->
         :ok
 
       {:ok, db} ->

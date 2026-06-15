@@ -424,6 +424,13 @@ defmodule Redix.ClusterTest do
       Redix.Cluster.stop(:db_zero_test)
     end
 
+    test "database 0 in string form is allowed" do
+      assert {:ok, _pid} =
+               Redix.Cluster.start_link(name: :db_zero_str_test, nodes: @nodes, database: "0")
+
+      Redix.Cluster.stop(:db_zero_str_test)
+    end
+
     test "sentinel connections are not supported in cluster mode" do
       assert_raise ArgumentError, ~r/Sentinel connections are not supported/, fn ->
         Redix.Cluster.start_link(
