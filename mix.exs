@@ -23,7 +23,8 @@ defmodule Redix.Mixfile do
       # Dialyzer
       dialyzer: [
         plt_local_path: "plts",
-        plt_core_path: "plts"
+        plt_core_path: "plts",
+        plt_add_apps: [:ex_unit]
       ],
 
       # Hex
