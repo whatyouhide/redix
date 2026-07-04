@@ -484,17 +484,17 @@ defmodule Redix.Cluster do
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def transaction_pipeline(cluster, [_ | _] = commands, opts \\ []) when is_atom(cluster) do
-    case validate_route!(opts) do
-      :primary ->
-        :ok
+    opts =
+      case validate_and_pop_route!(opts) do
+        {:primary, opts} ->
+          opts
 
-      other ->
-        raise ArgumentError,
-              "transaction_pipeline/3 only supports route: :primary, got: #{inspect(other)} " <>
-                "(MULTI/EXEC must run on the slot's primary)"
-    end
+        {other, _opts} ->
+          raise ArgumentError,
+                "transaction_pipeline/3 only supports route: :primary, got: #{inspect(other)} " <>
+                  "(MULTI/EXEC must run on the slot's primary)"
+      end
 
-    opts = Keyword.delete(opts, :route)
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
 
@@ -651,13 +651,9 @@ defmodule Redix.Cluster do
 
   ## Pipeline implementation
 
-  defp execute_pipeline(_cluster, [] = _commands, _opts) do
-    raise ArgumentError, "no commands passed to the pipeline"
-  end
-
   defp execute_pipeline(cluster, commands, opts) do
-    route = validate_route!(opts)
-    opts = Keyword.delete(opts, :route)
+    Redix.__assert_valid_pipeline_commands__(commands)
+    {route, opts} = validate_and_pop_route!(opts)
 
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
@@ -1082,12 +1078,12 @@ defmodule Redix.Cluster do
     end
   end
 
-  defp validate_route!(opts) do
-    case Keyword.get(opts, :route, :primary) do
-      route when route in @valid_routes ->
-        route
+  defp validate_and_pop_route!(opts) do
+    case Keyword.pop(opts, :route, :primary) do
+      {route, opts} when route in @valid_routes ->
+        {route, opts}
 
-      other ->
+      {other, _opts} ->
         raise ArgumentError,
               "invalid :route option: #{inspect(other)}, expected one of #{inspect(@valid_routes)}"
     end

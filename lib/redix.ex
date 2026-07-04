@@ -378,7 +378,7 @@ defmodule Redix do
           {:ok, [Redix.Protocol.redis_value()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def pipeline(conn, commands, options \\ []) when is_list(options) do
-    assert_valid_pipeline_commands(commands)
+    __assert_valid_pipeline_commands__(commands)
     pipeline_without_checks(conn, commands, options)
   end
 
@@ -446,7 +446,7 @@ defmodule Redix do
   @spec noreply_pipeline(connection(), [command()], keyword()) ::
           :ok | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def noreply_pipeline(conn, commands, options \\ []) when is_list(options) do
-    assert_valid_pipeline_commands(commands)
+    __assert_valid_pipeline_commands__(commands)
     commands = [["CLIENT", "REPLY", "OFF"]] ++ commands ++ [["CLIENT", "REPLY", "ON"]]
 
     case pipeline_without_checks(conn, commands, options) do
@@ -674,15 +674,18 @@ defmodule Redix do
     Redix.Connection.pipeline(conn, commands, timeout, telemetry_metadata)
   end
 
-  defp assert_valid_pipeline_commands([] = _commands) do
+  # Made public as it's used by Redix.Cluster as well.
+  @doc false
+  @spec __assert_valid_pipeline_commands__(term()) :: :ok
+  def __assert_valid_pipeline_commands__([] = _commands) do
     raise ArgumentError, "no commands passed to the pipeline"
   end
 
-  defp assert_valid_pipeline_commands(commands) when is_list(commands) do
+  def __assert_valid_pipeline_commands__(commands) when is_list(commands) do
     Enum.each(commands, &assert_valid_command/1)
   end
 
-  defp assert_valid_pipeline_commands(other) do
+  def __assert_valid_pipeline_commands__(other) do
     raise ArgumentError, "expected a list of Redis commands, got: #{inspect(other)}"
   end
 

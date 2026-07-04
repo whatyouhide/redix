@@ -453,7 +453,7 @@ defmodule RedixTest do
     end
 
     test "passing a PubSub command causes an error", %{conn: c} do
-      assert_raise ArgumentError, ~r{Redix doesn't support Pub/Sub}, fn ->
+      assert_raise ArgumentError, ~r{for Pub/Sub commands, use Redix\.PubSub connections}, fn ->
         Redix.pipeline(c, [["PING"], ["SUBSCRIBE", "foo"]])
       end
     end
