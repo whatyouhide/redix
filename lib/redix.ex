@@ -694,9 +694,7 @@ defmodule Redix do
     case String.upcase(first) do
       first when first in ["SUBSCRIBE", "PSUBSCRIBE", "UNSUBSCRIBE", "PUNSUBSCRIBE"] ->
         raise ArgumentError,
-              "Redix doesn't support Pub/Sub commands; use redix_pubsub " <>
-                "(https://github.com/whatyouhide/redix_pubsub) for Pub/Sub " <>
-                "functionality support. Offending command: #{inspect(command)}"
+              "for Pub/Sub commands, use Redix.PubSub connections (offending command: #{inspect(command)})"
 
       "CLIENT" ->
         if String.upcase(second) == "REPLY" do
