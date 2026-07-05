@@ -376,6 +376,7 @@ defmodule Redix.Cluster do
     with {:ok, [result]} <- execute_pipeline(cluster, [command], opts) do
       case result do
         %Redix.Error{} = error -> {:error, error}
+        %Redix.ConnectionError{} = error -> {:error, error}
         other -> {:ok, other}
       end
     end
@@ -405,11 +406,13 @@ defmodule Redix.Cluster do
 
   ## Partial failures across nodes
 
-  When a pipeline spans multiple nodes and only *some* of those nodes fail (for example, it times out or its task crashes), the call still returns `{:ok, results}`.
-  The positions of the commands routed to a failed node are filled with the relevant
-  error *value* (a `%Redix.ConnectionError{}`, or a `%Redix.Error{}` for a Redis-level
-  error) at their original indices, while the results from nodes that succeeded stay
-  visible. This extends Redix's "errors are values" philosophy to the cross-node connection-error case, so a failure
+  When a pipeline spans multiple nodes and only *some* of those nodes fail (for
+  example, it times out or its task crashes), the call still returns `{:ok,
+  results}`. The positions of the commands routed to a failed node are filled
+  with the relevant error *value* (a `%Redix.ConnectionError{}`, or a
+  `%Redix.Error{}` for a Redis-level error) at their original indices, while the
+  results from nodes that succeeded stay visible. This extends Redix's "errors
+  are values" philosophy to the cross-node connection-error case, so a failure
   affecting one node no longer discards the work that committed on the others.
 
   This is a deliberate extension of `Redix.pipeline/3`, which fails the whole call
@@ -913,7 +916,19 @@ defmodule Redix.Cluster do
         final_results
 
       remaining <= 0 ->
-        {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
+        # Only the commands still awaiting a hop are exhausted; commands that
+        # already landed in `final_results` (on this node or an earlier hop)
+        # keep their real result instead of being discarded with the rest of
+        # the group (issue #341).
+        exhausted_results =
+          redirect_cmds
+          |> Map.values()
+          |> List.flatten()
+          |> Enum.map(fn {idx, _cmd} ->
+            {idx, %Redix.ConnectionError{reason: :too_many_redirections}}
+          end)
+
+        final_results ++ exhausted_results
 
       true ->
         redirect_results =

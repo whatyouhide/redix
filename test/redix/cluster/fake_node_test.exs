@@ -98,6 +98,37 @@ defmodule Redix.Cluster.FakeNodeTest do
                {:error, %Redix.ConnectionError{reason: :too_many_redirections}}
     end
 
+    # Reproduces issue #341: exhausting the redirect budget used to discard the
+    # whole group's results, including commands that had already succeeded
+    # server-side. Both keys below route to the same initial node, so they're
+    # sent as a single pipeline group.
+    test "exhausting the redirect budget for one command keeps the group's other results", %{
+      cluster: cluster
+    } do
+      slot = Hash.hash_slot("x")
+      good_slot = Hash.hash_slot("good")
+
+      node_a = FakeNode.reserve() |> FakeNode.connect(cluster)
+      node_b = FakeNode.reserve() |> FakeNode.connect(cluster)
+
+      FakeNode.serve(node_a, fn
+        ["ASKING"] -> "+OK\r\n"
+        ["GET", "good"] -> "$2\r\nhi\r\n"
+        ["GET", "x"] -> "-ASK #{slot} #{node_b}\r\n"
+      end)
+
+      FakeNode.serve(node_b, fn
+        ["ASKING"] -> "+OK\r\n"
+        ["GET", "x"] -> "-ASK #{slot} #{node_a}\r\n"
+      end)
+
+      route_slot(cluster, good_slot, node_a)
+      route_slot(cluster, slot, node_a)
+
+      assert Redix.Cluster.pipeline(cluster, [["GET", "good"], ["GET", "x"]]) ==
+               {:ok, ["hi", %Redix.ConnectionError{reason: :too_many_redirections}]}
+    end
+
     # Reproduces issue #306: the cluster code splits a "host:port" node id on every
     # colon and matches `[host, port_str]`, which blows up on IPv6 addresses. Redis
     # emits MOVED/ASK targets unbracketed (e.g. "MOVED 866 ::1:7000"), so following

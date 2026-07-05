@@ -237,6 +237,20 @@ This eliminates the need for `persistent_term` or any external lookup.
   `ASKING` prefix via `execute_asking_command/5`, then re-feeds the result through
   `follow_redirections/5` so a further hop re-issues `ASKING` at the new target.
 
+- **Running out of redirect budget only fails the commands still in flight.**
+  When `follow_redirections/5`'s `remaining` budget hits 0, only the commands still
+  awaiting a hop are turned into `%Redix.ConnectionError{reason: :too_many_redirections}`
+  values at their original indices; commands in the same group that already
+  finished (no redirect needed, or resolved on an earlier hop) keep their real
+  result instead of the whole group being discarded (issue #341). This relies on
+  the recursive MOVED/ASK handlers (`handle_moved_redirect/6`,
+  `handle_ask_redirect/6`, `execute_asking_command/5`) always returning a list of
+  `{idx, result}` tuples rather than a bare `{:error, reason}` — a bare error would
+  match the `{:error, _}` check one level up in `follow_redirections/5` and discard
+  that level's `final_results` too. `command/3` checks the sole result for
+  `%Redix.ConnectionError{}` in addition to `%Redix.Error{}`, since a single-command
+  call can now surface this as a value rather than a top-level `{:error, _}`.
+
 ### Telemetry events
 
 All under `[:redix, :cluster, ...]`:
