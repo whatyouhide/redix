@@ -383,14 +383,25 @@ services need their default host ports free.
   staleness tolerance, or zone/locality awareness yet.
 - No cluster PubSub (different semantics — messages broadcast to all nodes)
 - No `noreply_*` functions in cluster mode
-- **Topology refresh is synchronous on the `Manager` process.** `do_refresh_topology/1`
+- **Topology refresh is synchronous on the `Manager` process.** `do_refresh_topology/2`
   runs inside the gen_statem callback, so while a refresh is in flight the Manager
   serves no other events. Steady-state commands don't touch the Manager, so this is
   invisible there; it only delays the on-demand `connect_to_node` path (MOVED/ASK to a
-  not-yet-known node) during a slow refresh against a partially-down cluster, where each
-  unreachable node costs up to the connection `:timeout`. That path uses a finite call
-  timeout and fails fast (issue #327), so it never hangs, but a redirect can spuriously
-  fail mid-refresh. Future work: move `fetch_cluster_slots/2` into a Task and feed the
-  result back as an event so the Manager stays responsive. Deferred because it reworks
-  the `await_topology_discovery/2` handshake, which relies on the initial fetch being
-  synchronous within the callback.
+  not-yet-known node) and DOWN-triggered restarts during a slow refresh against a
+  partially-down cluster, where each unreachable node costs up to the connection
+  `:timeout`. Two things bound the damage: `connect_to_node` uses a finite call timeout
+  and fails fast (issue #327), and a *steady-state* refresh now bounds its whole sweep to
+  a single `:timeout` budget — `do_refresh_topology/2` takes a `deadline` and
+  `fetch_cluster_slots/3` stops probing once `past_deadline?/1` trips before the next
+  node, so N black-holed nodes can no longer cost N × `:timeout` and block the Manager
+  for tens of seconds (issue #335). Callers pass the deadline: reactive/periodic
+  refreshes in `:ready` pass `fetch_deadline/1` (finite, `:infinity` `:timeout` opts
+  out); the *initial* discovery fetch (sync `init/1` and the `:disconnected` retry)
+  passes `:infinity` so startup reliably reaches a reachable seed even past an earlier
+  black hole, and because nothing else needs the Manager yet. A skipped node is retried
+  on the next refresh, and the first node in a sweep is always tried (the deadline is in
+  the future at the start), so a refresh always attempts at least one node. The remaining,
+  larger step — moving `fetch_cluster_slots/3` (the network-bound part) into a Task and
+  feeding the result back as an event so the Manager never blocks at all — stays deferred
+  because it reworks the `await_topology_discovery/2` handshake, which relies on the
+  initial fetch being synchronous within the callback.

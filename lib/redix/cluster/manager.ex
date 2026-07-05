@@ -286,7 +286,11 @@ defmodule Redix.Cluster.Manager do
     }
 
     if sync_connect do
-      case do_refresh_topology(data) do
+      # The initial discovery fetch is deliberately *unbounded* (deadline :infinity):
+      # startup must reliably reach a reachable seed even if an earlier seed is a black
+      # hole, and blocking here is expected (start_link/1 is allowed to take time). Only
+      # steady-state refreshes are time-bounded (see fetch_deadline/1, issue #335).
+      case do_refresh_topology(data, _deadline = :infinity) do
         {:ok, data} ->
           {:ok, :ready, data, [periodic_refresh_action(refresh_interval)]}
 
@@ -308,7 +312,10 @@ defmodule Redix.Cluster.Manager do
 
   def disconnected(event_type, :connect, data)
       when event_type in [:internal, :state_timeout] do
-    case do_refresh_topology(data) do
+    # Unbounded like the sync initial fetch: this is still *initial* discovery (no node
+    # connections exist yet, so a slow fetch blocks nothing that matters), and it must
+    # reliably reach a reachable seed. Only steady-state refreshes are bounded (#335).
+    case do_refresh_topology(data, _deadline = :infinity) do
       {:ok, data} ->
         data = %{data | backoff_current: nil}
         {:next_state, :ready, data, [periodic_refresh_action(data.refresh_interval)]}
@@ -317,7 +324,7 @@ defmodule Redix.Cluster.Manager do
         # The attempt completed (just unsuccessfully), so set the marker: commands
         # stop awaiting and fail fast — if we couldn't reach the cluster on the
         # first try, it might be a while before we can, and blocking every caller
-        # for each retry wouldn't help. do_refresh_topology/1 sets it on success.
+        # for each retry wouldn't help. do_refresh_topology/2 sets it on success.
         :ets.insert(data.slot_table, {:discovery_attempted, true})
         {backoff, data} = next_backoff(data)
         {:keep_state, data, [{:state_timeout, backoff, :connect}]}
@@ -341,7 +348,7 @@ defmodule Redix.Cluster.Manager do
 
   def ready(:cast, :refresh_topology, data) do
     data =
-      case do_refresh_topology(data) do
+      case do_refresh_topology(data, fetch_deadline(data)) do
         {:ok, data} -> data
         {:error, _reason} -> data
       end
@@ -352,7 +359,7 @@ defmodule Redix.Cluster.Manager do
 
   def ready({:timeout, :periodic_refresh}, :refresh, data) do
     data =
-      case do_refresh_topology(data) do
+      case do_refresh_topology(data, fetch_deadline(data)) do
         {:ok, data} -> data
         {:error, _reason} -> data
       end
@@ -508,23 +515,26 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  # NOTE (known limitation): this runs *synchronously* inside the gen_statem callback,
-  # so while a refresh is in flight the Manager processes no other events. In steady
-  # state that's invisible — commands read the slot table and Registry directly and
-  # never call the Manager. It only bites the on-demand `connect_to_node` path
-  # (MOVED/ASK redirects to a not-yet-known node): against a partially-down cluster,
-  # `fetch_cluster_slots/2` tries nodes serially and each unreachable one can cost up to
-  # the connection `:timeout`, so a redirect arriving mid-refresh waits behind it. That's
-  # bounded — `connect_to_node/3` uses a finite call timeout and fails fast on expiry
-  # (issue #327) rather than hanging — but a redirect can still spuriously fail during a
-  # slow refresh. The real fix is to move `fetch_cluster_slots/2` (the network-bound part)
-  # into a Task and feed its result back as an event, keeping the Manager responsive;
-  # that's deferred because it reworks the await_topology_discovery/2 handshake (which
-  # relies on the initial fetch being synchronous within this callback).
-  defp do_refresh_topology(data) do
+  # NOTE: this runs *synchronously* inside the gen_statem callback, so while a refresh is
+  # in flight the Manager processes no other events. In steady state that's invisible —
+  # commands read the slot table and Registry directly and never call the Manager. It
+  # only bites the on-demand `connect_to_node` path (MOVED/ASK redirects to a
+  # not-yet-known node) and DOWN-triggered restarts, which queue behind an in-flight
+  # refresh. `fetch_cluster_slots/3` tries nodes serially and each unreachable one can
+  # cost up to the connection `:timeout`, so without a bound N black-holed nodes cost
+  # N x `:timeout` and block the Manager for tens of seconds (issue #335). `deadline`
+  # bounds the whole sweep: steady-state refreshes pass a finite one (see
+  # `fetch_deadline/1`) so the Manager stays responsive, while the *initial* discovery
+  # fetch passes `:infinity` so startup reliably reaches a reachable seed. A redirect
+  # arriving mid-refresh still uses a finite call timeout and fails fast rather than
+  # hanging (issue #327). The remaining, larger step — moving the network-bound fetch
+  # into a Task and feeding its result back as an event so the Manager never blocks at
+  # all — stays deferred because it reworks the await_topology_discovery/2 handshake
+  # (which relies on the initial fetch being synchronous within this callback).
+  defp do_refresh_topology(data, deadline) do
     all_nodes = get_known_nodes(data) ++ data.seed_nodes
 
-    case fetch_cluster_slots(all_nodes, data.conn_opts) do
+    case fetch_cluster_slots(all_nodes, data.conn_opts, deadline) do
       {:ok, slots_data} ->
         update_slot_map(data, slots_data)
         data = ensure_connections(data, slots_data)
@@ -614,23 +624,48 @@ defmodule Redix.Cluster.Manager do
     "#{canonical_host}:#{port}"
   end
 
+  # A finite deadline (System.monotonic_time/1 in ms) past which no *further* node is
+  # probed, bounding the whole sweep's wall-clock (issue #335). `:infinity` opts out
+  # (the initial discovery fetch, which must reach a reachable seed however long the
+  # partly-down seed list takes). `nil` conn_opts[:timeout] can't happen —
+  # StartOptions.sanitize/2 always fills it in — but :infinity can, and means "no bound".
+  defp fetch_deadline(%__MODULE__{conn_opts: conn_opts}) do
+    case Keyword.fetch!(conn_opts, :timeout) do
+      :infinity -> :infinity
+      timeout when is_integer(timeout) -> System.monotonic_time(:millisecond) + timeout
+    end
+  end
+
+  defp past_deadline?(:infinity), do: false
+  defp past_deadline?(deadline), do: System.monotonic_time(:millisecond) >= deadline
+
   # `node_errors` accumulates a `{host, port, reason}` tuple per node that was
   # tried and failed, in the order tried, so that when every node is exhausted
   # the caller can see *why* each node was rejected instead of a single opaque
   # :no_reachable_node.
-  defp fetch_cluster_slots(all_nodes, conn_opts) do
-    fetch_cluster_slots(all_nodes, conn_opts, _node_errors = [])
+  defp fetch_cluster_slots(all_nodes, conn_opts, deadline) do
+    fetch_cluster_slots(all_nodes, conn_opts, deadline, _node_errors = [])
   end
 
-  defp fetch_cluster_slots(_all_nodes = [], _conn_opts, node_errors) do
+  defp fetch_cluster_slots(_all_nodes = [], _conn_opts, _deadline, node_errors) do
     {:error, {:no_reachable_node, Enum.reverse(node_errors)}}
   end
 
-  defp fetch_cluster_slots([{host, port} | rest], conn_opts, node_errors) do
-    try_fetch_slots(host, port, conn_opts, rest, node_errors)
+  defp fetch_cluster_slots([{host, port} | rest], conn_opts, deadline, node_errors) do
+    # The first node is always tried (at the start of a sweep the deadline is in the
+    # future), so a refresh always attempts at least one node. A node that consumes the
+    # whole budget — a black hole timing out at `:timeout` — trips this check before the
+    # *next* node, capping the sweep instead of paying `:timeout` per remaining node.
+    # Fast failures (connection refused) don't advance the clock, so a healthy node
+    # later in the list is still reached. Skipped nodes are retried on the next refresh.
+    if past_deadline?(deadline) do
+      {:error, {:no_reachable_node, Enum.reverse(node_errors)}}
+    else
+      try_fetch_slots(host, port, conn_opts, rest, deadline, node_errors)
+    end
   end
 
-  defp try_fetch_slots(host, port, conn_opts, rest, node_errors) do
+  defp try_fetch_slots(host, port, conn_opts, rest, deadline, node_errors) do
     transport = if(conn_opts[:ssl], do: :ssl, else: :gen_tcp)
 
     opts =
@@ -651,21 +686,21 @@ defmodule Redix.Cluster.Manager do
 
                 :error ->
                   node_errors = [{host, port, :invalid_cluster_slots_reply} | node_errors]
-                  fetch_cluster_slots(rest, conn_opts, node_errors)
+                  fetch_cluster_slots(rest, conn_opts, deadline, node_errors)
               end
 
             {:error, reason} ->
-              fetch_cluster_slots(rest, conn_opts, [{host, port, reason} | node_errors])
+              fetch_cluster_slots(rest, conn_opts, deadline, [{host, port, reason} | node_errors])
           end
         after
           transport.close(socket)
         end
 
       {:error, reason} ->
-        fetch_cluster_slots(rest, conn_opts, [{host, port, reason} | node_errors])
+        fetch_cluster_slots(rest, conn_opts, deadline, [{host, port, reason} | node_errors])
 
       {:stop, reason} ->
-        fetch_cluster_slots(rest, conn_opts, [{host, port, reason} | node_errors])
+        fetch_cluster_slots(rest, conn_opts, deadline, [{host, port, reason} | node_errors])
     end
   end
 

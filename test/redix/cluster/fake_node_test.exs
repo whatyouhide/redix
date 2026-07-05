@@ -706,6 +706,78 @@ defmodule Redix.Cluster.FakeNodeTest do
       assert :ets.lookup(slot_table, 0) == [{0, node.id, []}]
       assert :ets.lookup(slot_table, 16_383) == [{16_383, node.id, []}]
     end
+
+    # Reproduces issue #335: a steady-state topology refresh runs synchronously
+    # on the Manager's event loop and probes nodes serially, so a black-holed
+    # node (one that accepts the connection but never replies) costs a full
+    # connection `:timeout`. Left unbounded, N such nodes cost N x `:timeout`
+    # and block the Manager — and every DOWN-triggered restart or MOVED/ASK
+    # on-demand connect queued behind it — for tens of seconds. The refresh now
+    # bounds its total wall-clock: once a node exhausts the budget the sweep
+    # gives up rather than paying `:timeout` for each remaining node.
+    @tag :capture_log
+    test "bounds a steady-state topology refresh instead of probing every node" do
+      cluster = :"bounded_refresh_#{System.unique_integer([:positive])}"
+
+      node_a = FakeNode.reserve()
+      node_b = FakeNode.reserve()
+
+      # `node_a` answers CLUSTER SLOTS normally at first (claiming every slot), then
+      # becomes a black hole: it accepts the fetch connection but never replies, so the
+      # fetch blocks until the command `:timeout`.
+      {:ok, blackhole} = Agent.start_link(fn -> false end)
+
+      FakeNode.serve(node_a, fn
+        ["CLUSTER", "SLOTS"] ->
+          if Agent.get(blackhole, & &1), do: Process.sleep(:infinity)
+          FakeNode.cluster_slots([{0, 16_383, node_a}])
+
+        _other ->
+          "+OK\r\n"
+      end)
+
+      FakeNode.serve(node_b, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node_b}])
+        _other -> "+OK\r\n"
+      end)
+
+      # Both are seeds. A short `:timeout` keeps the bounded sweep fast. `node_a` is
+      # reachable at startup, so the (deliberately unbounded) sync_connect discovery
+      # succeeds with `node_a` as the sole connected node; `node_b` owns no slots and is
+      # never dialed.
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster,
+         nodes: ["redis://#{node_a}", "redis://#{node_b}"],
+         timeout: 150,
+         sync_connect: true}
+      )
+
+      :telemetry_test.attach_event_handlers(self(), [
+        [:redix, :cluster, :failed_topology_refresh]
+      ])
+
+      baseline_b = FakeNode.connections_accepted(node_b)
+
+      # `node_a` goes dark, then a reactive refresh runs. It probes `node_a` first (the
+      # connected node, ahead of the seeds), which now black-holes until the fetch times
+      # out — exhausting the sweep's total budget. With the bound the sweep stops there
+      # instead of moving on to the healthy seed `node_b`, so `node_b` is never dialed
+      # and the refresh fails fast rather than blocking for a second `:timeout`.
+      Agent.update(blackhole, fn _ -> true end)
+      Redix.Cluster.Manager.refresh_topology(:"#{cluster}_manager")
+
+      assert_receive {[:redix, :cluster, :failed_topology_refresh], _ref, %{},
+                      %{cluster: ^cluster, reason: {:no_reachable_node, node_errors}}},
+                     2_000
+
+      # `node_a` was probed and timed out; `node_b` was skipped once the budget ran out.
+      assert Enum.any?(node_errors, fn {host, port, _reason} ->
+               host == node_a.host and port == node_a.port
+             end)
+
+      assert FakeNode.connections_accepted(node_b) == baseline_b
+    end
   end
 
   describe "role reconciliation" do

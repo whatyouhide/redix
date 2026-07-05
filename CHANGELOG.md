@@ -32,6 +32,17 @@
     `customize_hostname_check` automatically; you can still override it (or any other
     default SSL option) through `:socket_opts`.
 
+### Bug fixes
+
+  * Bound the total wall-clock of a steady-state `Redix.Cluster` topology refresh. The
+    refresh runs on the cluster manager's process and probes seed/known nodes serially,
+    so a few *black-holed* nodes (which accept the connection but never reply) used to
+    block the manager—and every connection restart or `MOVED`/`ASK` redirect that needs
+    it—for up to one connection `:timeout` *per node*, i.e. tens of seconds. A refresh
+    now stops probing once it exhausts a single `:timeout` budget, relying on the next
+    refresh for any skipped nodes. The initial topology discovery stays unbounded so
+    startup reliably reaches a reachable seed.
+
 ## v1.5.3
 
   * Address warnings with recent Elixir versions.
