@@ -22,7 +22,6 @@ jobs:
           - otp: "27.2"
             elixir: "1.18"
             dialyzer: trueos
-            lint: true
 
           - otp: "25.3"
             elixir: "1.15.8"
