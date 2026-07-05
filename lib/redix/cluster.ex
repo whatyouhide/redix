@@ -13,25 +13,24 @@ defmodule Redix.Cluster do
   You can start connections to a Redis Cluster similarly to how you'd start a single
   `Redix` connection, but specifying a *list of seed nodes* and a *name*:
 
-      {:ok, cluster} = Redix.Cluster.start_link(
-        name: :my_cluster,
-        nodes: ["redis://localhost:7000"]
-      )
+      {:ok, cluster} =
+        Redix.Cluster.start_link(
+          name: :my_cluster,
+          nodes: ["redis://localhost:7000"]
+        )
 
       Redix.Cluster.command(:my_cluster, ["SET", "mykey", "myvalue"])
       #=> {:ok, "OK"}
       Redix.Cluster.command(:my_cluster, ["GET", "mykey"])
       #=> {:ok, "myvalue"}
 
-  Like single-node `Redix` connections, the cluster starts even if no seed node is
-  currently reachable: the topology is discovered in the background, retrying with
-  exponential backoff. Commands issued while the *initial* discovery attempt is in
-  flight wait for it to complete (just like a single Redix connection postpones
-  commands while it's connecting), so the common "start the cluster, issue a
-  command right away" pattern works without retries. If that first attempt fails,
-  commands return `{:error, %Redix.ConnectionError{reason: :closed}}` until a seed
-  node becomes reachable. Pass `sync_connect: true` to `start_link/1` to block
-  until the topology has been discovered instead.
+  Like single-node `Redix` connections, the cluster starts even if no seed node
+  is currently reachable: the topology is discovered in the background, retrying
+  with exponential backoff. Commands issued while the *initial* discovery
+  attempt is in flight wait for it to complete, but if that first attempt fails,
+  commands return an error until a seed node becomes reachable. Pass
+  `sync_connect: true` to `start_link/1` to block until the topology has been
+  discovered instead.
 
   ### Pipelines
 
@@ -81,7 +80,7 @@ defmodule Redix.Cluster do
   ### Limitations
 
     * Only database `0` is supported (Redis Cluster does not support `SELECT`).
-    * Pub/Sub is not supported through the cluster interface (*yet*).
+    * Pub/Sub is not supported through the cluster interface.
     * The `:noreply_*` functions are not supported in cluster mode.
 
   ## Telemetry
@@ -125,8 +124,7 @@ defmodule Redix.Cluster do
       type: :atom,
       required: true,
       doc: """
-      An atom to register the cluster process under.
-      All internal resources (ETS tables, Registry, connection supervisor) are named
+      An atom to register the cluster process under. All internal resources are named
       deterministically based on this name. You use this name to issue commands:
 
           Redix.Cluster.start_link(name: :my_cluster, nodes: [...])
@@ -192,6 +190,13 @@ defmodule Redix.Cluster do
   exceptions are `:sentinel` and `:exit_on_disconnection`, which are not supported in
   cluster mode (the cluster supervises node connections and handles disconnections
   itself).
+
+  ## Resources
+
+  Each cluster uses:
+
+    * Two ETS tables.
+    * One `Registry` (which starts another ETS table).
 
   ## TLS and credentials in seed URIs
 
@@ -409,8 +414,8 @@ defmodule Redix.Cluster do
   When a pipeline spans multiple nodes and only *some* of those nodes fail (for
   example, it times out or its task crashes), the call still returns `{:ok,
   results}`. The positions of the commands routed to a failed node are filled
-  with the relevant error *value* (a `%Redix.ConnectionError{}`, or a
-  `%Redix.Error{}` for a Redis-level error) at their original indices, while the
+  with the relevant error *value* (a `Redix.ConnectionError`, or a
+  `Redix.Error` for a Redis-level error) at their original indices, while the
   results from nodes that succeeded stay visible. This extends Redix's "errors
   are values" philosophy to the cross-node connection-error case, so a failure
   affecting one node no longer discards the work that committed on the others.
