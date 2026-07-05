@@ -229,6 +229,32 @@ This eliminates the need for `persistent_term` or any external lookup.
   refresh against a partially-down cluster. On timeout the caught `:exit` degrades to the
   normal "unreachable" error path (issue #327).
 
+- **Node identity is the resolved IP, not the literal `"host:port"` string.**
+  `Redix.Cluster.Manager.canonical_node_id/2` resolves `host` (via
+  `:inet.parse_address/1`, falling back to `:inet.getaddr/2` for a hostname) and uses
+  the IP in the Registry key / slot-table entry; the literal host is kept separately
+  in `data.node_addresses` (`node_id => host`, populated in
+  `start_and_monitor_connection/5`) so reconnects (`handle_down/2`) and refresh
+  seeding (`get_known_nodes/1`) still dial the *original* address — resolving to an
+  IP for identity but dialing the literal host means this can't break TLS hostname
+  verification. Without this, a MOVED/ASK redirect announcing a node under a
+  different address form than `CLUSTER SLOTS` does for that same node (IP vs
+  hostname, typical of `cluster-preferred-endpoint-type` in managed/NAT'd
+  deployments) would never match the Registry key `CLUSTER SLOTS` already
+  registered that node under: `connect_for_redirect`'s fast-path lookup always
+  missed, so every redirect to such a node dialed a *second*, short-lived
+  connection under the redirect's own form — which the next topology refresh tore
+  down as "unneeded" (computed from `CLUSTER SLOTS`'s form), only for the next
+  redirect to repeat the cycle (issue #340). Canonicalizing makes both forms
+  resolve to the same key, so the fast path finds the existing connection directly
+  and no extra dial ever happens. Resolution only runs where an address enters
+  persistent state (topology processing, the on-demand connect fallback) or on the
+  `get_connection_by_node/2` fast path itself — not behind a cache, so a
+  hostname-vs-IP mismatch costs a DNS lookup (typically OS-cached) on each such
+  redirect rather than a full connection churn cycle; a literal IP address costs
+  nothing (`:inet.parse_address/1` is pure). Resolution failure falls back to the
+  literal host, same as before this fix (not worse, just not deduplicated).
+
 - **Redirect chains are followed, not just single hops.** `MOVED` and `ASK` both
   flow through `follow_redirections/5`, the single place the `@max_redirections`
   budget is decremented, so a chain like `ASK -> ASK` or `ASK -> MOVED` is followed

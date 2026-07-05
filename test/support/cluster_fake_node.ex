@@ -45,8 +45,8 @@ defmodule Redix.Cluster.FakeNode do
   @accept_timeout 10_000
   @recv_timeout 10_000
 
-  @enforce_keys [:id, :host, :port, :listen, :inet6, :status]
-  defstruct [:id, :host, :port, :listen, :inet6, :status]
+  @enforce_keys [:id, :host, :port, :listen, :inet6, :status, :accepted]
+  defstruct [:id, :host, :port, :listen, :inet6, :status, :accepted]
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -54,7 +54,8 @@ defmodule Redix.Cluster.FakeNode do
           port: :inet.port_number(),
           listen: :gen_tcp.socket(),
           inet6: boolean(),
-          status: pid()
+          status: pid(),
+          accepted: pid()
         }
 
   @type handler :: ([binary()] -> iodata())
@@ -78,6 +79,7 @@ defmodule Redix.Cluster.FakeNode do
 
     {:ok, port} = :inet.port(listen)
     {:ok, status} = Agent.start_link(fn -> Keyword.get(opts, :status, :up) end)
+    {:ok, accepted} = Agent.start_link(fn -> 0 end)
 
     %FakeNode{
       id: "#{host}:#{port}",
@@ -85,7 +87,8 @@ defmodule Redix.Cluster.FakeNode do
       port: port,
       listen: listen,
       inet6: inet6?,
-      status: status
+      status: status,
+      accepted: accepted
     }
   end
 
@@ -136,6 +139,15 @@ defmodule Redix.Cluster.FakeNode do
   @spec set_status(t(), :up | :down) :: :ok
   def set_status(%FakeNode{status: status}, value) when value in [:up, :down] do
     Agent.update(status, fn _ -> value end)
+  end
+
+  # Total number of TCP connections ever accepted (transient topology-fetch
+  # sockets and managed Redix connections alike). Used to assert that no *new*
+  # dial happens — e.g. a redirect resolving to an already-connected node instead
+  # of opening a duplicate connection under a different address form (#340).
+  @spec connections_accepted(t()) :: non_neg_integer()
+  def connections_accepted(%FakeNode{accepted: accepted}) do
+    Agent.get(accepted, & &1)
   end
 
   ## CLUSTER SLOTS encoding
@@ -226,8 +238,12 @@ defmodule Redix.Cluster.FakeNode do
     case :gen_tcp.accept(node.listen, @accept_timeout) do
       {:ok, socket} ->
         case Agent.get(node.status, & &1) do
-          :up -> spawn_link(fn -> loop(socket, handler, "") end)
-          :down -> :gen_tcp.close(socket)
+          :up ->
+            Agent.update(node.accepted, &(&1 + 1))
+            spawn_link(fn -> loop(socket, handler, "") end)
+
+          :down ->
+            :gen_tcp.close(socket)
         end
 
         accept_loop(node, handler)

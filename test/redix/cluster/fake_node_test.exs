@@ -188,6 +188,78 @@ defmodule Redix.Cluster.FakeNodeTest do
       assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
     end
 
+    # Reproduces issue #340: a MOVED/ASK redirect can announce a node under a
+    # different address form than CLUSTER SLOTS does for that same node (IP vs
+    # hostname, typical of `cluster-preferred-endpoint-type` in managed/NAT'd
+    # deployments). Node identity used to be the raw "host:port" string, so the
+    # redirect's form never matched the Registry key CLUSTER SLOTS had already
+    # registered under: every redirect to that node opened a *second*,
+    # short-lived connection that the next topology refresh tore down as
+    # "unneeded" — a connect/teardown cycle on every redirect. Node identity is
+    # now canonicalized to the resolved IP, so a redirect to "localhost" and a
+    # CLUSTER SLOTS entry for "127.0.0.1" (the same loopback address) resolve to
+    # the same connection instead of each getting their own.
+    #
+    # Uses ASK rather than MOVED so the assertion isn't racing the reactive
+    # refresh a MOVED unconditionally triggers (which opens its own, unrelated
+    # transient CLUSTER SLOTS connection) — same connect_for_redirect code path
+    # either way.
+    test "an ASK redirect to the same node under a different address form reuses " <>
+           "the existing connection instead of dialing a new one" do
+      cluster = :"ask_alias_#{System.unique_integer([:positive])}"
+      slot = Hash.hash_slot("aliased")
+
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] ->
+          FakeNode.cluster_slots([{0, 16_383, node}])
+
+        ["ASKING"] ->
+          # Each accepted connection is handled by its own process, so the
+          # dictionary flag is naturally scoped per connection: it's set here
+          # and read by the GET clause below within the same process.
+          Process.put(:asking, true)
+          "+OK\r\n"
+
+        ["GET", "aliased"] ->
+          # ASK redirects to "localhost" — the same node, port, and underlying
+          # loopback address as `node` (which is "127.0.0.1"), just a different
+          # textual form — unless this connection already sent ASKING (i.e. it's
+          # the retry following that redirect).
+          if Process.get(:asking) do
+            "$3\r\nbar\r\n"
+          else
+            "-ASK #{slot} localhost:#{node.port}\r\n"
+          end
+
+        _other ->
+          "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster, name: cluster, nodes: ["redis://#{node}"], sync_connect: true}
+      )
+
+      # The managed node connection is always async regardless of the cluster's
+      # own `sync_connect`, and registers its name before its TCP handshake with
+      # the fake node actually completes. Wait for a real round-trip (not just
+      # Registry presence) before taking the baseline, otherwise that unrelated,
+      # still-in-flight connect could land after `baseline` and look like churn.
+      registry = :"#{cluster}_registry"
+      wait_until(fn -> Redix.Cluster.command(cluster, ["PING"]) == {:ok, "OK"} end)
+      baseline = FakeNode.connections_accepted(node)
+
+      assert Redix.Cluster.command(cluster, ["GET", "aliased"]) == {:ok, "bar"}
+
+      # No new TCP connection was dialed to follow the redirect: it resolved
+      # straight to the connection already registered from CLUSTER SLOTS.
+      assert FakeNode.connections_accepted(node) == baseline
+
+      assert Registry.lookup(registry, "localhost:#{node.port}") == []
+      assert [{_pid, :primary}] = Registry.lookup(registry, node.id)
+    end
+
     # Reproduces issue #325: redirect messages are server-controlled input, so a
     # malformed MOVED/ASK from a buggy or hostile server must come back to the
     # caller as a plain Redis error instead of crashing the calling process with

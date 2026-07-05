@@ -27,7 +27,14 @@ defmodule Redix.Cluster.Manager do
     read_from_replicas: false,
     # Maps a monitor ref to `{node_id, role}` so a crashed connection is
     # restarted with the same role (and therefore the same READONLY behavior).
-    monitors: %{}
+    monitors: %{},
+    # Maps a node_id (canonical, resolved-IP form) to the literal host it was
+    # actually reached at (a hostname or an IP, whichever the server gave us).
+    # Reconnects) and refresh seeding must dial this exact host again rather
+    # than the resolved IP: with TLS + hostname verification, dialing the IP
+    # would fail the handshake even though the node is perfectly reachable.
+    # Dropped when a node is torn down for good.
+    node_addresses: %{}
   ]
 
   ## Public API
@@ -104,7 +111,7 @@ defmodule Redix.Cluster.Manager do
   """
   @spec get_connection_by_node(atom(), {String.t(), non_neg_integer()}) :: {:ok, pid()} | :error
   def get_connection_by_node(registry, {host, port}) do
-    lookup_connection(registry, "#{host}:#{port}")
+    lookup_connection(registry, canonical_node_id(host, port))
   end
 
   @doc """
@@ -392,7 +399,7 @@ defmodule Redix.Cluster.Manager do
   end
 
   defp handle_connect_to_node(from, host, port, data) do
-    node_id = "#{host}:#{port}"
+    node_id = canonical_node_id(host, port)
 
     case lookup_connection(data.registry, node_id) do
       {:ok, pid} ->
@@ -417,7 +424,8 @@ defmodule Redix.Cluster.Manager do
 
     case node_info do
       {node_id, role} ->
-        {:ok, host, port} = split_host_port(node_id)
+        {:ok, _canonical_host, port} = split_host_port(node_id)
+        host = Map.fetch!(data.node_addresses, node_id)
         {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
         data
 
@@ -516,8 +524,8 @@ defmodule Redix.Cluster.Manager do
     data.registry
     |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
     |> Enum.map(fn node_id ->
-      {:ok, host, port} = split_host_port(node_id)
-      {host, port}
+      {:ok, _canonical_host, port} = split_host_port(node_id)
+      {Map.fetch!(data.node_addresses, node_id), port}
     end)
   end
 
@@ -536,6 +544,30 @@ defmodule Redix.Cluster.Manager do
     else
       _other -> :error
     end
+  end
+
+  # Builds the node identity used as the Registry key/slot-table entry: `host`
+  # resolved to its underlying IP, so the same physical node reached under two
+  # different address forms (a hostname from CLUSTER SLOTS vs the raw IP a
+  # MOVED/ASK redirect gives it, or vice versa, common with
+  # `cluster-preferred-endpoint-type` in managed/NAT'd deployments) converges on
+  # one Registry entry instead of each form getting its own connection that the
+  # next refresh tears down as "not needed" (because it was computed from the
+  # *other* form). `host` itself is never used to dial the node. Resolution
+  # failure falls back to the literal host.
+  defp canonical_node_id(host, port) do
+    host = to_charlist(host)
+
+    canonical_host =
+      with {:error, :einval} <- :inet.parse_address(host),
+           {:error, _reason} <- :inet.getaddr(host, :inet),
+           {:error, _reason} <- :inet.getaddr(host, :inet6) do
+        host
+      else
+        {:ok, ip} -> :inet.ntoa(ip)
+      end
+
+    "#{canonical_host}:#{port}"
   end
 
   defp fetch_cluster_slots(_all_nodes = [], _conn_opts) do
@@ -635,11 +667,11 @@ defmodule Redix.Cluster.Manager do
     ranges =
       for slot_range <- slots_data do
         [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
-        primary_id = "#{host}:#{port}"
+        primary_id = canonical_node_id(host, port)
 
         replica_ids =
           if data.read_from_replicas do
-            for [r_host, r_port | _] <- replica_entries, do: "#{r_host}:#{r_port}"
+            for [r_host, r_port | _] <- replica_entries, do: canonical_node_id(r_host, r_port)
           else
             []
           end
@@ -728,6 +760,7 @@ defmodule Redix.Cluster.Manager do
         # doesn't land in `handle_down/2` and immediately resurrect a node that
         # just left the cluster (see issue #305).
         acc = demonitor_node(acc, node_id)
+        acc = %{acc | node_addresses: Map.delete(acc.node_addresses, node_id)}
 
         if Process.alive?(pid) do
           DynamicSupervisor.terminate_child(acc.pool_supervisor, pid)
@@ -745,14 +778,14 @@ defmodule Redix.Cluster.Manager do
   defp nodes_to_connect(data, slots_data) do
     primaries =
       Enum.map(slots_data, fn [_start, _end, [host, port | _] | _replicas] ->
-        {"#{host}:#{port}", host, port, :primary}
+        {canonical_node_id(host, port), host, port, :primary}
       end)
 
     replicas =
       if data.read_from_replicas do
         for [_start, _end, _primary | replica_entries] <- slots_data,
             [host, port | _] <- replica_entries do
-          {"#{host}:#{port}", host, port, :replica}
+          {canonical_node_id(host, port), host, port, :replica}
         end
       else
         []
@@ -787,6 +820,7 @@ defmodule Redix.Cluster.Manager do
          ) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
+        data = %{data | node_addresses: Map.put(data.node_addresses, node_id, host)}
         {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, role})}}
 
       # A concurrent monitor restart (or the connection's own retry) may have
@@ -794,6 +828,8 @@ defmodule Redix.Cluster.Manager do
       # monitoring the live pid, otherwise the Manager would silently stop
       # tracking the node for restart (see issue #305).
       {:error, {:already_started, pid}} ->
+        data = %{data | node_addresses: Map.put(data.node_addresses, node_id, host)}
+
         if monitoring_node?(data, node_id) do
           {{:ok, pid}, data}
         else
