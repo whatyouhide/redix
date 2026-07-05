@@ -289,6 +289,28 @@ This eliminates the need for `persistent_term` or any external lookup.
   `%Redix.ConnectionError{}` in addition to `%Redix.Error{}`, since a single-command
   call can now surface this as a value rather than a top-level `{:error, _}`.
 
+- **A whole call shares one deadline across its redirect chain, not a fresh
+  `:timeout` per hop.** Each MOVED/ASK hop re-issued `Redix.pipeline/3` with the
+  caller's *full* `:timeout`, and on-demand connects were unbounded, so with the
+  5-hop budget a command called with `timeout: 5_000` could legally run for ~30s.
+  Only the multi-node path was bounded overall (by `Task.yield_many/2`); the common
+  single-group `pipeline/3`/`command/3` case and `transaction_pipeline/3` were not
+  (issue #337). `execute_pipeline/3` and `transaction_pipeline/3` now capture an
+  absolute-monotonic deadline once (`put_deadline/1`, derived from the effective
+  `:timeout`, `:infinity` stays `:infinity`) into `opts` under a private
+  `:__deadline__` key, *after* `await_topology_discovery` so discovery-wait keeps its
+  own budget. Every network hop then reads the *remaining* time off it:
+  `pipeline_catching_exit/3` strips the key (`Redix.pipeline/3` rejects unknown
+  options), and passes the remaining ms as `:timeout` — or short-circuits with
+  `%Redix.ConnectionError{reason: :timeout}` when the deadline already elapsed on an
+  earlier hop; `connect_timeout/1` (used by the on-demand `connect_to_node`) does the
+  same. This bounds the single-group and transaction paths to ~one `:timeout` total.
+  The multi-node path's inner tasks now self-terminate at the deadline too, so
+  `redirect_aware_timeout/1`'s `(@max_redirections + 1) × :timeout` `Task.yield_many/2`
+  value is now purely a backstop that fires strictly *after* the task's own deadline
+  (kept generous so it never preempts a group about to return); in practice the
+  deadline returns first. Complements the per-node fetch bounds of issues #327/#335.
+
 - **A table-missing race during a cluster tree restart degrades to a connection
   error (or a cache miss) instead of raising in the caller.** The Manager owns the
   slot and command-cache ETS tables, and `Redix.Cluster`'s top-level supervisor uses

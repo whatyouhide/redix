@@ -505,6 +505,12 @@ defmodule Redix.Cluster do
 
     await_topology_discovery(cluster, slot_table, opts)
 
+    # From here on, the whole transaction—the initial MULTI/EXEC plus every
+    # MOVED/ASK hop and on-demand connect it spawns—shares one deadline derived
+    # from the caller's :timeout, so a redirect chain can't run for the full
+    # timeout per hop (issue #337).
+    opts = put_deadline(opts)
+
     # All commands in a transaction must target the same slot.
     indexed_commands =
       commands
@@ -664,6 +670,12 @@ defmodule Redix.Cluster do
     registry = registry_name(cluster)
 
     await_topology_discovery(cluster, slot_table, opts)
+
+    # From here on, the whole pipeline—the initial request plus every MOVED/ASK
+    # hop and on-demand connect it spawns—shares one deadline derived from the
+    # caller's :timeout, so a redirect chain can't run for the full timeout per
+    # hop (issue #337). Each group's task reads the *remaining* budget off it.
+    opts = put_deadline(opts)
 
     # Group commands by target node
     indexed_commands =
@@ -836,14 +848,13 @@ defmodule Redix.Cluster do
     Enum.map(cmds, fn {idx, _cmd} -> {idx, error} end)
   end
 
-  # A group's task may issue up to `1 + @max_redirections` sequential pipelines (the
-  # initial request plus a MOVED/ASK chain), each bounded by the per-call `:timeout`.
-  # `Task.yield_many/2` is only a backstop against a wedged task, so it must allow the
-  # whole chain its per-hop timeout: budgeting just `:timeout` would kill a redirected
-  # group even though every hop stayed within it, while the single-node path (which
-  # never goes through yield_many) lets the same chain run to completion (A3). A wedged
-  # task can't actually reach this bound — each inner pipeline times out at `:timeout`
-  # and returns an error value — so this only matters for genuine redirect work.
+  # A group's task issues the initial request plus a MOVED/ASK chain, but every hop
+  # now draws from one shared deadline (issue #337), so the task self-terminates
+  # around the caller's `:timeout` regardless of how many hops it took. `Task.yield_many/2`
+  # is only a backstop against a task wedged *outside* that deadline logic, so it stays
+  # deliberately generous — `1 + @max_redirections` times `:timeout` — to fire strictly
+  # after the task's own deadline rather than preempt a group that's legitimately about
+  # to return. In practice the deadline returns first, so this bound is never reached.
   defp redirect_aware_timeout(:infinity) do
     :infinity
   end
@@ -862,7 +873,25 @@ defmodule Redix.Cluster do
   # that exit and turn it into a connection-error value, matching how every other
   # unreachable-node case surfaces here (issue #317).
   defp pipeline_catching_exit(conn, commands, opts) do
-    Redix.pipeline(conn, commands, opts)
+    # Every network hop draws from the call's shared deadline (issue #337): the
+    # :timeout handed to Redix.pipeline/3 is the time *remaining*, not a fresh
+    # full timeout. If the deadline already elapsed on an earlier hop, fail fast
+    # with a timeout error instead of starting another full-timeout request. The
+    # private :__deadline__ key is stripped so it never reaches Redix.pipeline/3
+    # (which rejects unknown options). pop_lazy keeps this robust if a caller ever
+    # reaches here without a deadline set — it derives one from the opts :timeout.
+    {deadline, opts} =
+      Keyword.pop_lazy(opts, :__deadline__, fn ->
+        deadline_from_timeout(Keyword.get(opts, :timeout, @default_timeout))
+      end)
+
+    case deadline_remaining(deadline) do
+      0 ->
+        {:error, %Redix.ConnectionError{reason: :timeout}}
+
+      remaining ->
+        Redix.pipeline(conn, commands, Keyword.put(opts, :timeout, remaining))
+    end
   catch
     :exit, {:redix_exited_during_call, _reason} ->
       {:error, %Redix.ConnectionError{reason: :closed}}
@@ -1082,8 +1111,37 @@ defmodule Redix.Cluster do
     :ok
   end
 
+  # An on-demand connect for a redirect draws from the same shared deadline as the
+  # pipeline hops (issue #337): a MOVED/ASK to a not-yet-known node connects via the
+  # Manager, and that call must not get a fresh full :timeout when the redirect chain
+  # has already burned most of the budget. Falls back to the raw :timeout only if no
+  # deadline was captured (a direct caller outside the pipeline/transaction paths).
   defp connect_timeout(opts) do
-    Keyword.get(opts, :timeout, @default_timeout)
+    case Keyword.get(opts, :__deadline__) do
+      nil -> Keyword.get(opts, :timeout, @default_timeout)
+      deadline -> deadline_remaining(deadline)
+    end
+  end
+
+  # The shared deadline is an absolute monotonic timestamp (in milliseconds) or
+  # `:infinity`, stashed in opts under a private key and captured once per call at
+  # the public entry points. Each network hop reads the *remaining* time off it.
+  defp put_deadline(opts) do
+    deadline = deadline_from_timeout(Keyword.get(opts, :timeout, @default_timeout))
+    Keyword.put(opts, :__deadline__, deadline)
+  end
+
+  defp deadline_from_timeout(:infinity), do: :infinity
+
+  defp deadline_from_timeout(timeout) when is_integer(timeout) do
+    System.monotonic_time(:millisecond) + timeout
+  end
+
+  # Milliseconds left until the deadline, floored at 0. `:infinity` never expires.
+  defp deadline_remaining(:infinity), do: :infinity
+
+  defp deadline_remaining(deadline) when is_integer(deadline) do
+    max(deadline - System.monotonic_time(:millisecond), 0)
   end
 
   # Resolves the connection for a slot according to the routing choice. Returns

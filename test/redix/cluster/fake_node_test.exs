@@ -129,6 +129,87 @@ defmodule Redix.Cluster.FakeNodeTest do
                {:ok, ["hi", %Redix.ConnectionError{reason: :too_many_redirections}]}
     end
 
+    # Reproduces issue #337: a single-group pipeline followed no overall deadline
+    # across redirect hops — each hop re-used the caller's *full* :timeout, so with
+    # the 5-hop budget a command could run for ~6x its timeout. Two nodes bounce
+    # MOVED back and forth, each sleeping < :timeout per hop but long enough that a
+    # *chain* of hops blows past it. With the shared deadline the chain is cut off
+    # at ~:timeout with a timeout error, instead of running the whole budget out to
+    # a too_many_redirections error.
+    test "bounds a redirect chain by the overall :timeout, not per hop", %{cluster: cluster} do
+      slot = Hash.hash_slot("x")
+      hop_delay = 120
+
+      node_a = FakeNode.reserve() |> FakeNode.connect(cluster)
+      node_b = FakeNode.reserve() |> FakeNode.connect(cluster)
+
+      FakeNode.serve(node_a, fn ["GET", _] ->
+        Process.sleep(hop_delay)
+        "-MOVED #{slot} #{node_b}\r\n"
+      end)
+
+      FakeNode.serve(node_b, fn ["GET", _] ->
+        Process.sleep(hop_delay)
+        "-MOVED #{slot} #{node_a}\r\n"
+      end)
+
+      route_slot(cluster, slot, node_a)
+
+      timeout = 300
+
+      {elapsed_us, result} =
+        :timer.tc(fn -> Redix.Cluster.command(cluster, ["GET", "x"], timeout: timeout) end)
+
+      # Cut off at the shared deadline (a timeout error), not run to the end of the
+      # redirect budget (which would be too_many_redirections).
+      assert result == {:error, %Redix.ConnectionError{reason: :timeout}}
+
+      # The whole call stays within roughly one :timeout, not (@max_redirections + 1)
+      # hops of `hop_delay` (~720ms here).
+      assert div(elapsed_us, 1000) < timeout * 2
+    end
+
+    # Same as above but for transaction_pipeline/3 (issue #337): the MULTI/EXEC is
+    # re-run on each MOVED target, so an unbounded chain could likewise run for
+    # ~6x the caller's :timeout. A slow queue-time reply on each hop makes the chain
+    # exceed the timeout; the shared deadline cuts it off with a timeout error.
+    test "bounds a transaction's redirect chain by the overall :timeout", %{cluster: cluster} do
+      slot = Hash.hash_slot("x")
+      hop_delay = 120
+
+      node_a = FakeNode.reserve() |> FakeNode.connect(cluster)
+      node_b = FakeNode.reserve() |> FakeNode.connect(cluster)
+
+      transaction_handler = fn other ->
+        fn
+          ["MULTI"] ->
+            Process.sleep(hop_delay)
+            "+OK\r\n"
+
+          ["SET", "x", _] ->
+            "-MOVED #{slot} #{other}\r\n"
+
+          ["EXEC"] ->
+            "-EXECABORT Transaction discarded because of previous errors.\r\n"
+        end
+      end
+
+      FakeNode.serve(node_a, transaction_handler.(node_b))
+      FakeNode.serve(node_b, transaction_handler.(node_a))
+
+      route_slot(cluster, slot, node_a)
+
+      timeout = 300
+
+      {elapsed_us, result} =
+        :timer.tc(fn ->
+          Redix.Cluster.transaction_pipeline(cluster, [["SET", "x", "1"]], timeout: timeout)
+        end)
+
+      assert result == {:error, %Redix.ConnectionError{reason: :timeout}}
+      assert div(elapsed_us, 1000) < timeout * 2
+    end
+
     # Reproduces issue #306: the cluster code splits a "host:port" node id on every
     # colon and matches `[host, port_str]`, which blows up on IPv6 addresses. Redis
     # emits MOVED/ASK targets unbracketed (e.g. "MOVED 866 ::1:7000"), so following
