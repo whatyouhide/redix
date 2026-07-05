@@ -33,7 +33,7 @@ jobs:
 
     steps:
       - name: Clone the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Start Docker
         run: docker compose up --detach
@@ -46,7 +46,7 @@ jobs:
 
       - name: Cache dependencies
         id: cache-deps
-        uses: actions/cache@v3
+        uses: actions/cache@v6
         with:
           path: |
             deps
@@ -65,7 +65,7 @@ jobs:
       # Cache key based on Elixir & Erlang version (also useful when running in matrix)
       - name: Cache Dialyzer's PLT
         if: ${{ matrix.dialyzer }}
-        uses: actions/cache@v3
+        uses: actions/cache@v6
         id: cache-plt
         with:
           path: plts
