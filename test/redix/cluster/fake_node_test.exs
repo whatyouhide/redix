@@ -403,6 +403,102 @@ defmodule Redix.Cluster.FakeNodeTest do
       # And commands route to a working connection registered under that address.
       assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
     end
+
+    @tag :capture_log
+    test "a CLUSTER SLOTS range with no node array fails the refresh instead of crashing " <>
+           "the Manager" do
+      cluster = :"malformed_no_nodes_#{System.unique_integer([:positive])}"
+
+      node = FakeNode.reserve()
+
+      {:ok, topology} =
+        Agent.start_link(fn -> FakeNode.cluster_slots([{0, 16_383, node}]) end)
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> Agent.get(topology, & &1)
+        _other -> "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster, name: cluster, nodes: ["redis://#{node}"], sync_connect: true}
+      )
+
+      slot_table = :"#{cluster}_slots"
+      manager = Process.whereis(:"#{cluster}_manager")
+      Process.monitor(manager)
+
+      assert :ets.lookup(slot_table, 0) == [{0, node.id, []}]
+
+      :telemetry_test.attach_event_handlers(self(), [
+        [:redix, :cluster, :failed_topology_refresh]
+      ])
+
+      # A range like `[start, end]` with no node array at all -- e.g. a buggy server
+      # or proxy. With the bug, update_slot_map/2's hard match on
+      # `[start, end, primary | replicas]` crashes the Manager, which escalates to a
+      # :one_for_all restart of the whole cluster (issue #344, same escalation as #334).
+      Agent.update(topology, fn _ -> "*1\r\n*2\r\n:0\r\n:16383\r\n" end)
+      Redix.Cluster.Manager.refresh_topology(manager)
+
+      assert_receive {[:redix, :cluster, :failed_topology_refresh], _ref, %{},
+                      %{cluster: ^cluster, reason: :no_reachable_node}}
+
+      refute_receive {:DOWN, _ref, :process, ^manager, _reason}
+      assert Process.alive?(manager)
+
+      # The previous, valid topology is untouched.
+      assert :ets.lookup(slot_table, 0) == [{0, node.id, []}]
+      assert :ets.lookup(slot_table, 16_383) == [{16_383, node.id, []}]
+    end
+
+    @tag :capture_log
+    test "a CLUSTER SLOTS reply with non-integer slot bounds fails the refresh instead " <>
+           "of crashing the Manager" do
+      cluster = :"malformed_bounds_#{System.unique_integer([:positive])}"
+
+      node = FakeNode.reserve()
+
+      {:ok, topology} =
+        Agent.start_link(fn -> FakeNode.cluster_slots([{0, 16_383, node}]) end)
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> Agent.get(topology, & &1)
+        _other -> "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster, name: cluster, nodes: ["redis://#{node}"], sync_connect: true}
+      )
+
+      slot_table = :"#{cluster}_slots"
+      manager = Process.whereis(:"#{cluster}_manager")
+      Process.monitor(manager)
+
+      assert :ets.lookup(slot_table, 0) == [{0, node.id, []}]
+
+      :telemetry_test.attach_event_handlers(self(), [
+        [:redix, :cluster, :failed_topology_refresh]
+      ])
+
+      # start_slot is a bulk string ("x") instead of the RESP integer Redis always
+      # sends. With the bug, `Enum.each(start_slot..end_slot, ...)` in
+      # update_slot_map/2 raises trying to build the range.
+      Agent.update(topology, fn _ ->
+        "*1\r\n*3\r\n$1\r\nx\r\n:16383\r\n*3\r\n$9\r\n127.0.0.1\r\n:7000\r\n$3\r\nabc\r\n"
+      end)
+
+      Redix.Cluster.Manager.refresh_topology(manager)
+
+      assert_receive {[:redix, :cluster, :failed_topology_refresh], _ref, %{},
+                      %{cluster: ^cluster, reason: :no_reachable_node}}
+
+      refute_receive {:DOWN, _ref, :process, ^manager, _reason}
+      assert Process.alive?(manager)
+
+      # The previous, valid topology is untouched.
+      assert :ets.lookup(slot_table, 0) == [{0, node.id, []}]
+      assert :ets.lookup(slot_table, 16_383) == [{16_383, node.id, []}]
+    end
   end
 
   describe "role reconciliation" do

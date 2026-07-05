@@ -1,6 +1,8 @@
 defmodule Redix.Cluster.Manager do
   @moduledoc false
 
+  require Logger
+
   @behaviour :gen_statem
 
   @refresh_cooldown 1_000
@@ -558,8 +560,14 @@ defmodule Redix.Cluster.Manager do
       {:ok, socket, _address} ->
         try do
           case Redix.Connector.sync_command(transport, socket, ["CLUSTER", "SLOTS"], timeout) do
-            {:ok, slots} -> {:ok, normalize_slots(slots, host)}
-            {:error, _} -> fetch_cluster_slots(rest, conn_opts)
+            {:ok, slots} ->
+              case validate_and_normalize_slots(slots, host) do
+                {:ok, normalized} -> {:ok, normalized}
+                :error -> fetch_cluster_slots(rest, conn_opts)
+              end
+
+            {:error, _} ->
+              fetch_cluster_slots(rest, conn_opts)
           end
         after
           transport.close(socket)
@@ -573,29 +581,50 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  # Redis 7+ returns a null host in CLUSTER SLOTS entries when the node's
-  # "cluster-preferred-endpoint-type" is "unknown-endpoint" (common in managed or
-  # NAT'd deployments), meaning "use the address you connected to". Substitute the
-  # host that answered the topology query so node IDs and connection attempts stay
-  # well-formed (see issue #328). Empty strings are handled the same way for good
-  # measure.
-  defp normalize_slots(slots_data, answering_host) do
-    for [start_slot, end_slot | node_entries] <- slots_data do
-      node_entries =
-        for [host, port | rest] <- node_entries do
-          normalized_host =
-            case host do
-              nil -> answering_host
-              "" -> answering_host
-              _other -> host
-            end
+  defguardp is_valid_slot_range(start_slot, end_slot)
+            when is_integer(start_slot) and is_integer(end_slot) and
+                   start_slot in 0..(@hash_slots - 1)//1 and end_slot in 0..(@hash_slots - 1)//1 and
+                   start_slot <= end_slot
 
-          [normalized_host, port | rest]
-        end
+  # Validates and normalizes a CLUSTER SLOTS reply in one pass. A buggy server or proxy
+  # can answer with a reply that doesn't match the shape we expect, and we just want
+  # to go to the next server (and not crash anything).
+  defp validate_and_normalize_slots(slots_data, answering_host) when is_list(slots_data) do
+    ranges =
+      Enum.map(slots_data, fn
+        [start_slot, end_slot, primary | replicas]
+        when is_valid_slot_range(start_slot, end_slot) ->
+          nodes = Enum.map([primary | replicas], &normalize_node_entry(&1, answering_host))
+          [start_slot, end_slot | nodes]
 
-      [start_slot, end_slot | node_entries]
-    end
+        invalid_range ->
+          throw(
+            {:invalid_slots_reply,
+             "invalid CLUSTER SLOTS reply with range: #{inspect(invalid_range)}"}
+          )
+      end)
+
+    {:ok, ranges}
+  catch
+    {:invalid_slots_reply, message} ->
+      Logger.error(message)
+      :error
   end
+
+  defp validate_and_normalize_slots(_other, _answering_host) do
+    :error
+  end
+
+  defguardp is_valid_port(port) when is_integer(port) and port in 0..65_535
+
+  defp normalize_node_entry([host, port | rest], answering_host)
+       when host in [nil, ""] and is_valid_port(port), do: [answering_host, port | rest]
+
+  defp normalize_node_entry([host, port | rest], _answering_host) when is_valid_port(port),
+    do: [host, port | rest]
+
+  defp normalize_node_entry(other, _answering_host),
+    do: throw({:invalid_slots_reply, "invalid CLUSTER SLOTS reply: #{inspect(other)}"})
 
   # Rewrites the slot table to reflect `slots_data`. Covered slots are overwritten
   # in place (so reshards/reassignments are seamless and a concurrent lookup never
