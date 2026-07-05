@@ -353,7 +353,9 @@ defmodule Redix.Cluster do
 
       `:replica` and `:prefer_replica` require the cluster to have been started with
       `read_from_replicas: true`. Use them only for reads: a write routed to a replica
-      is transparently redirected (via `MOVED`) to the primary.
+      is transparently redirected (via `MOVED`) to the primary. Keyless commands, such
+      as `PING` or `INFO`, always go to a random primary, even when called with
+      `route: :replica | :prefer_replica`.
 
   ## Examples
 
