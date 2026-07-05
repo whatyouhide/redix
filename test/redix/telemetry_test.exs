@@ -71,12 +71,16 @@ defmodule Redix.TelemetryTest do
           Redix.Telemetry.handle_event(
             [:redix, :cluster, :failed_topology_refresh],
             %{},
-            %{cluster: :my_cluster, reason: :no_reachable_node},
+            %{
+              cluster: :my_cluster,
+              reason: {:no_reachable_node, [{"localhost", 9999, :econnrefused}]}
+            },
             :no_config
           )
         end)
 
-      assert log =~ ~r/Cluster :my_cluster failed to refresh topology: :no_reachable_node/
+      assert log =~
+               ~r/Cluster :my_cluster failed to refresh topology: {:no_reachable_node, \[{"localhost", 9999, :econnrefused}\]}/
     end
 
     test "logs node connection failures" do

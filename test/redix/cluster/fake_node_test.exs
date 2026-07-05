@@ -544,7 +544,13 @@ defmodule Redix.Cluster.FakeNodeTest do
       Redix.Cluster.Manager.refresh_topology(manager)
 
       assert_receive {[:redix, :cluster, :failed_topology_refresh], _ref, %{},
-                      %{cluster: ^cluster, reason: :no_reachable_node}}
+                      %{cluster: ^cluster, reason: {:no_reachable_node, node_errors}}}
+
+      assert node_errors != []
+
+      assert Enum.all?(node_errors, fn {host, _port, reason} ->
+               host == node.host and reason == :invalid_cluster_slots_reply
+             end)
 
       refute_receive {:DOWN, _ref, :process, ^manager, _reason}
       assert Process.alive?(manager)
@@ -593,7 +599,13 @@ defmodule Redix.Cluster.FakeNodeTest do
       Redix.Cluster.Manager.refresh_topology(manager)
 
       assert_receive {[:redix, :cluster, :failed_topology_refresh], _ref, %{},
-                      %{cluster: ^cluster, reason: :no_reachable_node}}
+                      %{cluster: ^cluster, reason: {:no_reachable_node, node_errors}}}
+
+      assert node_errors != []
+
+      assert Enum.all?(node_errors, fn {host, _port, reason} ->
+               host == node.host and reason == :invalid_cluster_slots_reply
+             end)
 
       refute_receive {:DOWN, _ref, :process, ^manager, _reason}
       assert Process.alive?(manager)
@@ -778,7 +790,7 @@ defmodule Redix.Cluster.FakeNodeTest do
                  sync_connect: true
                )
 
-      assert reason == :no_reachable_node
+      assert {:no_reachable_node, [{"127.0.0.1", ^port, :econnrefused}]} = reason
     end
 
     test "nodes: [] is rejected at validation time" do

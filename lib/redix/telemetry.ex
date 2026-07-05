@@ -105,7 +105,10 @@ defmodule Redix.Telemetry do
       measurements. Metadata are:
 
       * `:cluster` - the name of the cluster.
-      * `:reason` - the error reason (such as `:no_reachable_node`).
+      * `:reason` - the error reason. This is `{:no_reachable_node, node_errors}`,
+        where `node_errors` is a list of `{host, port, reason}` triples, one per
+        node that was tried, in the order tried, so you can tell (for example) a
+        wrong password from a network partition instead of a single opaque reason.
 
     * `[:redix, :cluster, :node_connection_failed]` - executed when the cluster
       manager fails to establish a connection to a specific node. There are no

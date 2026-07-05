@@ -900,7 +900,7 @@ defmodule Redix.ClusterTest do
 
       assert_receive {^ref, meta}, 5_000
       assert meta.cluster == name
-      assert meta.reason == :no_reachable_node
+      assert {:no_reachable_node, [{"localhost", 9999, _reason}]} = meta.reason
 
       :telemetry.detach("#{test_name}")
     end

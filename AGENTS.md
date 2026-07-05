@@ -152,11 +152,23 @@ This eliminates the need for `persistent_term` or any external lookup.
   option only covers topology discovery. Relatedly, `:nodes` rejects `[]` at validation
   time (`__parse_nodes__`) instead of failing later with `:no_reachable_node`.
 
-- **Transient socket for topology fetches.** `try_fetch_slots/4` connects with
+- **Transient socket for topology fetches.** `try_fetch_slots/5` connects with
   `Redix.Connector.connect/2` against a raw socket, runs `CLUSTER SLOTS` via
   `Redix.Connector.sync_command/4`, and closes the socket in an `after` block. There's
   no `Redix.start_link` and no linked process, so an unreachable host can't take down
   the Manager — failures just fall through to the next node.
+
+- **Per-node failure reasons are collected, not discarded, on a failed topology
+  fetch.** `fetch_cluster_slots/3` threads a `node_errors` accumulator (`{host, port,
+  reason}` triples, in the order tried) through every rejection branch in
+  `try_fetch_slots/5` — connect failure, `AUTH`/`ACL` failure surfaced as
+  `Redix.Connector.connect/2`'s `{:stop, reason}`, a `CLUSTER SLOTS` error reply, and
+  an invalid/malformed reply (tagged `:invalid_cluster_slots_reply`) — and returns
+  `{:error, {:no_reachable_node, node_errors}}` once every node is exhausted. Before
+  this, every failure mode collapsed to the bare atom `:no_reachable_node`, so a wrong
+  password (`NOAUTH`/`WRONGPASS`) was indistinguishable from a network partition in
+  both the `sync_connect: true` start error and the `:failed_topology_refresh`
+  telemetry event (issue #339).
 
 - **Transparent pipeline splitting.** Pipelines spanning multiple nodes are grouped by
   target node, executed in parallel via `Task.Supervisor`, and results reassembled in

@@ -570,15 +570,23 @@ defmodule Redix.Cluster.Manager do
     "#{canonical_host}:#{port}"
   end
 
-  defp fetch_cluster_slots(_all_nodes = [], _conn_opts) do
-    {:error, :no_reachable_node}
+  # `node_errors` accumulates a `{host, port, reason}` tuple per node that was
+  # tried and failed, in the order tried, so that when every node is exhausted
+  # the caller can see *why* each node was rejected instead of a single opaque
+  # :no_reachable_node.
+  defp fetch_cluster_slots(all_nodes, conn_opts) do
+    fetch_cluster_slots(all_nodes, conn_opts, _node_errors = [])
   end
 
-  defp fetch_cluster_slots([{host, port} | rest], conn_opts) do
-    try_fetch_slots(host, port, conn_opts, rest)
+  defp fetch_cluster_slots(_all_nodes = [], _conn_opts, node_errors) do
+    {:error, {:no_reachable_node, Enum.reverse(node_errors)}}
   end
 
-  defp try_fetch_slots(host, port, conn_opts, rest) do
+  defp fetch_cluster_slots([{host, port} | rest], conn_opts, node_errors) do
+    try_fetch_slots(host, port, conn_opts, rest, node_errors)
+  end
+
+  defp try_fetch_slots(host, port, conn_opts, rest, node_errors) do
     transport = if(conn_opts[:ssl], do: :ssl, else: :gen_tcp)
 
     opts =
@@ -594,22 +602,26 @@ defmodule Redix.Cluster.Manager do
           case Redix.Connector.sync_command(transport, socket, ["CLUSTER", "SLOTS"], timeout) do
             {:ok, slots} ->
               case validate_and_normalize_slots(slots, host) do
-                {:ok, normalized} -> {:ok, normalized}
-                :error -> fetch_cluster_slots(rest, conn_opts)
+                {:ok, normalized} ->
+                  {:ok, normalized}
+
+                :error ->
+                  node_errors = [{host, port, :invalid_cluster_slots_reply} | node_errors]
+                  fetch_cluster_slots(rest, conn_opts, node_errors)
               end
 
-            {:error, _} ->
-              fetch_cluster_slots(rest, conn_opts)
+            {:error, reason} ->
+              fetch_cluster_slots(rest, conn_opts, [{host, port, reason} | node_errors])
           end
         after
           transport.close(socket)
         end
 
-      {:error, _} ->
-        fetch_cluster_slots(rest, conn_opts)
+      {:error, reason} ->
+        fetch_cluster_slots(rest, conn_opts, [{host, port, reason} | node_errors])
 
-      {:stop, _} ->
-        fetch_cluster_slots(rest, conn_opts)
+      {:stop, reason} ->
+        fetch_cluster_slots(rest, conn_opts, [{host, port, reason} | node_errors])
     end
   end
 
