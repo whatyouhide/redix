@@ -395,7 +395,9 @@ defmodule Redix.Cluster.Manager do
   # Events handled identically in every state, dispatched to from each state's
   # trailing catch-all clause:
   #
-  #   * a monitored connection going `:DOWN` — restart it under its tracked role;
+  #   * a monitored connection going `:DOWN` — restart it under its tracked role,
+  #     *unless* it died of a semantic error, in which case it's left to the
+  #     periodic topology refresh;
   #   * an on-demand `connect_to_node` call — served regardless of state, since a
   #     MOVED/ASK redirect address is authoritative (even while :disconnected, and
   #     during :cooling_down it isn't a refresh so the cooldown doesn't apply);
@@ -410,8 +412,8 @@ defmodule Redix.Cluster.Manager do
   #
   # Any other event (an unknown call/cast/timeout) has no clause here and crashes
   # the Manager, exactly as it did when each state matched events explicitly.
-  defp handle_common_event(:info, {:DOWN, ref, :process, _pid, _reason}, data) do
-    {:keep_state, handle_down(data, ref)}
+  defp handle_common_event(:info, {:DOWN, ref, :process, _pid, reason}, data) do
+    {:keep_state, handle_down(data, ref, reason)}
   end
 
   defp handle_common_event({:call, from}, {:connect_to_node, host, port}, data) do
@@ -469,20 +471,43 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  defp handle_down(data, ref) do
+  defp handle_down(data, ref, reason) do
     {node_info, monitors} = Map.pop(data.monitors, ref)
     data = %{data | monitors: monitors}
 
     case node_info do
-      {node_id, role} ->
-        {:ok, _canonical_host, port} = split_host_port(node_id)
-        host = Map.fetch!(data.node_addresses, node_id)
-        {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
-        data
-
-      nil ->
-        data
+      {node_id, role} -> handle_node_down(data, node_id, role, reason)
+      nil -> data
     end
+  end
+
+  # A node connection that stopped with a *semantic* error (a `%Redix.Error{}`
+  # such as NOAUTH/WRONGPASS from per-node password/ACL drift, or READONLY on a
+  # node with cluster support disabled) is misconfigured relative to our shared
+  # connection config. Restarting it on a timer can't fix that: only an operator
+  # changing the node (or our config) can, and there's no bound on when. So we
+  # deliberately do *not* restart it here. Instead we leave it to the periodic
+  # topology refresh.
+  defp handle_node_down(data, node_id, _role, %Redix.Error{} = reason) do
+    :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
+      cluster: data.cluster_name,
+      address: node_id,
+      reason: reason
+    })
+
+    data
+  end
+
+  # Any other death (a process crash or a deliberate kill) is expected to be a
+  # one-off, so restart right away for fast recovery. A *transient network*
+  # failure never reaches here: `Redix.Connection` handles it internally (it moves
+  # to its own :disconnected state and reconnects) rather than stopping, so this
+  # path can't degenerate into a fast restart loop.
+  defp handle_node_down(data, node_id, role, _reason) do
+    {:ok, _canonical_host, port} = split_host_port(node_id)
+    host = Map.fetch!(data.node_addresses, node_id)
+    {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
+    data
   end
 
   # Demonitors and drops every monitor entry tracking `node_id`. Called before a
@@ -848,7 +873,7 @@ defmodule Redix.Cluster.Manager do
         acc
       else
         # Demonitor *before* terminating so the deliberate `terminate_child` DOWN
-        # doesn't land in `handle_down/2` and immediately resurrect a node that
+        # doesn't land in `handle_down/3` and immediately resurrect a node that
         # just left the cluster (see issue #305).
         acc = demonitor_node(acc, node_id)
         acc = %{acc | node_addresses: Map.delete(acc.node_addresses, node_id)}
@@ -889,7 +914,7 @@ defmodule Redix.Cluster.Manager do
   # the given `role`. Used when a node's role changed after a failover (#318).
   # Demonitors *before* terminating (like the no-longer-needed branch in
   # `ensure_connections/2`) so the deliberate `terminate_child` DOWN doesn't land
-  # in `handle_down/2` and resurrect the connection under its *old* role.
+  # in `handle_down/3` and resurrect the connection under its *old* role.
   defp restart_connection(data, node_id, pid, host, port, role) do
     data = demonitor_node(data, node_id)
     DynamicSupervisor.terminate_child(data.pool_supervisor, pid)
@@ -953,7 +978,18 @@ defmodule Redix.Cluster.Manager do
       )
       |> maybe_put_readonly(role)
 
-    DynamicSupervisor.start_child(pool_supervisor, {Redix, opts})
+    # :temporary, not the default :permanent: the Manager owns the connection
+    # lifecycle (it monitors every connection and restarts it on DOWN, with the
+    # :already_started adoption path), so the DynamicSupervisor must never restart
+    # one itself. A node that fails *setup* with a semantic error stops its
+    # Redix.Connection by design; a :permanent child would crash-loop with no
+    # backoff, blow past the supervisor's restart intensity in milliseconds, and
+    # take the whole :one_for_all cluster tree down. As :temporary the crash is
+    # absorbed and handled by handle_down/3, which parks a semantically-failed node
+    # for the periodic topology refresh to re-attempt instead of restarting it in a
+    # tight loop, degrading it to "unavailable" (issue #334).
+    child_spec = Supervisor.child_spec({Redix, opts}, restart: :temporary)
+    DynamicSupervisor.start_child(pool_supervisor, child_spec)
   end
 
   # Replica connections issue READONLY after connecting so they serve reads.

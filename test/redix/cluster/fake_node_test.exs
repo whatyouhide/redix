@@ -1045,6 +1045,72 @@ defmodule Redix.Cluster.FakeNodeTest do
     end
   end
 
+  describe "node connection setup failure" do
+    # Reproduces issue #334: a node that fails connection *setup* with a semantic
+    # error (a %Redix.Error{} — e.g. READONLY on a node with cluster support
+    # disabled, or NOAUTH from per-node password drift) stops its Redix.Connection
+    # by design. When node connections were started `restart: :permanent`, that
+    # crash-looped under the cluster's DynamicSupervisor, blew past the default
+    # restart intensity (3/5s) in milliseconds, and took the whole :one_for_all
+    # cluster tree down within a second — escalating into the host app tree. Node
+    # connections are now `restart: :temporary` (the Manager owns their lifecycle
+    # via monitors), and the Manager does *not* restart a connection that stopped
+    # with a semantic error — retrying can't fix a misconfiguration, so it's left
+    # to the periodic topology refresh to re-attempt. A persistently failing node
+    # thus degrades to "unavailable" instead of a storm.
+    @tag :capture_log
+    test "a node failing setup with a semantic error doesn't take down the cluster" do
+      cluster = :"setup_fail_#{System.unique_integer([:positive])}"
+
+      primary = FakeNode.reserve()
+      replica = FakeNode.reserve()
+
+      # The primary is healthy and reports itself + a replica for every slot.
+      FakeNode.serve(primary, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, primary, [replica]}])
+        ["PING"] -> "+PONG\r\n"
+        _other -> "+OK\r\n"
+      end)
+
+      # The replica rejects READONLY (issued on every replica connect) with a
+      # semantic error, so its connection stops abnormally each time it's started.
+      FakeNode.serve(replica, fn
+        ["READONLY"] -> "-ERR This instance has cluster support disabled\r\n"
+        _other -> "+OK\r\n"
+      end)
+
+      {:ok, sup} =
+        start_supervised(
+          {Redix.Cluster,
+           name: cluster,
+           nodes: ["redis://#{primary}"],
+           read_from_replicas: true,
+           sync_connect: true}
+        )
+
+      ref = Process.monitor(sup)
+
+      # Before the fix the whole cluster supervisor is dead within ~1s from the
+      # replica's crash-loop. It must stay up, with the healthy primary usable
+      # throughout despite the replica failing its setup.
+      refute_receive {:DOWN, ^ref, :process, ^sup, _reason}, 1_000
+
+      assert Process.alive?(sup)
+      assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
+
+      # The failing replica never registers a live connection, so a replica-routed
+      # read has none to use (it degrades to a connection error rather than looping).
+      assert Redix.Cluster.command(cluster, ["GET", "x"], route: :replica) ==
+               {:error, %Redix.ConnectionError{reason: :no_replica_connection}}
+
+      # And critically: the replica is *not* hammered. Its connection is attempted
+      # once during discovery, fails setup, and is then left for the (30s-default)
+      # periodic refresh — so within this window it's dialed a small, bounded number
+      # of times, not thousands as in the pre-fix restart storm.
+      assert FakeNode.connections_accepted(replica) <= 3
+    end
+  end
+
   ## Helpers
 
   # Hand-wires a cluster's internal resources — registry, task supervisor, and slot

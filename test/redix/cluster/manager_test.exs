@@ -177,9 +177,11 @@ defmodule Redix.Cluster.ManagerTest do
 
       Process.exit(pid, :kill)
 
-      # Wait for the new connection to appear in the registry.
+      # Wait for the new connection to appear in the registry. The DOWN-driven
+      # restart backs off (issue #334), so the replacement isn't instantaneous —
+      # `assert` (not a bare match) so `wait_until_passes` retries until it lands.
       wait_until_passes(2_000, fn ->
-        [{new_pid, _}] = Registry.lookup(registry, node_id)
+        assert [{new_pid, _}] = Registry.lookup(registry, node_id)
         assert new_pid != pid
         assert Process.alive?(new_pid)
       end)

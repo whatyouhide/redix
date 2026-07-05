@@ -103,6 +103,35 @@ This eliminates the need for `persistent_term` or any external lookup.
   `terminate_child` so the deliberate DOWN doesn't resurrect the old role via
   `handle_down/2`.
 
+- **Node connections are `restart: :temporary`, and a *semantic* setup failure parks the
+  node for the topology refresh rather than restarting it.** `start_connection/7`
+  overrides the `{Redix, opts}` child spec to `restart: :temporary` so the pool
+  `DynamicSupervisor` never restarts a node connection itself — the Manager owns the
+  lifecycle (it monitors every connection and reacts to `DOWN`, with the
+  `:already_started` adoption path). A node that fails connection *setup* with a
+  *semantic* error (a `%Redix.Error{}`: `NOAUTH`/`WRONGPASS` from per-node password/ACL
+  drift, or `READONLY` on a node with cluster support disabled) stops its
+  `Redix.Connection` by design (`connection.ex`'s `disconnect(_, %Redix.Error{}) ->
+  {:stop, error}`). As a `:permanent` pool child that crash-looped with no backoff, blew
+  past the `DynamicSupervisor`'s default intensity (3/5s) in milliseconds, and — via the
+  top-level `:one_for_all` — took the whole cluster tree (and often the host app) down
+  within a second (issue #334). Now the crash is absorbed (temporary child) and handled
+  in `handle_down/3`, which **branches on the DOWN reason**: a `%Redix.Error{}` is *not*
+  restarted (retrying on a timer can't fix a misconfiguration — only an operator can, on
+  no bounded schedule), so the node is left to the periodic topology refresh, which
+  `ensure_connections/2` uses to re-attempt every needed-but-unconnected node each
+  interval. That re-evaluates the node on the correct trigger (a fresh `CLUSTER SLOTS`):
+  it reconnects within one refresh once fixed, or is torn down for good if it has left
+  the cluster. A `node_connection_failed` telemetry event makes a parked node observable.
+  Any *other* DOWN reason (a process crash or deliberate kill) *is* restarted inline for
+  fast recovery — and can't degenerate into a loop, because a *transient network* failure
+  never reaches `handle_down/3` at all (`Redix.Connection` handles it internally, moving
+  to its own `:disconnected` state and reconnecting, rather than stopping). This is why
+  no per-node backoff machinery is needed: exponential backoff's only edge over the
+  refresh — a fast *first* retry — is worthless for a semantic error (the retry is
+  guaranteed to fail again), and its steady state would just match the refresh interval
+  anyway.
+
 - **One Redix connection per node** (multiplexing model, like ioredis/Lettuce). Redix
   already pipelines internally. Users who need more throughput start multiple named
   `Redix.Cluster` instances.
