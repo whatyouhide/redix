@@ -17,10 +17,11 @@ The API for `Redix.Cluster` will feel familiar to folks used to `Redix`.
 
 ```elixir
 # Start a cluster connection with a name and one or more seed nodes.
-{:ok, _pid} = Redix.Cluster.start_link(
-  name: :my_cluster,
-  nodes: ["redis://localhost:7000", "redis://localhost:7001"]
-)
+{:ok, _pid} =
+  Redix.Cluster.start_link(
+    name: :my_cluster,
+    nodes: ["redis://localhost:7000", "redis://localhost:7001"]
+  )
 
 # Issue commands across the cluster.
 Redix.Cluster.command(:my_cluster, ["SET", "mykey", "myvalue"])
@@ -33,9 +34,9 @@ Redix.Cluster.command(:my_cluster, ["GET", "mykey"])
 
 Like single-node `Redix` connections, starting a cluster does **not** require any node to be reachable. By default, `Redix.Cluster.start_link/1` returns right away and discovers the cluster topology in the background, retrying with exponential backoff (controlled by the `:backoff_initial` and `:backoff_max` options) until a seed node answers. This means a `Redix.Cluster` in your supervision tree won't crash-loop your application at boot if Redis comes up *after* your app.
 
-Commands issued while the *initial* discovery attempt is in flight **wait for it to complete** (up to their `:timeout`), just like a single `Redix` connection postpones commands while it's connecting — so starting a cluster and issuing commands right away works without retries. Once that first attempt fails (no seed node is reachable), commands stop waiting and return `{:error, %Redix.ConnectionError{reason: :closed}}` until a node becomes reachable.
+Commands issued while the *initial* discovery attempt is in flight **wait for it to complete** (up to their `:timeout`), just like a single `Redix` connection postpones commands while it's connecting (so starting a cluster and issuing commands right away works without retries). Once that first attempt fails (no seed node is reachable), commands stop waiting and return an error until a node becomes reachable.
 
-If you prefer to block until the topology has been discovered—and fail fast if no seed node is reachable—pass `sync_connect: true`:
+If you'd prefer to block until the topology has been discovered—and fail fast if no seed node is reachable—pass `sync_connect: true`:
 
 ```elixir
 Redix.Cluster.start_link(
@@ -81,7 +82,7 @@ Redis Cluster handles slot migrations transparently:
   * `MOVED`: the slot has permanently moved to another node. Redix updates its topology map and retries the command on the new node.
   * `ASK`: the slot is being migrated. Redix sends `ASKING` followed by the command to the target node without updating the topology map.
 
-Up to 5 redirections are followed before returning an error.
+Up to five redirections are followed before returning an error.
 
 ## Reading from Replicas
 
@@ -101,11 +102,4 @@ Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :replica)
 Redix.Cluster.command(:my_cluster, ["GET", "mykey"], route: :prefer_replica)
 ```
 
-See the `Redix.Cluster` module documentation for details.
-
-## Limitations
-
-  * **Database `0` only**: Redis Cluster does not support the `SELECT` command. Passing a non-zero `:database` option raises an error.
-  * **Basic replica reads**: replica reads pick a random reachable replica. There is no read-load balancing strategy, staleness tolerance, or zone/locality awareness yet.
-  * **No Pub/Sub**: Redis Cluster Pub/Sub has different semantics (messages broadcast to all nodes). Use `Redix.PubSub` with a direct connection instead.
-  * **No `noreply_*` functions**: fire-and-forget commands are not supported in cluster mode.
+See the `Redix.Cluster` module documentation for details and present limitations.
