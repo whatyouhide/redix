@@ -72,10 +72,15 @@ defmodule Redix.Cluster.Manager do
   """
   @spec get_connection(atom(), atom(), non_neg_integer()) :: {:ok, pid()} | :error
   def get_connection(slot_table, registry, slot) when is_integer(slot) do
-    case :ets.lookup(slot_table, slot) do
-      [{^slot, primary_id, _replica_ids}] -> lookup_connection(registry, primary_id)
-      [] -> :error
-    end
+    guard_missing_table(
+      fn ->
+        case :ets.lookup(slot_table, slot) do
+          [{^slot, primary_id, _replica_ids}] -> lookup_connection(registry, primary_id)
+          [] -> :error
+        end
+      end,
+      :error
+    )
   end
 
   @doc """
@@ -88,20 +93,25 @@ defmodule Redix.Cluster.Manager do
   """
   @spec get_replica_connection(atom(), atom(), non_neg_integer()) :: {:ok, pid()} | :error
   def get_replica_connection(slot_table, registry, slot) when is_integer(slot) do
-    case :ets.lookup(slot_table, slot) do
-      [{^slot, _primary_id, replica_ids}] when replica_ids != [] ->
-        replica_ids
-        |> Enum.shuffle()
-        |> Enum.find_value(:error, fn replica_id ->
-          case lookup_connection(registry, replica_id) do
-            {:ok, pid} -> {:ok, pid}
-            :error -> false
-          end
-        end)
+    guard_missing_table(
+      fn ->
+        case :ets.lookup(slot_table, slot) do
+          [{^slot, _primary_id, replica_ids}] when replica_ids != [] ->
+            replica_ids
+            |> Enum.shuffle()
+            |> Enum.find_value(:error, fn replica_id ->
+              case lookup_connection(registry, replica_id) do
+                {:ok, pid} -> {:ok, pid}
+                :error -> false
+              end
+            end)
 
-      _other ->
-        :error
-    end
+          _other ->
+            :error
+        end
+      end,
+      :error
+    )
   end
 
   @doc """
@@ -111,7 +121,10 @@ defmodule Redix.Cluster.Manager do
   """
   @spec get_connection_by_node(atom(), {String.t(), non_neg_integer()}) :: {:ok, pid()} | :error
   def get_connection_by_node(registry, {host, port}) do
-    lookup_connection(registry, canonical_node_id(host, port))
+    guard_missing_table(
+      fn -> lookup_connection(registry, canonical_node_id(host, port)) end,
+      :error
+    )
   end
 
   @doc """
@@ -124,16 +137,47 @@ defmodule Redix.Cluster.Manager do
   """
   @spec get_random_connection(atom()) :: {:ok, pid()} | :error
   def get_random_connection(registry) do
-    case Registry.select(registry, [{{:_, :"$1", :primary}, [], [:"$1"]}]) do
-      [_ | _] = pids ->
-        {:ok, Enum.random(pids)}
+    guard_missing_table(
+      fn ->
+        case Registry.select(registry, [{{:_, :"$1", :primary}, [], [:"$1"]}]) do
+          [_ | _] = pids ->
+            {:ok, Enum.random(pids)}
 
-      [] ->
-        case Registry.select(registry, [{{:_, :"$1", :_}, [], [:"$1"]}]) do
-          [] -> :error
-          pids -> {:ok, Enum.random(pids)}
+          [] ->
+            case Registry.select(registry, [{{:_, :"$1", :_}, [], [:"$1"]}]) do
+              [] -> :error
+              pids -> {:ok, Enum.random(pids)}
+            end
         end
-    end
+      end,
+      :error
+    )
+  end
+
+  # The slot/command-cache ETS tables (owned by this Manager) and the Registry are
+  # siblings in the cluster's :one_for_all supervisor, so a Manager crash briefly tears
+  # all of them down before they're recreated. A caller racing that window (a lookup
+  # from `Redix.Cluster`, `Redix.Cluster.KeyResolver`, or one of this module's own public
+  # functions above) hits :ets.lookup/member or Registry.lookup/select on a table that
+  # doesn't exist yet, which raises `ArgumentError` in the *caller* instead of just not
+  # finding an answer (issue #338). `fun` wraps exactly that single lookup; `default` is
+  # what a "not found" result already looks like for that lookup (`:error`, `false`, ...),
+  # so a table-missing race degrades identically to an ordinary miss. Only the specific
+  # "table/registry doesn't exist" class of ArgumentError is treated this way — anything
+  # else re-raises, so a genuine bug in the wrapped lookup isn't silently hidden.
+  @doc false
+  @spec guard_missing_table((-> result), result) :: result when result: var
+  def guard_missing_table(fun, default) do
+    fun.()
+  rescue
+    error in ArgumentError ->
+      if is_binary(error.message) and
+           (String.contains?(error.message, "does not refer to an existing ETS table") or
+              String.starts_with?(error.message, "unknown registry:")) do
+        default
+      else
+        reraise error, __STACKTRACE__
+      end
   end
 
   @doc """

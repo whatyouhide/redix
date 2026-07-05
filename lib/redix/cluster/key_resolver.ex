@@ -62,35 +62,47 @@ defmodule Redix.Cluster.KeyResolver do
   end
 
   # Fetches and caches the key specification for any command name not already cached.
+  #
+  # Guarded as a whole against the command-cache table being momentarily gone
+  # (torn down mid-:one_for_all-restart of the cluster tree): this is a
+  # best-effort cache population with no return value callers depend on, so a
+  # table-missing race simply skips caching for this call, same as the existing
+  # "malformed reply" no-op below. COMMAND INFO is retried next time the table
+  # (and thus the cluster) is back.
   defp cache_missing_keyspecs(conn, command_cache, unknowns) do
-    missing =
-      unknowns
-      |> Enum.map(fn {_idx, cmd} -> command_name(cmd) end)
-      |> Enum.uniq()
-      |> Enum.reject(&(:ets.lookup(command_cache, &1) != []))
+    Manager.guard_missing_table(
+      fn ->
+        missing =
+          unknowns
+          |> Enum.map(fn {_idx, cmd} -> command_name(cmd) end)
+          |> Enum.uniq()
+          |> Enum.reject(&(:ets.lookup(command_cache, &1) != []))
 
-    if missing != [] and :ets.info(command_cache, :size) < @command_cache_max_size do
-      # safe_command, not Redix.command: a randomly-chosen `conn` that died mid-flight
-      # would otherwise exit the *caller* (A1). The caught exit yields an `{:error, _}`
-      # tuple, which falls through to the `_other` clause (nothing cached, commands
-      # resolve to :no_slot for this call, COMMAND INFO retried next time).
-      case safe_command(conn, ["COMMAND", "INFO" | missing]) do
-        {:ok, infos} when length(infos) == length(missing) ->
-          missing
-          |> Enum.zip(infos)
-          |> Enum.each(fn {name, info} ->
-            :ets.insert(command_cache, {name, keyspec_from_info(info)})
-          end)
+        if missing != [] and :ets.info(command_cache, :size) < @command_cache_max_size do
+          # safe_command, not Redix.command: a randomly-chosen `conn` that died mid-flight
+          # would otherwise exit the *caller* (A1). The caught exit yields an `{:error, _}`
+          # tuple, which falls through to the `_other` clause (nothing cached, commands
+          # resolve to :no_slot for this call, COMMAND INFO retried next time).
+          case safe_command(conn, ["COMMAND", "INFO" | missing]) do
+            {:ok, infos} when length(infos) == length(missing) ->
+              missing
+              |> Enum.zip(infos)
+              |> Enum.each(fn {name, info} ->
+                :ets.insert(command_cache, {name, keyspec_from_info(info)})
+              end)
 
-        # A malformed *whole* reply (wrong length) or a connection error isn't cached:
-        # the commands resolve to :no_slot for this call and we retry COMMAND INFO next
-        # time. Note this is only about the whole reply — a well-formed reply whose entry
-        # for a given command is `nil` (a command the server doesn't know) *is* cached as
-        # :no_key by keyspec_from_info/1.
-        _other ->
-          :ok
-      end
-    end
+            # A malformed *whole* reply (wrong length) or a connection error isn't cached:
+            # the commands resolve to :no_slot for this call and we retry COMMAND INFO next
+            # time. Note this is only about the whole reply — a well-formed reply whose entry
+            # for a given command is `nil` (a command the server doesn't know) *is* cached as
+            # :no_key by keyspec_from_info/1.
+            _other ->
+              :ok
+          end
+        end
+      end,
+      :ok
+    )
   end
 
   # COMMAND INFO reply per command: [name, arity, flags, first_key, last_key, step | _].
@@ -128,10 +140,15 @@ defmodule Redix.Cluster.KeyResolver do
   end
 
   defp cached_keyspec(command_cache, cmd) do
-    case :ets.lookup(command_cache, command_name(cmd)) do
-      [{_name, keyspec}] -> keyspec
-      [] -> :no_key
-    end
+    Manager.guard_missing_table(
+      fn ->
+        case :ets.lookup(command_cache, command_name(cmd)) do
+          [{_name, keyspec}] -> keyspec
+          [] -> :no_key
+        end
+      end,
+      :no_key
+    )
   end
 
   defp slot_from_keyspec({:first_key, position}, cmd) do

@@ -431,6 +431,98 @@ defmodule Redix.Cluster.FakeNodeTest do
     end
   end
 
+  describe "cluster tree restart" do
+    setup :wire_cluster
+
+    # The Manager owns the slot/command-cache ETS tables, and Registry sits in the
+    # same :one_for_all group, so a crash-restart of the whole cluster tree briefly
+    # tears all of them down. Any lookup landing in that window used to raise
+    # ArgumentError ("table identifier does not refer to an existing ETS table") in
+    # the *caller* — :ets.member/2 on the missing slot table, the first thing every
+    # entry point does in await_topology_discovery — instead of returning a
+    # connection error like every other "cluster unreachable" case (issue #338). We
+    # reproduce the window deterministically by deleting the wired slot table
+    # instead of actually crashing a Manager, since racing a real restart would make
+    # the test flaky.
+    test "command/pipeline/transaction_pipeline degrade to a connection error instead " <>
+           "of raising when the slot table is momentarily gone",
+         %{cluster: cluster} do
+      :ets.delete(:"#{cluster}_slots")
+
+      assert Redix.Cluster.command(cluster, ["PING"]) ==
+               {:error, %Redix.ConnectionError{reason: :closed}}
+
+      # Both commands are keyless (:no_slot), so this stays a single-node group and
+      # surfaces a top-level error rather than per-command values (see the
+      # "Partial failures across nodes" pipeline/3 doc — that's a distinct, unrelated
+      # behavior for pipelines actually spanning multiple nodes).
+      assert Redix.Cluster.pipeline(cluster, [["PING"], ["PING"]]) ==
+               {:error, %Redix.ConnectionError{reason: :closed}}
+
+      assert Redix.Cluster.transaction_pipeline(cluster, [["SET", "x", "1"]]) ==
+               {:error, %Redix.ConnectionError{reason: :closed}}
+    end
+
+    test "Manager.get_connection/3 and get_replica_connection/3 return :error instead of " <>
+           "raising when the slot table is momentarily gone",
+         %{cluster: cluster} do
+      slot_table = :"#{cluster}_slots"
+      registry = :"#{cluster}_registry"
+
+      :ets.delete(slot_table)
+
+      assert Redix.Cluster.Manager.get_connection(slot_table, registry, 0) == :error
+      assert Redix.Cluster.Manager.get_replica_connection(slot_table, registry, 0) == :error
+    end
+
+    test "Manager.get_random_connection/1 and get_connection_by_node/2 return :error " <>
+           "instead of raising when the registry doesn't exist" do
+      # A registry name with no backing ETS table at all — whichever moment mid-restart
+      # a caller catches, there's no table for that name yet, same as here. (A live
+      # registry killed out from under a caller isn't a clean stand-in: Registry's
+      # own child spec is :permanent, so under start_supervised! it auto-restarts almost
+      # immediately, and depending on exactly when the lookup lands relative to that
+      # restart, Registry's internals raise a *different* ArgumentError shape — the
+      # table exists but its metadata row doesn't ("not a key that exists in the
+      # table") — that missing_table_error?/1 doesn't special-case, since it's specific
+      # to Registry's own restart bookkeeping rather than the caller-visible "unknown
+      # registry" it settles into once gone. A never-started name sidesteps that
+      # entirely and deterministically reproduces the caller-visible condition.)
+      registry = :"never_started_registry_#{System.unique_integer([:positive])}"
+
+      assert Redix.Cluster.Manager.get_random_connection(registry) == :error
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, {"127.0.0.1", 7000}) == :error
+    end
+  end
+
+  describe "Manager.guard_missing_table/2" do
+    test "normalizes only the ETS/Registry table-missing ArgumentError, re-raising anything else" do
+      table = :"guard_missing_table_probe_#{System.unique_integer([:positive])}"
+
+      # A genuinely missing ETS table...
+      assert Redix.Cluster.Manager.guard_missing_table(
+               fn -> :ets.lookup(table, :key) end,
+               :default
+             ) == :default
+
+      # ...and Registry's own "unknown registry" wording for the same underlying
+      # condition both degrade to the given default.
+      assert Redix.Cluster.Manager.guard_missing_table(
+               fn -> Registry.lookup(table, :key) end,
+               :default
+             ) == :default
+
+      # An unrelated ArgumentError — a real bug in the wrapped lookup — must not be
+      # swallowed.
+      assert_raise ArgumentError, "unrelated", fn ->
+        Redix.Cluster.Manager.guard_missing_table(
+          fn -> raise ArgumentError, "unrelated" end,
+          :default
+        )
+      end
+    end
+  end
+
   describe "slot map refresh" do
     test "drops slot-table entries for slots that become unassigned on refresh" do
       cluster = :"slotmap_#{System.unique_integer([:positive])}"

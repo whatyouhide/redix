@@ -1064,8 +1064,17 @@ defmodule Redix.Cluster do
   # (if the cluster couldn't be reached on the first try it might be a while before
   # it can, so blocking callers for every backoff retry wouldn't help). Once the
   # marker is set this costs one ETS lookup and the Manager is never contacted again.
+  #
+  # The table itself can be momentarily missing (torn down
+  # mid-:one_for_all-restart of the cluster tree) in which case discovery
+  # certainly hasn't happened yet, so `guard_missing_table` defaults the member
+  # check to `false` and we fall through to awaiting the Manager exactly as if
+  # the marker were absent.
   defp await_topology_discovery(cluster, slot_table, opts) do
-    unless :ets.member(slot_table, :discovery_attempted) do
+    discovery_attempted? =
+      Manager.guard_missing_table(fn -> :ets.member(slot_table, :discovery_attempted) end, false)
+
+    if not discovery_attempted? do
       timeout = Keyword.get(opts, :timeout, @default_timeout)
       Manager.await_topology_discovery(manager_name(cluster), timeout)
     end

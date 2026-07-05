@@ -289,6 +289,35 @@ This eliminates the need for `persistent_term` or any external lookup.
   `%Redix.ConnectionError{}` in addition to `%Redix.Error{}`, since a single-command
   call can now surface this as a value rather than a top-level `{:error, _}`.
 
+- **A table-missing race during a cluster tree restart degrades to a connection
+  error (or a cache miss) instead of raising in the caller.** The Manager owns the
+  slot and command-cache ETS tables, and `Redix.Cluster`'s top-level supervisor uses
+  `:one_for_all`, so a Manager crash briefly tears down Registry and both tables
+  before restarting them. A lookup landing in that window used to raise
+  `ArgumentError` straight out of the underlying `:ets`/`Registry` call — `:ets`
+  itself says "table identifier does not refer to an existing ETS table"; `Registry`
+  catches that internally and re-raises as "unknown registry: ..." — instead of
+  just not finding an answer, like every other "cluster unreachable" case (issue
+  #338). `Manager.guard_missing_table/2` wraps a single lookup and its `default`
+  (`fun.() rescue e in ArgumentError -> if missing_table_error?(e), do: default,
+  else: reraise e, __STACKTRACE__`), so only that specific message shape degrades —
+  any other `ArgumentError` (a genuine bug in the wrapped lookup) still propagates.
+  It's applied at the narrow leaf call sites, each defaulting to what an ordinary
+  "not found" already looks like there: `Manager.get_connection/3`,
+  `get_replica_connection/3`, `get_connection_by_node/2`, and `get_random_connection/1`
+  default to `:error` (their existing "no connection" contract, which
+  `Redix.Cluster`'s callers already turn into a `%Redix.ConnectionError{}`);
+  `Redix.Cluster`'s own `await_topology_discovery/3` defaults its `:ets.member/2`
+  check to `false` (falls through to awaiting the Manager, same as "discovery not
+  attempted yet"); `Redix.Cluster.KeyResolver`'s `cached_keyspec/2` and
+  `cache_missing_keyspecs/3` default to `:no_key`/a no-op (same as an ordinary cache
+  miss). No `try/rescue` lives in `Redix.Cluster`'s public entry points themselves —
+  every path degrades through the leaf functions' existing return contracts, so a
+  multi-node pipeline racing this window still gets the documented **partial**
+  per-command error values instead of one blanket top-level error. Reproduced
+  deterministically in tests by deleting the wired slot table (and, for the Registry
+  case, killing the wired Registry process) rather than racing a real Manager crash.
+
 ### Telemetry events
 
 All under `[:redix, :cluster, ...]`:
