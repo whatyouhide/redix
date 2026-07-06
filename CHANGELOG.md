@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.6.0
+
+  * Add support for **Redis Cluster**. This is a major feature and this its first release, so use with care—I only tested it (extensively) in non-production-grade scenarios; it was tested on various synthetic environments (like with AWS ElastiCache and locally via Docker) but it has not seen the horrors of production traffic. See the `Redix.Cluster` documentation to get started.
+  * Add `Redix.PubSub.ping/2`.
+  * Fix Elixir 1.19/1.20 warnings.
+
 ## Unreleased
 
 ### New features
