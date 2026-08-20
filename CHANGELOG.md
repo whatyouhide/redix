@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.7.0
+
+  * Introduce `:primary_pool_size` and `:replica_pool_size` options for `Redix.Cluster`. These let you configure per-node pool size, so that you can increase the Elixir-side concurrency in a Redis Cluster setup. Redis is still single-threaded, so apply this only when it makes sense. Defaults have not changed, so a `Redix.Cluster` connection started without these explicit options defaults to one connection per primary and one per replica (if `:read_from_replicas` is set).
+  * Add a few `Redix.Cluster`-related telemetry events.
+
 ## v1.6.0
 
   * Add support for **Redis Cluster**. This is a major feature and this its first release, so use with care—I only tested it (extensively) in non-production-grade scenarios; it was tested on various synthetic environments (like with AWS ElastiCache and locally via Docker) but it has not seen the horrors of production traffic. See the `Redix.Cluster` documentation to get started.
