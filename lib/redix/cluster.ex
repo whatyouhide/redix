@@ -538,6 +538,12 @@ defmodule Redix.Cluster do
                   "(MULTI/EXEC must run on the slot's primary)"
       end
 
+    span(cluster, :transaction_pipeline, :primary, commands, opts, fn opts ->
+      route_and_execute_transaction(cluster, commands, opts)
+    end)
+  end
+
+  defp route_and_execute_transaction(cluster, commands, opts) do
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
 
@@ -573,6 +579,8 @@ defmodule Redix.Cluster do
       [slot] ->
         case Manager.get_connection(slot_table, registry, slot, primary_pool_size) do
           {:ok, conn} ->
+            record_node_count(opts, 1)
+
             execute_transaction(
               cluster,
               conn,
@@ -640,7 +648,7 @@ defmodule Redix.Cluster do
     # queued command.
     prefix = if asking?, do: [["ASKING"], ["MULTI"]], else: [["MULTI"]]
 
-    case pipeline_catching_exit(conn, prefix ++ commands ++ [["EXEC"]], opts) do
+    case pipeline_catching_exit(cluster, conn, prefix ++ commands ++ [["EXEC"]], opts) do
       {:ok, responses} ->
         # Replies line up as [prefix..., queueing replies..., EXEC reply]. A
         # wrong-slot command is rejected with MOVED/ASK at *queue* time (which
@@ -682,6 +690,7 @@ defmodule Redix.Cluster do
     # same reactive refresh command/3 does so future routing is corrected. ASK is a
     # transient per-request migration hint and signals no topology change.
     if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
+    record_redirection(opts)
 
     :telemetry.execute([:redix, :cluster, :redirection], %{}, %{
       cluster: cluster,
@@ -705,6 +714,12 @@ defmodule Redix.Cluster do
     Redix.__assert_valid_pipeline_commands__(commands)
     {route, opts} = validate_and_pop_route!(opts)
 
+    span(cluster, :pipeline, route, commands, opts, fn opts ->
+      route_and_execute_pipeline(cluster, commands, opts, route)
+    end)
+  end
+
+  defp route_and_execute_pipeline(cluster, commands, opts, route) do
     slot_table = slot_table_name(cluster)
     registry = registry_name(cluster)
 
@@ -728,6 +743,7 @@ defmodule Redix.Cluster do
 
     # Group by slot -> node. Returns a list of {conn, [{idx, cmd}]} tuples.
     groups = group_by_node(slot_table, registry, indexed_commands, route)
+    record_node_count(opts, length(groups))
 
     # Execute each group on its target node
     results = execute_groups(cluster, groups, opts)
@@ -923,7 +939,7 @@ defmodule Redix.Cluster do
   # would otherwise exit the *calling* process instead of returning an error value. Catch
   # that exit and turn it into a connection-error value, matching how every other
   # unreachable-node case surfaces here (issue #317).
-  defp pipeline_catching_exit(conn, commands, opts) do
+  defp pipeline_catching_exit(cluster, conn, commands, opts) do
     # Every network hop draws from the call's shared deadline (issue #337): the
     # :timeout handed to Redix.pipeline/3 is the time *remaining*, not a fresh
     # full timeout. If the deadline already elapsed on an earlier hop, fail fast
@@ -936,7 +952,17 @@ defmodule Redix.Cluster do
         deadline_from_timeout(Keyword.get(opts, :timeout, @default_timeout))
       end)
 
-    opts = Keyword.delete(opts, :__caller__)
+    opts = opts |> Keyword.delete(:__caller__) |> Keyword.delete(:__stats__)
+
+    # Tag the per-node [:redix, :pipeline, ...] events with the cluster so node
+    # latency can be split per cluster without a cluster-specific event.
+    opts =
+      Keyword.update(
+        opts,
+        :telemetry_metadata,
+        %{cluster: cluster},
+        &Map.put(&1, :cluster, cluster)
+      )
 
     case deadline_remaining(deadline) do
       0 ->
@@ -953,7 +979,7 @@ defmodule Redix.Cluster do
   defp execute_and_handle_redirections(cluster, conn, cmds, opts, remaining) do
     commands = Enum.map(cmds, fn {_idx, cmd} -> cmd end)
 
-    case pipeline_catching_exit(conn, commands, opts) do
+    case pipeline_catching_exit(cluster, conn, commands, opts) do
       {:ok, results} ->
         indexed_results = Enum.zip(cmds, results) |> Enum.map(fn {{idx, _}, r} -> {idx, r} end)
         follow_redirections(cluster, cmds, indexed_results, opts, remaining)
@@ -974,6 +1000,7 @@ defmodule Redix.Cluster do
         case parse_redirection(result) do
           {type, slot, host, port} when type in [:moved, :ask] ->
             if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
+            record_redirection(opts)
 
             :telemetry.execute([:redix, :cluster, :redirection], %{}, %{
               cluster: cluster,
@@ -1109,7 +1136,7 @@ defmodule Redix.Cluster do
   # follows any further redirection the target returns. ASKING only needs to ride
   # the first request to a given node, so subsequent hops re-issue it themselves.
   defp execute_asking_command(cluster, conn, {idx, cmd}, opts, remaining) do
-    case pipeline_catching_exit(conn, [["ASKING"], cmd], opts) do
+    case pipeline_catching_exit(cluster, conn, [["ASKING"], cmd], opts) do
       {:ok, [_asking_ok, result]} ->
         case follow_redirections(cluster, [{idx, cmd}], [{idx, result}], opts, remaining) do
           {:error, _} = error -> error
@@ -1169,7 +1196,15 @@ defmodule Redix.Cluster do
 
     if not discovery_attempted? do
       timeout = Keyword.get(opts, :timeout, @default_timeout)
-      Manager.await_topology_discovery(manager_name(cluster), timeout)
+
+      start_time = System.monotonic_time()
+      result = Manager.await_topology_discovery(manager_name(cluster), timeout)
+
+      :telemetry.execute(
+        [:redix, :cluster, :discovery_wait],
+        %{duration: System.monotonic_time() - start_time},
+        %{cluster: cluster, result: result}
+      )
     end
 
     :ok
@@ -1199,6 +1234,79 @@ defmodule Redix.Cluster do
     opts
     |> put_deadline()
     |> Keyword.put(:__caller__, self())
+  end
+
+  # Wraps a whole cluster call (every node request plus every MOVED/ASK hop it
+  # spawns) in a [:redix, :cluster, :pipeline] span. Per-call stats live in an
+  # atomics counter stashed in opts under a private key, because the multi-node
+  # path runs groups in separate tasks: slot 1 counts redirections, slot 2 the
+  # number of target nodes. The key is stripped before reaching Redix.pipeline/3.
+  @stats_redirections 1
+  @stats_node_count 2
+
+  defp span(cluster, call, route, commands, opts, fun) do
+    stats = :counters.new(2, [:atomics])
+    opts = Keyword.put(opts, :__stats__, stats)
+
+    metadata = %{
+      cluster: cluster,
+      call: call,
+      route: route,
+      commands: commands,
+      extra_metadata: Keyword.get(opts, :telemetry_metadata, %{})
+    }
+
+    # Emitted by hand rather than via :telemetry.span/3 because the 3-tuple
+    # return (extra measurements) needs telemetry >= 1.1 and we still allow 0.4.
+    start_time = System.monotonic_time()
+
+    :telemetry.execute(
+      [:redix, :cluster, :pipeline, :start],
+      %{system_time: System.system_time()},
+      metadata
+    )
+
+    try do
+      result = fun.(opts)
+
+      measurements = %{
+        duration: System.monotonic_time() - start_time,
+        command_count: length(commands),
+        node_count: :counters.get(stats, @stats_node_count),
+        redirections: :counters.get(stats, @stats_redirections)
+      }
+
+      :telemetry.execute(
+        [:redix, :cluster, :pipeline, :stop],
+        measurements,
+        Map.put(metadata, :result, result)
+      )
+
+      result
+    catch
+      kind, reason ->
+        :telemetry.execute(
+          [:redix, :cluster, :pipeline, :exception],
+          %{duration: System.monotonic_time() - start_time},
+          Map.merge(metadata, %{kind: kind, reason: reason, stacktrace: __STACKTRACE__})
+        )
+
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  defp record_redirection(opts) do
+    case Keyword.get(opts, :__stats__) do
+      nil -> :ok
+      stats -> :counters.add(stats, @stats_redirections, 1)
+    end
+  end
+
+  defp record_node_count(opts, count) do
+    case Keyword.get(opts, :__stats__) do
+      nil -> :ok
+      stats -> :counters.put(stats, @stats_node_count, count)
+    end
   end
 
   defp deadline_from_timeout(:infinity), do: :infinity

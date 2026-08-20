@@ -228,6 +228,19 @@ defmodule Redix.Cluster.ManagerTest do
       [{pid, _role}] = Registry.lookup(registry, {node_id, index})
       {:ok, host, port} = Redix.Cluster.Manager.split_host_port(node_id)
 
+      parent = self()
+      telemetry_ref = make_ref()
+      handler_id = "#{inspect(manager)}_restarted"
+
+      :telemetry.attach(
+        handler_id,
+        [:redix, :cluster, :node_connection_restarted],
+        fn _event, _measurements, meta, _config -> send(parent, {telemetry_ref, meta}) end,
+        :no_config
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
       :sys.suspend(manager)
 
       try do
@@ -252,6 +265,8 @@ defmodule Redix.Cluster.ManagerTest do
         assert [{new_pid, _role}] = Registry.lookup(registry, {node_id, index})
         assert new_pid != pid
       end)
+
+      assert_receive {^telemetry_ref, %{address: ^node_id, role: :primary, reason: :killed}}
     end
   end
 

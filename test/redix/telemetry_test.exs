@@ -89,12 +89,48 @@ defmodule Redix.TelemetryTest do
           Redix.Telemetry.handle_event(
             [:redix, :cluster, :node_connection_failed],
             %{},
-            %{cluster: :my_cluster, address: "127.0.0.1:7000", reason: :econnrefused},
+            %{
+              cluster: :my_cluster,
+              address: "127.0.0.1:7000",
+              reason: :econnrefused,
+              kind: :start_failed
+            },
             :no_config
           )
         end)
 
-      assert log =~ ~r/Cluster :my_cluster failed to connect to node 127.0.0.1:7000/
+      assert log =~
+               ~r/Cluster :my_cluster failed to connect to node 127.0.0.1:7000 \(start_failed\)/
+    end
+
+    test "logs node connection restarts" do
+      log =
+        capture_log(fn ->
+          Redix.Telemetry.handle_event(
+            [:redix, :cluster, :node_connection_restarted],
+            %{},
+            %{cluster: :my_cluster, address: "127.0.0.1:7000", role: :primary, reason: :killed},
+            :no_config
+          )
+        end)
+
+      assert log =~
+               ~r/Cluster :my_cluster restarted connection to primary node 127.0.0.1:7000 after it exited: :killed/
+    end
+
+    test "logs node role changes" do
+      log =
+        capture_log(fn ->
+          Redix.Telemetry.handle_event(
+            [:redix, :cluster, :node_role_changed],
+            %{},
+            %{cluster: :my_cluster, address: "127.0.0.1:7000", from: :replica, to: :primary},
+            :no_config
+          )
+        end)
+
+      assert log =~
+               ~r/Cluster :my_cluster node 127.0.0.1:7000 changed role from replica to primary/
     end
 
     test "logs redirections" do

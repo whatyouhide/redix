@@ -517,7 +517,8 @@ defmodule Redix.Cluster.Manager do
     :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
       cluster: data.cluster_name,
       address: node_id,
-      reason: reason
+      reason: reason,
+      kind: :parked
     })
 
     data
@@ -528,9 +529,17 @@ defmodule Redix.Cluster.Manager do
   # failure never reaches here: `Redix.Connection` handles it internally (it moves
   # to its own :disconnected state and reconnects) rather than stopping, so this
   # path can't degenerate into a fast restart loop.
-  defp handle_node_down(data, node_id, index, role, _reason) do
+  defp handle_node_down(data, node_id, index, role, reason) do
     {:ok, _canonical_host, port} = split_host_port(node_id)
     host = Map.fetch!(data.node_addresses, node_id)
+
+    :telemetry.execute([:redix, :cluster, :node_connection_restarted], %{}, %{
+      cluster: data.cluster_name,
+      address: node_id,
+      role: role,
+      reason: reason
+    })
+
     {_result, data} = start_and_monitor_connection(data, node_id, index, host, port, role)
     data
   end
@@ -621,6 +630,7 @@ defmodule Redix.Cluster.Manager do
   # all — stays deferred because it reworks the await_topology_discovery/2 handshake
   # (which relies on the initial fetch being synchronous within this callback).
   defp do_refresh_topology(data, deadline) do
+    start_time = System.monotonic_time()
     all_nodes = get_known_nodes(data) ++ data.seed_nodes
 
     case fetch_cluster_slots(all_nodes, data.conn_opts, deadline) do
@@ -638,21 +648,28 @@ defmodule Redix.Cluster.Manager do
         # update_slot_map/2's 3-tuple select/delete patterns.
         :ets.insert(data.slot_table, {:discovery_attempted, true})
 
-        node_addresses =
-          for {node_id, _host, _port, _role} <- nodes_to_connect(data, slots_data), do: node_id
+        nodes =
+          for {node_id, host, port, role} <- nodes_to_connect(data, slots_data),
+              do: %{id: node_id, host: host, port: port, role: role}
 
-        :telemetry.execute([:redix, :cluster, :topology_change], %{}, %{
-          cluster: data.cluster_name,
-          nodes: node_addresses
-        })
+        :telemetry.execute(
+          [:redix, :cluster, :topology_change],
+          %{duration: System.monotonic_time() - start_time, node_count: length(nodes)},
+          %{
+            cluster: data.cluster_name,
+            nodes: Enum.map(nodes, & &1.id),
+            node_info: nodes
+          }
+        )
 
         {:ok, data}
 
       {:error, reason} ->
-        :telemetry.execute([:redix, :cluster, :failed_topology_refresh], %{}, %{
-          cluster: data.cluster_name,
-          reason: reason
-        })
+        :telemetry.execute(
+          [:redix, :cluster, :failed_topology_refresh],
+          %{duration: System.monotonic_time() - start_time},
+          %{cluster: data.cluster_name, reason: reason}
+        )
 
         {:error, reason}
     end
@@ -993,6 +1010,15 @@ defmodule Redix.Cluster.Manager do
   # `ensure_connections/2`) so the deliberate `terminate_child` DOWN doesn't land
   # in `handle_down/3` and resurrect the connection under its *old* role.
   defp restart_node_pool(data, node_id, members, host, port, role) do
+    [{_index, _pid, old_role} | _] = members
+
+    :telemetry.execute([:redix, :cluster, :node_role_changed], %{}, %{
+      cluster: data.cluster_name,
+      address: node_id,
+      from: old_role,
+      to: role
+    })
+
     data = demonitor_node(data, node_id)
 
     Enum.each(members, fn {_index, pid, _registered_role} ->
@@ -1061,7 +1087,8 @@ defmodule Redix.Cluster.Manager do
         :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
           cluster: data.cluster_name,
           address: node_id,
-          reason: reason
+          reason: reason,
+          kind: :start_failed
         })
 
         {{:error, reason}, data}

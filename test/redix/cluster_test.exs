@@ -955,6 +955,75 @@ defmodule Redix.ClusterTest do
       assert is_list(meta.nodes)
       assert length(meta.nodes) > 0
       assert Enum.all?(meta.nodes, &String.contains?(&1, ":"))
+      assert length(meta.node_info) == length(meta.nodes)
+      assert Enum.all?(meta.node_info, &(&1.role == :primary and is_integer(&1.port)))
+
+      :telemetry.detach("#{test_name}")
+    end
+
+    test "pipeline start/stop span covers the whole call", %{cluster: cluster} do
+      {test_name, _arity} = __ENV__.function
+      parent = self()
+      ref = make_ref()
+
+      handler = fn event, measurements, meta, _config ->
+        if meta.cluster == cluster, do: send(parent, {ref, event, measurements, meta})
+      end
+
+      :telemetry.attach_many(
+        "#{test_name}",
+        [[:redix, :cluster, :pipeline, :start], [:redix, :cluster, :pipeline, :stop]],
+        handler,
+        :no_config
+      )
+
+      # Three keys in different slots, so the pipeline spans more than one node.
+      commands = [["SET", "a", "1"], ["SET", "b", "2"], ["SET", "c", "3"]]
+      assert {:ok, ["OK", "OK", "OK"]} = Redix.Cluster.pipeline(cluster, commands)
+
+      assert_receive {^ref, [:redix, :cluster, :pipeline, :start], start_measurements, start_meta}
+      assert is_integer(start_measurements.system_time)
+      assert start_meta.call == :pipeline
+      assert start_meta.route == :primary
+      assert start_meta.commands == commands
+      assert start_meta.extra_metadata == %{}
+
+      assert_receive {^ref, [:redix, :cluster, :pipeline, :stop], measurements, stop_meta}
+      assert is_integer(measurements.duration)
+      assert measurements.command_count == 3
+      assert measurements.node_count > 1
+      assert measurements.redirections == 0
+      assert stop_meta.result == {:ok, ["OK", "OK", "OK"]}
+
+      # transaction_pipeline/3 reports its own :call and a single node.
+      assert {:ok, _} =
+               Redix.Cluster.transaction_pipeline(cluster, [["INCR", "{t}x"], ["GET", "{t}x"]])
+
+      assert_receive {^ref, [:redix, :cluster, :pipeline, :start], _,
+                      %{call: :transaction_pipeline}}
+
+      assert_receive {^ref, [:redix, :cluster, :pipeline, :stop],
+                      %{node_count: 1, command_count: 2}, %{call: :transaction_pipeline}}
+
+      :telemetry.detach("#{test_name}")
+    end
+
+    test "per-node pipeline events carry the cluster in extra_metadata", %{cluster: cluster} do
+      {test_name, _arity} = __ENV__.function
+      parent = self()
+      ref = make_ref()
+
+      handler = fn _event, _measurements, meta, _config ->
+        if meta.extra_metadata[:cluster] == cluster, do: send(parent, {ref, meta})
+      end
+
+      :telemetry.attach("#{test_name}", [:redix, :pipeline, :stop], handler, :no_config)
+
+      assert {:ok, "OK"} =
+               Redix.Cluster.command(cluster, ["SET", "k", "v"], telemetry_metadata: %{tag: 1})
+
+      assert_receive {^ref, meta}
+      assert meta.extra_metadata == %{cluster: cluster, tag: 1}
 
       :telemetry.detach("#{test_name}")
     end

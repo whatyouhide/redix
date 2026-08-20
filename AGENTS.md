@@ -375,10 +375,21 @@ All under `[:redix, :cluster, ...]`:
 
 | Event | Emitted from | Key metadata |
 |---|---|---|
-| `:topology_change` | Manager, on successful refresh | `cluster`, `nodes` |
-| `:failed_topology_refresh` | Manager, when no node reachable | `cluster`, `reason` |
-| `:node_connection_failed` | Manager, when a node conn fails | `cluster`, `address`, `reason` |
+| `:pipeline, :start \| :stop \| :exception` | Cluster, around every `command/pipeline/transaction_pipeline` call (all hops) | `cluster`, `call`, `route`, `commands`, `result`; measurements `duration`, `command_count`, `node_count`, `redirections` |
+| `:discovery_wait` | Cluster, when a call waited for initial discovery | `cluster`, `result`; measurement `duration` |
+| `:topology_change` | Manager, on successful refresh | `cluster`, `nodes`, `node_info`; measurements `duration`, `node_count` |
+| `:failed_topology_refresh` | Manager, when no node reachable | `cluster`, `reason`; measurement `duration` |
+| `:node_connection_failed` | Manager, when a node conn fails | `cluster`, `address`, `reason`, `kind` (`:start_failed` \| `:parked`) |
+| `:node_connection_restarted` | Manager, inline restart after a non-semantic DOWN | `cluster`, `address`, `role`, `reason` |
+| `:node_role_changed` | Manager, role reconciliation on refresh | `cluster`, `address`, `from`, `to` |
 | `:redirection` | Cluster, on MOVED/ASK | `cluster`, `type`, `slot`, `target_address` |
+
+Per-node `[:redix, :pipeline, ...]` events issued by the cluster carry `cluster` in
+`extra_metadata` (`pipeline_catching_exit/4` injects it into `:telemetry_metadata`).
+The span is emitted by hand (not `:telemetry.span/3`) because the extra-measurements
+return shape needs telemetry >= 1.1 and `mix.exs` still allows 0.4. Per-call stats
+travel in an `:counters` ref under the private `:__stats__` opt key (stripped before
+`Redix.pipeline/3`), since multi-node groups run in separate tasks.
 
 ### Docker cluster setup
 

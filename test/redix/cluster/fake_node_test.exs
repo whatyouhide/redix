@@ -950,9 +950,27 @@ defmodule Redix.Cluster.FakeNodeTest do
       # A was the primary, so it never issued READONLY.
       assert Agent.get(a_readonly, & &1) == 0
 
+      parent = self()
+      ref = make_ref()
+
+      :telemetry.attach(
+        "#{cluster}_role_changed",
+        [:redix, :cluster, :node_role_changed],
+        fn _event, _measurements, meta, _config ->
+          if meta.cluster == cluster, do: send(parent, {ref, meta})
+        end,
+        :no_config
+      )
+
+      on_exit(fn -> :telemetry.detach("#{cluster}_role_changed") end)
+
       # Failover: B is promoted to primary and A demoted to its replica.
       Agent.update(topology, fn _ -> FakeNode.cluster_slots([{0, 16_383, node_b, [node_a]}]) end)
       Redix.Cluster.Manager.refresh_topology(:"#{cluster}_manager")
+
+      # One role-change event per node that swapped.
+      assert_receive {^ref, %{address: ^a_id, from: :primary, to: :replica}}, 2_000
+      assert_receive {^ref, %{address: ^b_id, from: :replica, to: :primary}}, 2_000
 
       # A's full pool must be torn down and restarted as replicas with new PIDs,
       # `:replica` Registry values, and fresh READONLY commands.

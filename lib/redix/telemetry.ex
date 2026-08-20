@@ -94,15 +94,60 @@ defmodule Redix.Telemetry do
 
   `Redix.Cluster` connections execute the following Telemetry events:
 
+    * `[:redix, :cluster, :pipeline, :start]` - executed when a
+      `Redix.Cluster.command/3`, `pipeline/3`, or `transaction_pipeline/3` call
+      starts. Measurements are `:system_time`. Metadata are:
+
+      * `:cluster` - the name of the cluster (the atom passed as `:name`).
+      * `:call` - `:pipeline` (for `command/3` and `pipeline/3`) or
+        `:transaction_pipeline`.
+      * `:route` - the resolved `:route` option (`:primary`, `:replica`, or
+        `:prefer_replica`).
+      * `:commands` - the commands passed to the call.
+      * `:extra_metadata` - the `:telemetry_metadata` option passed to the call,
+        or `%{}`.
+
+      *Available since 1.7.0.*
+
+    * `[:redix, :cluster, :pipeline, :stop]` - executed when the call returns.
+      It covers every node request and every MOVED/ASK hop the call performed.
+      Measurements are:
+
+      * `:duration` - the total time of the call (in native units).
+      * `:command_count` - the number of commands in the call.
+      * `:node_count` - the number of nodes the commands were split across.
+      * `:redirections` - the number of MOVED/ASK redirections followed.
+
+      Metadata are the same as for `:start`, plus `:result` (the return value
+      of the call).
+
+      *Available since 1.7.0.*
+
+    * `[:redix, :cluster, :pipeline, :exception]` - executed when the call raises
+      or exits. Measurements are `:duration`. Metadata are the same as for
+      `:start`, plus `:kind`, `:reason`, and `:stacktrace`.
+
+      *Available since 1.7.0.*
+
+    * `[:redix, :cluster, :discovery_wait]` - executed when a call had to wait
+      for the initial topology discovery (only possible before the first
+      topology fetch completes with `sync_connect: false`). Measurements are
+      `:duration`. Metadata are `:cluster` and `:result`.
+
+      *Available since 1.7.0.*
+
     * `[:redix, :cluster, :topology_change]` - executed when the cluster topology
-      is successfully refreshed. There are no measurements. Metadata are:
+      is successfully refreshed. Measurements are `:duration` (the time spent
+      fetching `CLUSTER SLOTS`) and `:node_count`. Metadata are:
 
       * `:cluster` - the name of the cluster (the atom passed as `:name`).
       * `:nodes` - the list of primary node addresses (as `"host:port"` strings).
+      * `:node_info` - a list of maps with `:id`, `:host`, `:port`, and `:role`
+        (`:primary` or `:replica`) for every node the cluster connects to.
 
     * `[:redix, :cluster, :failed_topology_refresh]` - executed when the cluster
-      manager fails to refresh the topology (no reachable node). There are no
-      measurements. Metadata are:
+      manager fails to refresh the topology (no reachable node). Measurements
+      are `:duration`. Metadata are:
 
       * `:cluster` - the name of the cluster.
       * `:reason` - the error reason. This is `{:no_reachable_node, node_errors}`,
@@ -117,6 +162,34 @@ defmodule Redix.Telemetry do
       * `:cluster` - the name of the cluster.
       * `:address` - the node address (as a `"host:port"` string).
       * `:reason` - the error reason.
+      * `:kind` - `:start_failed` if the connection could not be started, or
+        `:parked` if the connection stopped with a semantic error (such as
+        `NOAUTH` or `WRONGPASS`) and is left for the next topology refresh
+        instead of being restarted.
+
+    * `[:redix, :cluster, :node_connection_restarted]` - executed when a node
+      connection went down for a non-semantic reason (a crash or a kill) and the
+      cluster manager restarts it right away. There are no measurements.
+      Metadata are:
+
+      * `:cluster` - the name of the cluster.
+      * `:address` - the node address (as a `"host:port"` string).
+      * `:role` - `:primary` or `:replica`.
+      * `:reason` - the exit reason of the old connection.
+
+      *Available since 1.7.0.*
+
+    * `[:redix, :cluster, :node_role_changed]` - executed when a topology refresh
+      finds that a node changed role (typically after a failover) and its
+      connections are restarted with the new role. There are no measurements.
+      Metadata are:
+
+      * `:cluster` - the name of the cluster.
+      * `:address` - the node address (as a `"host:port"` string).
+      * `:from` - the previous role (`:primary` or `:replica`).
+      * `:to` - the new role.
+
+      *Available since 1.7.0.*
 
     * `[:redix, :cluster, :redirection]` - executed when a command receives a
       `MOVED` or `ASK` redirection from a cluster node. There are no measurements.
@@ -151,6 +224,8 @@ defmodule Redix.Telemetry do
       reconnection, not logged if it's the first connection.
     * `[:redix, :cluster, :failed_topology_refresh]` - logged at the `:error` level
     * `[:redix, :cluster, :node_connection_failed]` - logged at the `:warning` level
+    * `[:redix, :cluster, :node_connection_restarted]` - logged at the `:warning` level
+    * `[:redix, :cluster, :node_role_changed]` - logged at the `:info` level
     * `[:redix, :cluster, :redirection]` - logged at the `:info` level
 
   See the module documentation for more information. If you want to
@@ -171,6 +246,8 @@ defmodule Redix.Telemetry do
       [:redix, :cluster, :topology_change],
       [:redix, :cluster, :failed_topology_refresh],
       [:redix, :cluster, :node_connection_failed],
+      [:redix, :cluster, :node_connection_restarted],
+      [:redix, :cluster, :node_role_changed],
       [:redix, :cluster, :redirection]
     ]
 
@@ -241,7 +318,21 @@ defmodule Redix.Telemetry do
         _ =
           Logger.warning(fn ->
             "Cluster #{inspect(cluster)} failed to connect to node " <>
-              "#{metadata.address}: #{inspect(metadata.reason)}"
+              "#{metadata.address} (#{metadata.kind}): #{inspect(metadata.reason)}"
+          end)
+
+      :node_connection_restarted ->
+        _ =
+          Logger.warning(fn ->
+            "Cluster #{inspect(cluster)} restarted connection to #{metadata.role} node " <>
+              "#{metadata.address} after it exited: #{inspect(metadata.reason)}"
+          end)
+
+      :node_role_changed ->
+        _ =
+          Logger.info(fn ->
+            "Cluster #{inspect(cluster)} node #{metadata.address} changed role " <>
+              "from #{metadata.from} to #{metadata.to}"
           end)
 
       :redirection ->
