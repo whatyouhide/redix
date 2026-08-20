@@ -17,7 +17,9 @@ defmodule Redix.Cluster.ManagerTest do
   setup do
     cluster_name = :"mgr_test_#{System.unique_integer([:positive])}"
 
-    start_supervised!({Redix.Cluster, nodes: @nodes, name: cluster_name, sync_connect: true})
+    start_supervised!(
+      {Redix.Cluster, nodes: @nodes, name: cluster_name, primary_pool_size: 3, sync_connect: true}
+    )
 
     %{
       cluster: cluster_name,
@@ -111,30 +113,144 @@ defmodule Redix.Cluster.ManagerTest do
   end
 
   describe "connection lifecycle" do
-    test "connections are started for all master nodes", %{registry: registry} do
+    test "pool members are started for all primary nodes", %{registry: registry} do
       registered =
-        Registry.select(registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+        Registry.select(
+          registry,
+          [{{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}]
+        )
 
-      # A 3-master cluster should have at least 3 connections.
-      assert length(registered) >= 3
+      # A 3-primary cluster should have at least 3 pools of 3 connections.
+      assert length(registered) >= 9
 
-      for {node_id, pid} <- registered do
+      for {node_id, index, pid, role} <- registered do
         assert is_binary(node_id)
         assert String.contains?(node_id, ":")
+        assert index in 0..2
         assert Process.alive?(pid)
+        assert role == :primary
       end
+
+      assert Enum.all?(Enum.group_by(registered, &elem(&1, 0)), fn {_node_id, members} ->
+               Enum.sort(Enum.map(members, &elem(&1, 1))) == [0, 1, 2]
+             end)
     end
 
-    test "dead connection is restarted with a new PID", %{registry: registry} do
-      [{node_id, pid} | _] =
+    test "dead pool member is restarted with the same index and a new PID", %{
+      registry: registry
+    } do
+      [{{node_id, index}, pid} | _] =
         Registry.select(registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+
+      sibling_pids =
+        registry
+        |> Registry.select([{{{node_id, :_}, :"$1", :_}, [], [:"$1"]}])
+        |> MapSet.new()
+        |> MapSet.delete(pid)
 
       Process.exit(pid, :kill)
 
       wait_until_passes(2_000, fn ->
-        assert [{new_pid, _}] = Registry.lookup(registry, node_id)
+        assert [{new_pid, _}] = Registry.lookup(registry, {node_id, index})
         assert new_pid != pid
         assert Process.alive?(new_pid)
+
+        current_siblings =
+          registry
+          |> Registry.select([{{{node_id, :_}, :"$1", :_}, [], [:"$1"]}])
+          |> MapSet.new()
+          |> MapSet.delete(new_pid)
+
+        assert current_siblings == sibling_pids
+      end)
+    end
+
+    test "lookup spreads across callers and keeps each caller sticky through redirects", %{
+      registry: registry,
+      manager: manager
+    } do
+      [node_id | _] =
+        Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
+
+      {:ok, host, port} = Redix.Cluster.Manager.split_host_port(node_id)
+      address = {host, port}
+
+      same_caller_pids =
+        for _ <- 1..10 do
+          {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, address, self())
+          pid
+        end
+
+      assert same_caller_pids |> Enum.uniq() |> length() == 1
+
+      caller_pids =
+        1..24
+        |> Task.async_stream(
+          fn _ -> Redix.Cluster.Manager.get_connection_by_node(registry, address, self()) end,
+          ordered: false
+        )
+        |> Enum.map(fn {:ok, {:ok, pid}} -> pid end)
+
+      assert caller_pids |> Enum.uniq() |> length() > 1
+
+      original_caller = self()
+      [expected_pid] = Enum.uniq(same_caller_pids)
+
+      redirected_pids =
+        1..12
+        |> Task.async_stream(
+          fn _ ->
+            Redix.Cluster.Manager.get_connection_by_node(registry, address, original_caller)
+          end,
+          ordered: false
+        )
+        |> Enum.map(fn {:ok, {:ok, pid}} -> pid end)
+
+      assert Enum.uniq(redirected_pids) == [expected_pid]
+
+      manager_result =
+        Task.async(fn ->
+          Redix.Cluster.Manager.connect_to_node(manager, address, 5_000, original_caller)
+        end)
+        |> Task.await()
+
+      assert manager_result == {:ok, expected_pid}
+    end
+
+    test "lookup uses a sibling while its sticky member is down", %{
+      registry: registry,
+      manager: manager
+    } do
+      [node_id | _] =
+        Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
+
+      index = :erlang.phash2(self(), 3)
+      [{pid, _role}] = Registry.lookup(registry, {node_id, index})
+      {:ok, host, port} = Redix.Cluster.Manager.split_host_port(node_id)
+
+      :sys.suspend(manager)
+
+      try do
+        ref = Process.monitor(pid)
+        Process.exit(pid, :kill)
+        assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 1_000
+
+        wait_until_passes(1_000, fn ->
+          assert Registry.lookup(registry, {node_id, index}) == []
+        end)
+
+        assert {:ok, sibling_pid} =
+                 Redix.Cluster.Manager.get_connection_by_node(registry, {host, port}, self())
+
+        assert sibling_pid != pid
+        assert Process.alive?(sibling_pid)
+      after
+        :sys.resume(manager)
+      end
+
+      wait_until_passes(2_000, fn ->
+        assert [{new_pid, _role}] = Registry.lookup(registry, {node_id, index})
+        assert new_pid != pid
       end)
     end
   end
@@ -147,11 +263,11 @@ defmodule Redix.Cluster.ManagerTest do
     } do
       {_state, data_before} = :sys.get_state(manager)
       monitors_before = data_before.monitors
-      assert map_size(monitors_before) >= 3
+      assert map_size(monitors_before) >= 9
 
-      # Pick a node that we know is in the monitors map.
-      {old_ref, {node_id, _role}} = Enum.at(monitors_before, 0)
-      [{pid, _}] = Registry.lookup(registry, node_id)
+      # Pick a pool member that we know is in the monitors map.
+      {old_ref, {node_id, index, _role}} = Enum.at(monitors_before, 0)
+      [{pid, _}] = Registry.lookup(registry, {node_id, index})
 
       Process.exit(pid, :kill)
 
@@ -171,9 +287,9 @@ defmodule Redix.Cluster.ManagerTest do
       {_state, data_before} = :sys.get_state(manager)
       monitors_before = data_before.monitors
 
-      # Pick a monitored node and kill its connection.
-      {_old_ref, {node_id, _role}} = Enum.at(monitors_before, 0)
-      [{pid, _}] = Registry.lookup(registry, node_id)
+      # Pick a monitored pool member and kill its connection.
+      {_old_ref, {node_id, index, _role}} = Enum.at(monitors_before, 0)
+      [{pid, _}] = Registry.lookup(registry, {node_id, index})
 
       Process.exit(pid, :kill)
 
@@ -181,7 +297,7 @@ defmodule Redix.Cluster.ManagerTest do
       # restart backs off (issue #334), so the replacement isn't instantaneous —
       # `assert` (not a bare match) so `wait_until_passes` retries until it lands.
       wait_until_passes(2_000, fn ->
-        assert [{new_pid, _}] = Registry.lookup(registry, node_id)
+        assert [{new_pid, _}] = Registry.lookup(registry, {node_id, index})
         assert new_pid != pid
         assert Process.alive?(new_pid)
       end)
@@ -202,11 +318,15 @@ defmodule Redix.Cluster.ManagerTest do
 
       {:ok, fake_pid} = Redix.Cluster.Manager.connect_to_node(manager, fake_node, 5_000)
       ref = Process.monitor(fake_pid)
-      assert [{^fake_pid, _}] = Registry.lookup(registry, fake_id)
+
+      assert 3 ==
+               registry
+               |> Registry.select([{{{fake_id, :_}, :_, :_}, [], [true]}])
+               |> length()
 
       # The Manager should be monitoring it.
       {_state, data} = :sys.get_state(manager)
-      assert Enum.any?(data.monitors, fn {_ref, {id, _role}} -> id == fake_id end)
+      assert Enum.count(data.monitors, fn {_ref, {id, _index, _role}} -> id == fake_id end) == 3
 
       :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
 
@@ -224,10 +344,10 @@ defmodule Redix.Cluster.ManagerTest do
       # and resurrects the node. Give the Manager time to process that DOWN, then
       # assert it stayed gone — both from the registry and the monitors map.
       Process.sleep(200)
-      assert Registry.lookup(registry, fake_id) == []
+      assert Registry.select(registry, [{{{fake_id, :_}, :_, :_}, [], [true]}]) == []
 
       {_state, data} = :sys.get_state(manager)
-      refute Enum.any?(data.monitors, fn {_ref, {id, _role}} -> id == fake_id end)
+      refute Enum.any?(data.monitors, fn {_ref, {id, _index, _role}} -> id == fake_id end)
     end
   end
 

@@ -110,9 +110,11 @@ defmodule Redix.Cluster.FakeNode do
   # Register a supervised `Redix` connection to the node under its id in
   # `cluster`'s registry, so redirection code can resolve it by id. Must be
   # called from the test process (uses `start_supervised!`). Returns the node.
-  @spec connect(t(), atom()) :: t()
-  def connect(%FakeNode{} = node, cluster) do
+  @spec connect(t(), atom(), keyword()) :: t()
+  def connect(%FakeNode{} = node, cluster, opts \\ []) do
     socket_opts = if node.inet6, do: [socket_opts: [:inet6]], else: []
+    index = Keyword.get(opts, :index, 0)
+    role = Keyword.get(opts, :role, :primary)
 
     ExUnit.Callbacks.start_supervised!(
       {Redix,
@@ -120,9 +122,9 @@ defmodule Redix.Cluster.FakeNode do
          host: node.host,
          port: node.port,
          sync_connect: true,
-         name: {:via, Registry, {:"#{cluster}_registry", node.id}}
+         name: {:via, Registry, {:"#{cluster}_registry", {node.id, index}, role}}
        ] ++ socket_opts},
-      id: {:conn, node.id}
+      id: {:conn, node.id, index}
     )
 
     node

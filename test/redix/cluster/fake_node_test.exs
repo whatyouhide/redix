@@ -27,6 +27,30 @@ defmodule Redix.Cluster.FakeNodeTest do
   describe "MOVED/ASK redirection" do
     setup :wire_cluster
 
+    test "finds a redirect target at an index above the primary pool size", %{
+      cluster: cluster
+    } do
+      slot = Hash.hash_slot("x")
+
+      target =
+        FakeNode.reserve()
+        |> FakeNode.connect(cluster, index: 2, role: :replica)
+        |> FakeNode.serve(fn
+          ["ASKING"] -> "+OK\r\n"
+          ["GET", _] -> "$3\r\nbar\r\n"
+        end)
+
+      owner =
+        FakeNode.start_connected(cluster, fn
+          ["GET", _] -> "-ASK #{slot} #{target}\r\n"
+        end)
+
+      route_slot(cluster, slot, owner)
+
+      assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
+      assert [{_pid, :replica}] = Registry.lookup(:"#{cluster}_registry", {target.id, 2})
+    end
+
     test "follows an ASK -> ASK chain to the final node", %{cluster: cluster} do
       slot = Hash.hash_slot("x")
 
@@ -337,8 +361,8 @@ defmodule Redix.Cluster.FakeNodeTest do
       # straight to the connection already registered from CLUSTER SLOTS.
       assert FakeNode.connections_accepted(node) == baseline
 
-      assert Registry.lookup(registry, "localhost:#{node.port}") == []
-      assert [{_pid, :primary}] = Registry.lookup(registry, node.id)
+      assert Registry.lookup(registry, {"localhost:#{node.port}", 0}) == []
+      assert [{_pid, :primary}] = Registry.lookup(registry, {node.id, 0})
     end
 
     # Reproduces issue #325: redirect messages are server-controlled input, so a
@@ -544,7 +568,7 @@ defmodule Redix.Cluster.FakeNodeTest do
                {:error, %Redix.ConnectionError{reason: :closed}}
     end
 
-    test "Manager.get_connection/3 and get_replica_connection/3 return :error instead of " <>
+    test "Manager.get_connection/4 and get_replica_connection/4 return :error instead of " <>
            "raising when the slot table is momentarily gone",
          %{cluster: cluster} do
       slot_table = :"#{cluster}_slots"
@@ -552,11 +576,11 @@ defmodule Redix.Cluster.FakeNodeTest do
 
       :ets.delete(slot_table)
 
-      assert Redix.Cluster.Manager.get_connection(slot_table, registry, 0) == :error
-      assert Redix.Cluster.Manager.get_replica_connection(slot_table, registry, 0) == :error
+      assert Redix.Cluster.Manager.get_connection(slot_table, registry, 0, 1) == :error
+      assert Redix.Cluster.Manager.get_replica_connection(slot_table, registry, 0, 1) == :error
     end
 
-    test "Manager.get_random_connection/1 and get_connection_by_node/2 return :error " <>
+    test "Manager.get_random_connection/1 and get_connection_by_node/3 return :error " <>
            "instead of raising when the registry doesn't exist" do
       # A registry name with no backing ETS table at all — whichever moment mid-restart
       # a caller catches, there's no table for that name yet, same as here. (A live
@@ -572,7 +596,12 @@ defmodule Redix.Cluster.FakeNodeTest do
       registry = :"never_started_registry_#{System.unique_integer([:positive])}"
 
       assert Redix.Cluster.Manager.get_random_connection(registry) == :error
-      assert Redix.Cluster.Manager.get_connection_by_node(registry, {"127.0.0.1", 7000}) == :error
+
+      assert Redix.Cluster.Manager.get_connection_by_node(
+               registry,
+               {"127.0.0.1", 7000},
+               self()
+             ) == :error
     end
   end
 
@@ -620,7 +649,12 @@ defmodule Redix.Cluster.FakeNodeTest do
       end)
 
       start_supervised!(
-        {Redix.Cluster, name: cluster, nodes: ["redis://#{node}"], sync_connect: true}
+        {Redix.Cluster,
+         name: cluster,
+         nodes: ["redis://#{node}"],
+         primary_pool_size: 3,
+         replica_pool_size: 2,
+         sync_connect: true}
       )
 
       slot_table = :"#{cluster}_slots"
@@ -647,6 +681,7 @@ defmodule Redix.Cluster.FakeNodeTest do
       # Slots still covered are untouched.
       assert :ets.lookup(slot_table, 0) == [{0, node_id, []}]
       assert :ets.lookup(slot_table, 8_191) == [{8_191, node_id, []}]
+      assert :ets.lookup(slot_table, :pool_sizes) == [{:pool_sizes, {3, 2}}]
     end
 
     # A healthy cluster always covers all 16384 slots, so the "slot becomes
@@ -889,7 +924,12 @@ defmodule Redix.Cluster.FakeNodeTest do
 
       start_supervised!(
         {Redix.Cluster,
-         name: cluster, nodes: ["redis://#{node_a}"], read_from_replicas: true, sync_connect: true}
+         name: cluster,
+         nodes: ["redis://#{node_a}"],
+         primary_pool_size: 3,
+         replica_pool_size: 2,
+         read_from_replicas: true,
+         sync_connect: true}
       )
 
       registry = :"#{cluster}_registry"
@@ -899,11 +939,14 @@ defmodule Redix.Cluster.FakeNodeTest do
       # Node connections are async (sync_connect: false regardless of the cluster
       # option), so wait for both to register and for the replica to issue READONLY.
       wait_until(fn ->
-        role(registry, a_id) == :primary and role(registry, b_id) == :replica and
-          Agent.get(b_readonly, & &1) >= 1
+        map_size(member_pids(registry, a_id)) == 3 and
+          map_size(member_pids(registry, b_id)) == 2 and role(registry, a_id) == :primary and
+          role(registry, b_id) == :replica and
+          Agent.get(b_readonly, & &1) >= 2
       end)
 
-      [{a_pid, _}] = Registry.lookup(registry, a_id)
+      a_pids = member_pids(registry, a_id)
+      assert map_size(a_pids) == 3
       # A was the primary, so it never issued READONLY.
       assert Agent.get(a_readonly, & &1) == 0
 
@@ -911,17 +954,67 @@ defmodule Redix.Cluster.FakeNodeTest do
       Agent.update(topology, fn _ -> FakeNode.cluster_slots([{0, 16_383, node_b, [node_a]}]) end)
       Redix.Cluster.Manager.refresh_topology(:"#{cluster}_manager")
 
-      # A's connection must be torn down and restarted as a replica: new pid, a
-      # `:replica` Registry value, and a fresh READONLY. With the bug the stale
-      # `:primary` connection is kept, so the role never flips and READONLY is never
-      # sent — leaving `route: :replica` reads to bounce back MOVED forever.
+      # A's full pool must be torn down and restarted as replicas with new PIDs,
+      # `:replica` Registry values, and fresh READONLY commands.
       wait_until(fn ->
-        match?([{new_pid, :replica}] when new_pid != a_pid, Registry.lookup(registry, a_id)) and
-          Agent.get(a_readonly, & &1) >= 1
+        new_a_pids = member_pids(registry, a_id)
+
+        role(registry, a_id) == :replica and map_size(new_a_pids) == 2 and
+          Enum.all?(new_a_pids, fn {index, pid} -> pid != Map.fetch!(a_pids, index) end) and
+          Agent.get(a_readonly, & &1) >= 2
       end)
 
-      # And B is now registered as a primary.
+      # B's full pool is now registered as primary connections.
       assert role(registry, b_id) == :primary
+      assert map_size(member_pids(registry, b_id)) == 3
+    end
+  end
+
+  describe "pooled connection lifecycle" do
+    @tag :capture_log
+    test "a semantic exit parks one member until a topology refresh" do
+      cluster = :"park_member_#{System.unique_integer([:positive])}"
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node, []}])
+        ["PING"] -> "+PONG\r\n"
+        _other -> "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster, nodes: ["redis://#{node}"], primary_pool_size: 3, sync_connect: true}
+      )
+
+      registry = :"#{cluster}_registry"
+      manager = :"#{cluster}_manager"
+
+      wait_until(fn -> map_size(member_pids(registry, node.id)) == 3 end)
+      original_pids = member_pids(registry, node.id)
+      failed_pid = Map.fetch!(original_pids, 1)
+
+      :ok = :sys.terminate(failed_pid, %Redix.Error{message: "ERR forced semantic failure"})
+
+      wait_until(fn ->
+        member_pids(registry, node.id) == Map.delete(original_pids, 1)
+      end)
+
+      assert Process.alive?(Process.whereis(manager))
+      assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
+
+      Redix.Cluster.Manager.refresh_topology(manager)
+
+      wait_until(fn ->
+        case member_pids(registry, node.id) do
+          %{0 => pid0, 1 => pid1, 2 => pid2} ->
+            pid0 == Map.fetch!(original_pids, 0) and pid1 != failed_pid and
+              pid2 == Map.fetch!(original_pids, 2)
+
+          _other ->
+            false
+        end
+      end)
     end
   end
 
@@ -1125,6 +1218,7 @@ defmodule Redix.Cluster.FakeNodeTest do
 
     :ets.new(:"#{cluster}_slots", [:named_table, :public, :set])
     :ets.insert(:"#{cluster}_slots", {:discovery_attempted, true})
+    :ets.insert(:"#{cluster}_slots", {:pool_sizes, {1, 3}})
 
     %{cluster: cluster}
   end
@@ -1142,7 +1236,7 @@ defmodule Redix.Cluster.FakeNodeTest do
 
     pid =
       spawn(fn ->
-        {:ok, _} = Registry.register(:"#{cluster}_registry", node_id, _value = :primary)
+        {:ok, _} = Registry.register(:"#{cluster}_registry", {node_id, 0}, _value = :primary)
         send(test, {:registered, self()})
 
         receive do
@@ -1174,9 +1268,20 @@ defmodule Redix.Cluster.FakeNodeTest do
   end
 
   defp role(registry, node_id) do
-    case Registry.lookup(registry, node_id) do
-      [{_pid, role}] -> role
-      [] -> nil
+    case registry_members(registry, node_id) |> Enum.map(&elem(&1, 2)) |> Enum.uniq() do
+      [role] -> role
+      _other -> nil
     end
+  end
+
+  defp member_pids(registry, node_id) do
+    Map.new(registry_members(registry, node_id), fn {index, pid, _role} -> {index, pid} end)
+  end
+
+  defp registry_members(registry, node_id) do
+    Registry.select(
+      registry,
+      [{{{node_id, :"$1"}, :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}]
+    )
   end
 end

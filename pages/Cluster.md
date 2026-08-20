@@ -46,6 +46,40 @@ Redix.Cluster.start_link(
 )
 ```
 
+## Connection Pools
+
+By default, Redix opens one connection to each node. Set `:primary_pool_size` to open
+more connections to each primary:
+
+```elixir
+Redix.Cluster.start_link(
+  name: :my_cluster,
+  nodes: ["redis://localhost:7000"],
+  primary_pool_size: 5
+)
+```
+
+A larger pool can help when many processes send commands to the same node. This can
+occur with a serverless or proxy service that sends all commands through one endpoint.
+
+Replica pools have a separate size. This avoids opening a large number of connections
+to every replica when only primary traffic needs more capacity:
+
+```elixir
+Redix.Cluster.start_link(
+  name: :my_cluster,
+  nodes: ["redis://localhost:7000"],
+  primary_pool_size: 5,
+  replica_pool_size: 2,
+  read_from_replicas: true
+)
+```
+
+During normal routing, Redix uses the caller process to select a pool member. One caller
+process uses the same member for a node while that member is available. Redirects keep
+the original caller choice. If the selected member is unavailable, Redix uses another
+live member. A workload with only a few caller processes might not use all members.
+
 ## Pipelines
 
 Pipelines that span multiple hash slots are transparently split across nodes, executed in parallel, and reassembled in the original order:
