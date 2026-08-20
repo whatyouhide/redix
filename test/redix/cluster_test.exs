@@ -179,7 +179,7 @@ defmodule Redix.ClusterTest do
 
       conn_for = fn key ->
         slot = Redix.Cluster.Hash.hash_slot(key)
-        {:ok, conn} = Redix.Cluster.Manager.get_connection(slot_table, registry, slot)
+        {:ok, conn} = Redix.Cluster.Manager.get_connection(slot_table, registry, slot, 1)
         conn
       end
 
@@ -404,11 +404,97 @@ defmodule Redix.ClusterTest do
     end
   end
 
+  describe "per-node connection pools" do
+    test "primary and replica pool sizes are independent and support all command paths" do
+      name = :"pooled_cluster_#{System.unique_integer([:positive])}"
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: name,
+         nodes: @nodes,
+         primary_pool_size: 3,
+         replica_pool_size: 2,
+         read_from_replicas: true,
+         sync_connect: true},
+        id: name
+      )
+
+      registry = :"#{name}_registry"
+      slot_table = :"#{name}_slots"
+
+      assert :ets.lookup(slot_table, :pool_sizes) == [{:pool_sizes, {3, 2}}]
+      assert :ets.lookup(slot_table, :primary_pool_size) == []
+      assert :ets.lookup(slot_table, :replica_pool_size) == []
+
+      assert wait_until(fn ->
+               members =
+                 Registry.select(
+                   registry,
+                   [
+                     {{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+                   ]
+                 )
+
+               length(members) == 21 and
+                 Enum.frequencies_by(members, &elem(&1, 3)) == %{primary: 9, replica: 12} and
+                 Enum.all?(Enum.group_by(members, &elem(&1, 0)), fn {_node_id, node_members} ->
+                   expected_indexes =
+                     if elem(hd(node_members), 3) == :primary, do: [0, 1, 2], else: [0, 1]
+
+                   Enum.sort(Enum.map(node_members, &elem(&1, 1))) == expected_indexes
+                 end)
+             end)
+
+      assert Redix.Cluster.command(name, ["SET", "pooled", "value"]) == {:ok, "OK"}
+
+      assert Redix.Cluster.pipeline(name, [
+               ["SET", "pooled-a", "a"],
+               ["SET", "pooled-b", "b"],
+               ["GET", "pooled-a"],
+               ["GET", "pooled-b"]
+             ]) == {:ok, ["OK", "OK", "a", "b"]}
+
+      assert Redix.Cluster.transaction_pipeline(name, [
+               ["SET", "{pooled}.a", "1"],
+               ["GET", "{pooled}.a"]
+             ]) == {:ok, ["OK", "1"]}
+
+      assert wait_until(fn ->
+               Redix.Cluster.command(name, ["GET", "pooled"], route: :replica) ==
+                 {:ok, "value"}
+             end)
+    end
+  end
+
   describe "error handling" do
     test "name is required" do
       assert_raise NimbleOptions.ValidationError, ~r/required :name option not found/, fn ->
         Redix.Cluster.start_link(nodes: @nodes)
       end
+    end
+
+    test "primary_pool_size must be a positive integer" do
+      assert_raise NimbleOptions.ValidationError,
+                   ~r/invalid value for :primary_pool_size option/,
+                   fn ->
+                     Redix.Cluster.start_link(
+                       name: :bad_primary_pool_size,
+                       nodes: @nodes,
+                       primary_pool_size: 0
+                     )
+                   end
+    end
+
+    test "replica_pool_size must be a positive integer" do
+      assert_raise NimbleOptions.ValidationError,
+                   ~r/invalid value for :replica_pool_size option/,
+                   fn ->
+                     Redix.Cluster.start_link(
+                       name: :bad_replica_pool_size,
+                       nodes: @nodes,
+                       replica_pool_size: 0
+                     )
+                   end
     end
 
     test "database option must be 0 or nil" do
@@ -614,12 +700,12 @@ defmodule Redix.ClusterTest do
       address = {"127.0.0.1", unknown_port}
 
       # Precondition: the node is not known yet.
-      assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == :error
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, address, self()) == :error
 
       # On-demand connect succeeds and registers the node.
       assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, address, 5_000)
       assert is_pid(pid)
-      assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == {:ok, pid}
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, address, self()) == {:ok, pid}
 
       # The connection is real and usable.
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
@@ -632,11 +718,13 @@ defmodule Redix.ClusterTest do
       registry = :"#{cluster}_registry"
       manager = :"#{cluster}_manager"
 
-      [node_id | _] = Registry.select(registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+      [node_id | _] = Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
       [host, port_str] = String.split(node_id, ":")
       address = {host, String.to_integer(port_str)}
 
-      assert {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, address)
+      assert {:ok, pid} =
+               Redix.Cluster.Manager.get_connection_by_node(registry, address, self())
+
       assert Redix.Cluster.Manager.connect_to_node(manager, address, 5_000) == {:ok, pid}
     end
 
@@ -667,10 +755,10 @@ defmodule Redix.ClusterTest do
     test "the manager re-establishes a node connection when it dies", %{cluster: cluster} do
       registry = :"#{cluster}_registry"
 
-      [node_id | _] = Registry.select(registry, [{{:"$1", :_, :_}, [], [:"$1"]}])
+      [node_id | _] = Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
 
       {:ok, pid} =
-        Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
+        Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id), self())
 
       monitor = Process.monitor(pid)
       Process.exit(pid, :kill)
@@ -680,7 +768,11 @@ defmodule Redix.ClusterTest do
       assert wait_until(fn ->
                match?(
                  {:ok, new_pid} when new_pid != pid,
-                 Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
+                 Redix.Cluster.Manager.get_connection_by_node(
+                   registry,
+                   node_id_address(node_id),
+                   self()
+                 )
                )
              end)
 
@@ -780,7 +872,7 @@ defmodule Redix.ClusterTest do
       # returns the id of whichever node actually served it. So a pipeline of
       # same-slot reads reveals, black-box, how many distinct replicas served it:
       # the fix groups them onto one connection (one pipeline), so every id is the
-      # same. Without it, get_replica_connection/3 picks a random replica per
+      # same. Without it, get_replica_connection/4 picks a random replica per
       # command and the reads scatter across the slot's two replicas.
       whoami = ["EVAL", "return redis.call('CLUSTER','MYID')", "1", "{315}"]
 
@@ -932,7 +1024,7 @@ defmodule Redix.ClusterTest do
 
   defp registered_ports(registry) do
     registry
-    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Registry.select([{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
     |> Enum.map(fn node_id ->
       node_id |> String.split(":") |> List.last() |> String.to_integer()
     end)
@@ -940,7 +1032,7 @@ defmodule Redix.ClusterTest do
   end
 
   defp replica_pids(registry) do
-    Registry.select(registry, [{{:_, :"$1", :replica}, [], [:"$1"]}])
+    Registry.select(registry, [{{{:_, :_}, :"$1", :replica}, [], [:"$1"]}])
   end
 
   defp wait_until(fun, attempts \\ 50) do

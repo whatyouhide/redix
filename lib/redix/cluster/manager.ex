@@ -21,12 +21,14 @@ defmodule Redix.Cluster.Manager do
     :conn_opts,
     :seed_nodes,
     :refresh_interval,
+    :primary_pool_size,
+    :replica_pool_size,
     # Tracks the exponential backoff between initial topology fetch attempts
     # while in the :disconnected state (async connect).
     :backoff_current,
     read_from_replicas: false,
-    # Maps a monitor ref to `{node_id, role}` so a crashed connection is
-    # restarted with the same role (and therefore the same READONLY behavior).
+    # Maps a monitor ref to `{node_id, index, role}` so a crashed pool member is
+    # restarted with the same index and role (and therefore the same READONLY behavior).
     monitors: %{},
     # Maps a node_id (canonical, resolved-IP form) to the literal host it was
     # actually reached at (a hostname or an IP, whichever the server gave us).
@@ -70,13 +72,17 @@ defmodule Redix.Cluster.Manager do
 
   Reads the slot table from ETS and then looks up the connection in the Registry.
   """
-  @spec get_connection(atom(), atom(), non_neg_integer()) :: {:ok, pid()} | :error
-  def get_connection(slot_table, registry, slot) when is_integer(slot) do
+  @spec get_connection(atom(), atom(), non_neg_integer(), pos_integer()) ::
+          {:ok, pid()} | :error
+  def get_connection(slot_table, registry, slot, pool_size) when is_integer(slot) do
     guard_missing_table(
       fn ->
         case :ets.lookup(slot_table, slot) do
-          [{^slot, primary_id, _replica_ids}] -> lookup_connection(registry, primary_id)
-          [] -> :error
+          [{^slot, primary_id, _replica_ids}] ->
+            lookup_connection(registry, primary_id, pool_size)
+
+          [] ->
+            :error
         end
       end,
       :error
@@ -91,8 +97,9 @@ defmodule Redix.Cluster.Manager do
   disabled, in which case no replicas are tracked). Callers that want to fall back
   to the primary should do so explicitly (see `Redix.Cluster`'s `:prefer_replica`).
   """
-  @spec get_replica_connection(atom(), atom(), non_neg_integer()) :: {:ok, pid()} | :error
-  def get_replica_connection(slot_table, registry, slot) when is_integer(slot) do
+  @spec get_replica_connection(atom(), atom(), non_neg_integer(), pos_integer()) ::
+          {:ok, pid()} | :error
+  def get_replica_connection(slot_table, registry, slot, pool_size) when is_integer(slot) do
     guard_missing_table(
       fn ->
         case :ets.lookup(slot_table, slot) do
@@ -100,7 +107,7 @@ defmodule Redix.Cluster.Manager do
             replica_ids
             |> Enum.shuffle()
             |> Enum.find_value(:error, fn replica_id ->
-              case lookup_connection(registry, replica_id) do
+              case lookup_connection(registry, replica_id, pool_size) do
                 {:ok, pid} -> {:ok, pid}
                 :error -> false
               end
@@ -119,10 +126,11 @@ defmodule Redix.Cluster.Manager do
 
   Used for `MOVED`/`ASK` redirection to a specific node.
   """
-  @spec get_connection_by_node(atom(), {String.t(), non_neg_integer()}) :: {:ok, pid()} | :error
-  def get_connection_by_node(registry, {host, port}) do
+  @spec get_connection_by_node(atom(), {String.t(), non_neg_integer()}, pid()) ::
+          {:ok, pid()} | :error
+  def get_connection_by_node(registry, {host, port}, caller) do
     guard_missing_table(
-      fn -> lookup_connection(registry, canonical_node_id(host, port)) end,
+      fn -> lookup_node_connection(registry, canonical_node_id(host, port), caller) end,
       :error
     )
   end
@@ -139,12 +147,12 @@ defmodule Redix.Cluster.Manager do
   def get_random_connection(registry) do
     guard_missing_table(
       fn ->
-        case Registry.select(registry, [{{:_, :"$1", :primary}, [], [:"$1"]}]) do
+        case Registry.select(registry, [{{{:_, :_}, :"$1", :primary}, [], [:"$1"]}]) do
           [_ | _] = pids ->
             {:ok, Enum.random(pids)}
 
           [] ->
-            case Registry.select(registry, [{{:_, :"$1", :_}, [], [:"$1"]}]) do
+            case Registry.select(registry, [{{{:_, :_}, :"$1", :_}, [], [:"$1"]}]) do
               [] -> :error
               pids -> {:ok, Enum.random(pids)}
             end
@@ -226,6 +234,17 @@ defmodule Redix.Cluster.Manager do
   @spec connect_to_node(:gen_statem.server_ref(), {String.t(), :inet.port_number()}, timeout()) ::
           {:ok, pid()} | {:error, term()}
   def connect_to_node(manager, {host, port}, timeout) do
+    connect_to_node(manager, {host, port}, timeout, self())
+  end
+
+  @doc false
+  @spec connect_to_node(
+          :gen_statem.server_ref(),
+          {String.t(), :inet.port_number()},
+          timeout(),
+          pid()
+        ) :: {:ok, pid()} | {:error, term()}
+  def connect_to_node(manager, {host, port}, timeout, caller) do
     # This runs in the command hot path, so a Manager that's briefly busy (say,
     # mid-refresh against slow nodes) must not crash the caller: degrade to an
     # error tuple, which the MOVED handler turns into a normal Redix error. The
@@ -234,7 +253,7 @@ defmodule Redix.Cluster.Manager do
     # slow refresh against a partially-down cluster blocks every on-demand connect
     # (and thus every MOVED/ASK redirect) for the whole refresh (issue #327). On
     # timeout the `:exit` is caught and degrades to the documented error path.
-    :gen_statem.call(manager, {:connect_to_node, host, port}, timeout)
+    :gen_statem.call(manager, {:connect_to_node, host, port, caller}, timeout)
   catch
     :exit, reason -> {:error, reason}
   end
@@ -255,11 +274,14 @@ defmodule Redix.Cluster.Manager do
     command_cache_name = Keyword.fetch!(opts, :command_cache_table)
     registry = Keyword.fetch!(opts, :registry)
     read_from_replicas = Keyword.fetch!(opts, :read_from_replicas)
+    primary_pool_size = Keyword.fetch!(opts, :primary_pool_size)
+    replica_pool_size = Keyword.fetch!(opts, :replica_pool_size)
     sync_connect = Keyword.fetch!(opts, :sync_connect)
 
     # :protected, not :public: only the Manager (the owner) ever writes the slot
     # table; callers only read it, so :protected is free hardening.
     slot_table = :ets.new(table_name, [:named_table, :protected, :set, {:read_concurrency, true}])
+    :ets.insert(slot_table, {:pool_sizes, {primary_pool_size, replica_pool_size}})
 
     # Caches the key specification (first-key position / movable / no-key) of commands
     # outside CommandParser's static table, learned via COMMAND INFO. Written from
@@ -282,6 +304,8 @@ defmodule Redix.Cluster.Manager do
       conn_opts: conn_opts,
       seed_nodes: seed_nodes,
       refresh_interval: refresh_interval,
+      primary_pool_size: primary_pool_size,
+      replica_pool_size: replica_pool_size,
       read_from_replicas: read_from_replicas
     }
 
@@ -416,8 +440,8 @@ defmodule Redix.Cluster.Manager do
     {:keep_state, handle_down(data, ref, reason)}
   end
 
-  defp handle_common_event({:call, from}, {:connect_to_node, host, port}, data) do
-    handle_connect_to_node(from, host, port, data)
+  defp handle_common_event({:call, from}, {:connect_to_node, host, port, caller}, data) do
+    handle_connect_to_node(from, host, port, caller, data)
   end
 
   defp handle_common_event({:call, from}, :await_topology_discovery, _data) do
@@ -451,10 +475,10 @@ defmodule Redix.Cluster.Manager do
     {backoff_current, %{data | backoff_current: backoff_current}}
   end
 
-  defp handle_connect_to_node(from, host, port, data) do
+  defp handle_connect_to_node(from, host, port, caller, data) do
     node_id = canonical_node_id(host, port)
 
-    case lookup_connection(data.registry, node_id) do
+    case lookup_node_connection(data.registry, node_id, caller) do
       {:ok, pid} ->
         # Returns the existing connection whatever role it's registered under. Just
         # after a failover that role can be stale (a target promoted to primary may
@@ -465,8 +489,9 @@ defmodule Redix.Cluster.Manager do
 
       :error ->
         # MOVED is authoritative and always points at the slot's primary, so an
-        # on-demand connection is registered as a primary.
-        {result, data} = start_and_monitor_connection(data, node_id, host, port, :primary)
+        # on-demand pool is registered as primary connections.
+        {first_result, data} = start_and_monitor_node_pool(data, node_id, host, port, :primary)
+        result = lookup_node_connection(data.registry, node_id, caller, first_result)
         {:keep_state, data, [{:reply, from, result}]}
     end
   end
@@ -476,7 +501,7 @@ defmodule Redix.Cluster.Manager do
     data = %{data | monitors: monitors}
 
     case node_info do
-      {node_id, role} -> handle_node_down(data, node_id, role, reason)
+      {node_id, index, role} -> handle_node_down(data, node_id, index, role, reason)
       nil -> data
     end
   end
@@ -488,7 +513,7 @@ defmodule Redix.Cluster.Manager do
   # changing the node (or our config) can, and there's no bound on when. So we
   # deliberately do *not* restart it here. Instead we leave it to the periodic
   # topology refresh.
-  defp handle_node_down(data, node_id, _role, %Redix.Error{} = reason) do
+  defp handle_node_down(data, node_id, _index, _role, %Redix.Error{} = reason) do
     :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
       cluster: data.cluster_name,
       address: node_id,
@@ -503,10 +528,10 @@ defmodule Redix.Cluster.Manager do
   # failure never reaches here: `Redix.Connection` handles it internally (it moves
   # to its own :disconnected state and reconnects) rather than stopping, so this
   # path can't degenerate into a fast restart loop.
-  defp handle_node_down(data, node_id, role, _reason) do
+  defp handle_node_down(data, node_id, index, role, _reason) do
     {:ok, _canonical_host, port} = split_host_port(node_id)
     host = Map.fetch!(data.node_addresses, node_id)
-    {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
+    {_result, data} = start_and_monitor_connection(data, node_id, index, host, port, role)
     data
   end
 
@@ -516,7 +541,7 @@ defmodule Redix.Cluster.Manager do
   defp demonitor_node(data, node_id) do
     monitors =
       data.monitors
-      |> Enum.filter(fn {ref, {id, _role}} ->
+      |> Enum.filter(fn {ref, {id, _index, _role}} ->
         if id == node_id do
           Process.demonitor(ref, [:flush])
           false
@@ -529,14 +554,53 @@ defmodule Redix.Cluster.Manager do
     %{data | monitors: monitors}
   end
 
-  defp monitoring_node?(data, node_id) do
-    Enum.any?(data.monitors, fn {_ref, {id, _role}} -> id == node_id end)
+  defp monitoring_member?(data, node_id, index) do
+    Enum.any?(data.monitors, fn {_ref, {id, member_index, _role}} ->
+      id == node_id and member_index == index
+    end)
   end
 
-  defp lookup_connection(registry, node_id) do
-    case Registry.lookup(registry, node_id) do
-      [{pid, _value}] -> {:ok, pid}
-      [] -> :error
+  defp lookup_connection(registry, node_id, pool_size) do
+    index = :erlang.phash2(self(), pool_size)
+
+    case Registry.lookup(registry, {node_id, index}) do
+      [{pid, _value}] ->
+        {:ok, pid}
+
+      [] ->
+        lookup_other_connection(registry, node_id, index, pool_size)
+    end
+  end
+
+  defp lookup_other_connection(registry, node_id, preferred_index, pool_size) do
+    0..(pool_size - 1)
+    |> Enum.reject(&(&1 == preferred_index))
+    |> Enum.find_value(:error, fn index ->
+      case Registry.lookup(registry, {node_id, index}) do
+        [{pid, _value}] -> {:ok, pid}
+        [] -> false
+      end
+    end)
+  end
+
+  # A redirect target can already be registered under either role. Search all live
+  # members instead of limiting the lookup to one role's pool size.
+  defp lookup_node_connection(registry, node_id, caller, default \\ :error) do
+    members =
+      registry
+      |> Registry.select([{{{node_id, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+      |> Enum.filter(fn {_index, pid} -> Process.alive?(pid) end)
+      |> Enum.sort_by(&elem(&1, 0))
+
+    case members do
+      [] ->
+        default
+
+      members ->
+        {last_index, _pid} = List.last(members)
+        preferred_index = :erlang.phash2(caller, last_index + 1)
+        {_index, pid} = List.keyfind(members, preferred_index, 0, hd(members))
+        {:ok, pid}
     end
   end
 
@@ -601,7 +665,8 @@ defmodule Redix.Cluster.Manager do
   # slot map covered.
   defp get_known_nodes(data) do
     data.registry
-    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Registry.select([{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
+    |> Enum.uniq()
     |> Enum.map(fn node_id ->
       {:ok, _canonical_host, port} = split_host_port(node_id)
       {Map.fetch!(data.node_addresses, node_id), port}
@@ -833,42 +898,29 @@ defmodule Redix.Cluster.Manager do
   defp ensure_connections(data, slots_data) do
     needed_nodes = nodes_to_connect(data, slots_data)
 
+    registered_nodes =
+      data.registry
+      |> Registry.select([
+        {{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+      ])
+      |> Enum.group_by(&elem(&1, 0), fn {_node_id, index, pid, role} -> {index, pid, role} end)
+
     data =
       Enum.reduce(needed_nodes, data, fn {node_id, host, port, role}, acc ->
-        case Registry.lookup(acc.registry, node_id) do
-          [{pid, registered_role}] when is_pid(pid) ->
-            cond do
-              not Process.alive?(pid) ->
-                {_result, acc} = start_and_monitor_connection(acc, node_id, host, port, role)
-                acc
+        members = Map.get(registered_nodes, node_id, [])
 
-              # The node is still connected but its role changed since we last
-              # connected it (a failover: a primary demoted to replica or a
-              # replica promoted to primary). The live connection can't be reused
-              # as-is — a demoted primary never issued READONLY (so replica reads
-              # bounce back MOVED) and a promoted replica still carries
-              # `readonly: true`, and in both cases the Registry value used for
-              # keyless-command routing is stale. Terminate and restart so the
-              # role, the READONLY state, and routing all reflect reality (#318).
-              registered_role != role ->
-                restart_connection(acc, node_id, pid, host, port, role)
-
-              true ->
-                acc
-            end
-
-          [] ->
-            {_result, acc} = start_and_monitor_connection(acc, node_id, host, port, role)
-            acc
+        if Enum.any?(members, fn {_index, _pid, registered_role} -> registered_role != role end) do
+          # Every member carries the node role and its matching READONLY state. A
+          # failover must replace the full pool so no member keeps the old state.
+          restart_node_pool(acc, node_id, members, host, port, role)
+        else
+          ensure_node_pool(acc, node_id, members, host, port, role)
         end
       end)
 
     needed_ids = MapSet.new(needed_nodes, fn {node_id, _, _, _} -> node_id end)
 
-    registered_nodes =
-      Registry.select(data.registry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-
-    Enum.reduce(registered_nodes, data, fn {node_id, pid}, acc ->
+    Enum.reduce(registered_nodes, data, fn {node_id, members}, acc ->
       if node_id in needed_ids do
         acc
       else
@@ -878,11 +930,36 @@ defmodule Redix.Cluster.Manager do
         acc = demonitor_node(acc, node_id)
         acc = %{acc | node_addresses: Map.delete(acc.node_addresses, node_id)}
 
-        if Process.alive?(pid) do
-          DynamicSupervisor.terminate_child(acc.pool_supervisor, pid)
-        end
+        Enum.each(members, fn {_index, pid, _role} ->
+          if Process.alive?(pid) do
+            DynamicSupervisor.terminate_child(acc.pool_supervisor, pid)
+          end
+        end)
 
         acc
+      end
+    end)
+  end
+
+  defp ensure_node_pool(data, node_id, members, host, port, role) do
+    members_by_index =
+      Map.new(members, fn {index, pid, member_role} -> {index, {pid, member_role}} end)
+
+    Enum.reduce(0..(pool_size_for_role(data, role) - 1), data, fn index, acc ->
+      case Map.get(members_by_index, index) do
+        {pid, ^role} when is_pid(pid) ->
+          if Process.alive?(pid) do
+            acc
+          else
+            {_result, acc} =
+              start_and_monitor_connection(acc, node_id, index, host, port, role)
+
+            acc
+          end
+
+        nil ->
+          {_result, acc} = start_and_monitor_connection(acc, node_id, index, host, port, role)
+          acc
       end
     end)
   end
@@ -910,25 +987,51 @@ defmodule Redix.Cluster.Manager do
     Enum.uniq_by(primaries ++ replicas, fn {node_id, _, _, _} -> node_id end)
   end
 
-  # Tears down the connection registered for `node_id` and starts a fresh one with
+  # Tears down all connections registered for `node_id` and starts a fresh pool with
   # the given `role`. Used when a node's role changed after a failover (#318).
   # Demonitors *before* terminating (like the no-longer-needed branch in
   # `ensure_connections/2`) so the deliberate `terminate_child` DOWN doesn't land
   # in `handle_down/3` and resurrect the connection under its *old* role.
-  defp restart_connection(data, node_id, pid, host, port, role) do
+  defp restart_node_pool(data, node_id, members, host, port, role) do
     data = demonitor_node(data, node_id)
-    DynamicSupervisor.terminate_child(data.pool_supervisor, pid)
-    {_result, data} = start_and_monitor_connection(data, node_id, host, port, role)
+
+    Enum.each(members, fn {_index, pid, _registered_role} ->
+      DynamicSupervisor.terminate_child(data.pool_supervisor, pid)
+    end)
+
+    {_result, data} = start_and_monitor_node_pool(data, node_id, host, port, role)
     data
   end
 
+  # Starts all pool members and returns the first successful member. A redirect needs
+  # one PID for its current command, while later commands use sticky lookup.
+  defp start_and_monitor_node_pool(data, node_id, host, port, role) do
+    Enum.reduce(0..(pool_size_for_role(data, role) - 1), {nil, data}, fn
+      index, {first_result, acc} ->
+        {result, acc} = start_and_monitor_connection(acc, node_id, index, host, port, role)
+
+        first_result =
+          case {first_result, result} do
+            {nil, result} -> result
+            {{:error, _reason}, {:ok, _pid}} -> result
+            {first_result, _next_result} -> first_result
+          end
+
+        {first_result, acc}
+    end)
+  end
+
+  defp pool_size_for_role(data, :primary), do: data.primary_pool_size
+  defp pool_size_for_role(data, :replica), do: data.replica_pool_size
+
   # Returns `{result, data}` where `result` is `{:ok, pid}` or `{:error, reason}`.
   # Callers that only care about the updated data can discard the result.
-  defp start_and_monitor_connection(data, node_id, host, port, role) do
+  defp start_and_monitor_connection(data, node_id, index, host, port, role) do
     case start_connection(
            data.pool_supervisor,
            data.registry,
            node_id,
+           index,
            host,
            port,
            data.conn_opts,
@@ -937,7 +1040,7 @@ defmodule Redix.Cluster.Manager do
       {:ok, pid} ->
         ref = Process.monitor(pid)
         data = %{data | node_addresses: Map.put(data.node_addresses, node_id, host)}
-        {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, role})}}
+        {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, index, role})}}
 
       # A concurrent monitor restart (or the connection's own retry) may have
       # already registered this node. Treat it as success — but make sure we're
@@ -946,11 +1049,12 @@ defmodule Redix.Cluster.Manager do
       {:error, {:already_started, pid}} ->
         data = %{data | node_addresses: Map.put(data.node_addresses, node_id, host)}
 
-        if monitoring_node?(data, node_id) do
+        if monitoring_member?(data, node_id, index) do
           {{:ok, pid}, data}
         else
           ref = Process.monitor(pid)
-          {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, role})}}
+
+          {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, index, role})}}
         end
 
       {:error, reason} ->
@@ -964,7 +1068,16 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  defp start_connection(pool_supervisor, registry, node_id, host, port, conn_opts, role) do
+  defp start_connection(
+         pool_supervisor,
+         registry,
+         node_id,
+         index,
+         host,
+         port,
+         conn_opts,
+         role
+       ) do
     opts =
       conn_opts
       |> Keyword.delete(:name)
@@ -974,7 +1087,7 @@ defmodule Redix.Cluster.Manager do
         sync_connect: false,
         # The Registry value records the node's role so keyless commands can be
         # routed to primaries (see `get_random_connection/1`).
-        name: {:via, Registry, {registry, node_id, role}}
+        name: {:via, Registry, {registry, {node_id, index}, role}}
       )
       |> maybe_put_readonly(role)
 
