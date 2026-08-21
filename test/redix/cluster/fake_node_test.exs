@@ -1156,6 +1156,118 @@ defmodule Redix.Cluster.FakeNodeTest do
     end
   end
 
+  describe ":address_mapper" do
+    # The cluster announces its nodes under addresses the client can't reach (Docker
+    # container IPs, NAT'd deployments). The mapper rewrites every announced address,
+    # both from CLUSTER SLOTS and from redirections, before dialing it.
+    @unreachable_host "203.0.113.10"
+
+    test "maps CLUSTER SLOTS addresses before connecting" do
+      cluster = :"address_mapper_#{System.unique_integer([:positive])}"
+
+      node =
+        FakeNode.start(fn
+          ["CLUSTER", "SLOTS"] ->
+            FakeNode.cluster_slots([{0, 16_383, "#{@unreachable_host}:6379"}])
+
+          ["GET", _] ->
+            "$3\r\nbar\r\n"
+
+          _other ->
+            "+OK\r\n"
+        end)
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster,
+         nodes: ["redis://#{node}"],
+         sync_connect: true,
+         address_mapper: fn @unreachable_host, 6379 -> {node.host, node.port} end}
+      )
+
+      assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
+    end
+
+    test "maps MOVED/ASK redirection targets" do
+      cluster = :"address_mapper_ask_#{System.unique_integer([:positive])}"
+      slot = Hash.hash_slot("x")
+
+      node_new =
+        FakeNode.start(fn
+          ["ASKING"] -> "+OK\r\n"
+          ["GET", _] -> "$3\r\nbar\r\n"
+        end)
+
+      node_owner = FakeNode.reserve()
+
+      FakeNode.serve(node_owner, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node_owner}])
+        ["GET", _] -> "-ASK #{slot} #{@unreachable_host}:7000\r\n"
+        _other -> "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster,
+         nodes: ["redis://#{node_owner}"],
+         sync_connect: true,
+         address_mapper: fn
+           @unreachable_host, 7000 -> {node_new.host, node_new.port}
+           host, port -> {host, port}
+         end}
+      )
+
+      assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
+    end
+
+    test "does not map seed nodes" do
+      cluster = :"address_mapper_seed_#{System.unique_integer([:positive])}"
+
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node}])
+        _other -> "+OK\r\n"
+      end)
+
+      # A mapper that would break the seed if applied to it.
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster,
+         nodes: ["redis://#{node}"],
+         sync_connect: true,
+         address_mapper: fn host, port -> {host, port} end}
+      )
+
+      assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "OK"}
+    end
+
+    test "rejects a mapper that doesn't return {host, port}" do
+      cluster = :"address_mapper_bad_#{System.unique_integer([:positive])}"
+
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node}])
+        _other -> "+OK\r\n"
+      end)
+
+      Process.flag(:trap_exit, true)
+
+      assert {:error,
+              {:shutdown,
+               {:failed_to_start_child, Redix.Cluster.Manager, %ArgumentError{message: message}}}} =
+               Redix.Cluster.start_link(
+                 name: cluster,
+                 nodes: ["redis://#{node}"],
+                 sync_connect: true,
+                 address_mapper: fn _host, _port -> :nope end
+               )
+
+      assert message =~ "must return a {host, port} tuple"
+    end
+  end
+
   describe "node connection setup failure" do
     # Reproduces issue #334: a node that fails connection *setup* with a semantic
     # error (a %Redix.Error{} — e.g. READONLY on a node with cluster support

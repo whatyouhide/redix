@@ -196,6 +196,22 @@ defmodule Redix.Cluster do
       `route: :replica` or `route: :prefer_replica` (see `command/3`). Defaults to
       `false`, in which case only primaries are connected.
       """
+    ],
+    address_mapper: [
+      type: {:or, [nil, {:fun, 2}]},
+      default: nil,
+      doc: """
+      A `(host, port -> {host, port})` function applied to every node address the
+      cluster announces, both in `CLUSTER SLOTS` replies and in `MOVED`/`ASK`
+      redirections, before connecting to it. Seed `:nodes` are dialed as given. Use
+      this when the addresses the cluster advertises are not reachable from the
+      client, such as a cluster running in Docker that announces container IPs, or
+      a NAT'd deployment:
+
+          address_mapper: fn _host, port -> {"127.0.0.1", port} end
+
+      *Available since 1.8.0.*
+      """
     ]
   ]
 
@@ -272,6 +288,7 @@ defmodule Redix.Cluster do
     replica_pool_size = Keyword.fetch!(cluster_opts, :replica_pool_size)
     read_from_replicas = Keyword.fetch!(cluster_opts, :read_from_replicas)
     sync_connect = Keyword.fetch!(cluster_opts, :sync_connect)
+    address_mapper = Keyword.fetch!(cluster_opts, :address_mapper)
 
     if Keyword.has_key?(conn_opts, :sentinel) do
       raise ArgumentError, "Sentinel connections are not supported in cluster mode"
@@ -328,6 +345,7 @@ defmodule Redix.Cluster do
        replica_pool_size: replica_pool_size,
        read_from_replicas: read_from_replicas,
        sync_connect: sync_connect,
+       address_mapper: address_mapper,
        table_name: slot_table_name(name),
        command_cache_table: command_cache_name(name),
        registry: registry_name(name)}
@@ -656,7 +674,7 @@ defmodule Redix.Cluster do
         # replies, not in the EXEC reply.
         queue_responses = responses |> Enum.drop(length(prefix)) |> Enum.drop(-1)
 
-        case Enum.find_value(queue_responses, &parse_redirection/1) do
+        case Enum.find_value(queue_responses, &parse_redirection(cluster, &1)) do
           {type, slot, host, port} ->
             follow_transaction_redirect(
               cluster,
@@ -997,7 +1015,7 @@ defmodule Redix.Cluster do
   defp follow_redirections(cluster, cmds, indexed_results, opts, remaining) do
     {redirect_cmds, final_results} =
       Enum.reduce(indexed_results, {%{}, []}, fn {idx, result}, {redirects, finals} ->
-        case parse_redirection(result) do
+        case parse_redirection(cluster, result) do
           {type, slot, host, port} when type in [:moved, :ask] ->
             if type == :moved, do: Manager.refresh_topology(manager_name(cluster))
             record_redirection(opts)
@@ -1148,23 +1166,26 @@ defmodule Redix.Cluster do
     end
   end
 
-  defp parse_redirection(%Redix.Error{message: "MOVED " <> rest}) do
-    parse_redirection_target(:moved, rest)
+  defp parse_redirection(cluster, %Redix.Error{message: "MOVED " <> rest}) do
+    parse_redirection_target(cluster, :moved, rest)
   end
 
-  defp parse_redirection(%Redix.Error{message: "ASK " <> rest}) do
-    parse_redirection_target(:ask, rest)
+  defp parse_redirection(cluster, %Redix.Error{message: "ASK " <> rest}) do
+    parse_redirection_target(cluster, :ask, rest)
   end
 
-  defp parse_redirection(_), do: nil
+  defp parse_redirection(_cluster, _), do: nil
 
   # The slot and address are server-controlled, so parse them defensively: a
   # malformed redirect is handed back to the caller as a plain Redis error value
-  # instead of crashing the calling process (issue #325).
-  defp parse_redirection_target(type, rest) do
+  # instead of crashing the calling process (issue #325). The address goes through
+  # the :address_mapper like CLUSTER SLOTS addresses do, so a redirect to an
+  # unreachable announced address lands on the same mapped node.
+  defp parse_redirection_target(cluster, type, rest) do
     with [slot_str, address] <- String.split(rest, " "),
          {slot, ""} when slot in 0..16383 <- Integer.parse(slot_str),
          {:ok, host, port} <- Manager.split_host_port(address) do
+      {host, port} = Manager.map_address(slot_table_name(cluster), host, port)
       {type, slot, host, port}
     else
       _other -> nil
