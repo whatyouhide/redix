@@ -27,6 +27,8 @@ defmodule Redix.Cluster.Manager do
     # while in the :disconnected state (async connect).
     :backoff_current,
     read_from_replicas: false,
+    # Optional (host, port -> {host, port}) function applied to announced addresses.
+    address_mapper: nil,
     # Maps a monitor ref to `{node_id, index, role}` so a crashed pool member is
     # restarted with the same index and role (and therefore the same READONLY behavior).
     monitors: %{},
@@ -277,11 +279,15 @@ defmodule Redix.Cluster.Manager do
     primary_pool_size = Keyword.fetch!(opts, :primary_pool_size)
     replica_pool_size = Keyword.fetch!(opts, :replica_pool_size)
     sync_connect = Keyword.fetch!(opts, :sync_connect)
+    address_mapper = Keyword.get(opts, :address_mapper)
 
     # :protected, not :public: only the Manager (the owner) ever writes the slot
     # table; callers only read it, so :protected is free hardening.
     slot_table = :ets.new(table_name, [:named_table, :protected, :set, {:read_concurrency, true}])
     :ets.insert(slot_table, {:pool_sizes, {primary_pool_size, replica_pool_size}})
+    # Callers apply the mapper to MOVED/ASK targets in their own process, so they read
+    # it from the slot table like the pool sizes.
+    :ets.insert(slot_table, {:address_mapper, address_mapper})
 
     # Caches the key specification (first-key position / movable / no-key) of commands
     # outside CommandParser's static table, learned via COMMAND INFO. Written from
@@ -306,7 +312,8 @@ defmodule Redix.Cluster.Manager do
       refresh_interval: refresh_interval,
       primary_pool_size: primary_pool_size,
       replica_pool_size: replica_pool_size,
-      read_from_replicas: read_from_replicas
+      read_from_replicas: read_from_replicas,
+      address_mapper: address_mapper
     }
 
     if sync_connect do
@@ -635,6 +642,9 @@ defmodule Redix.Cluster.Manager do
 
     case fetch_cluster_slots(all_nodes, data.conn_opts, deadline) do
       {:ok, slots_data} ->
+        # Map announced addresses once here, so the slot table and the node pools
+        # only ever see mapped addresses.
+        slots_data = map_slots_addresses(data.address_mapper, slots_data)
         update_slot_map(data, slots_data)
         data = ensure_connections(data, slots_data)
 
@@ -688,6 +698,44 @@ defmodule Redix.Cluster.Manager do
       {:ok, _canonical_host, port} = split_host_port(node_id)
       {Map.fetch!(data.node_addresses, node_id), port}
     end)
+  end
+
+  @doc false
+  @spec map_address(atom(), String.t(), :inet.port_number()) ::
+          {String.t(), :inet.port_number()}
+  def map_address(slot_table, host, port) do
+    case :ets.lookup(slot_table, :address_mapper) do
+      [{:address_mapper, mapper}] -> apply_address_mapper(mapper, host, port)
+      [] -> {host, port}
+    end
+  end
+
+  defp map_slots_addresses(nil, slots_data), do: slots_data
+
+  defp map_slots_addresses(mapper, slots_data) do
+    for [start_slot, end_slot | nodes] <- slots_data do
+      mapped_nodes =
+        for [host, port | rest] <- nodes do
+          {host, port} = apply_address_mapper(mapper, host, port)
+          [host, port | rest]
+        end
+
+      [start_slot, end_slot | mapped_nodes]
+    end
+  end
+
+  defp apply_address_mapper(nil, host, port), do: {host, port}
+
+  defp apply_address_mapper(mapper, host, port) when is_function(mapper, 2) do
+    case mapper.(host, port) do
+      {mapped_host, mapped_port} when is_binary(mapped_host) and is_integer(mapped_port) ->
+        {mapped_host, mapped_port}
+
+      other ->
+        raise ArgumentError,
+              "the :address_mapper function must return a {host, port} tuple, " <>
+                "got: #{inspect(other)} for #{host}:#{port}"
+    end
   end
 
   # Splits a "host:port" address on its *last* colon. IPv6 hosts contain colons of
