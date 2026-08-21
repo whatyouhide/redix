@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.8.0
+
+  * Introduce the `:address_mapper` option in `Redix.Cluster`.
+
 ## v1.7.0
 
   * Introduce `:primary_pool_size` and `:replica_pool_size` options for `Redix.Cluster`. These let you configure per-node pool size, so that you can increase the Elixir-side concurrency in a Redis Cluster setup. Redis is still single-threaded, so apply this only when it makes sense. Defaults have not changed, so a `Redix.Cluster` connection started without these explicit options defaults to one connection per primary and one per replica (if `:read_from_replicas` is set).
