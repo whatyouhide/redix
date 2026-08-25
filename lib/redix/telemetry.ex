@@ -136,9 +136,15 @@ defmodule Redix.Telemetry do
 
       *Available since 1.7.0.*
 
-    * `[:redix, :cluster, :topology_change]` - executed when the cluster topology
-      is successfully refreshed. Measurements are `:duration` (the time spent
-      fetching `CLUSTER SLOTS`) and `:node_count`. Metadata are:
+    * `[:redix, :cluster, :topology_change]` - executed every time the cluster
+      topology is successfully fetched, **whether or not it changed** (sorry,
+      confusing name). In steady state that is once per
+      `:topology_refresh_interval` per cluster, plus the reactive refreshes
+      triggered by redirections, so a counter on this event measures refreshes,
+      not changes. Handlers that want actual changes can compare `:nodes` or
+      `:node_info` with the values from the previous event. Measurements are
+      `:duration` (the time spent fetching `CLUSTER SLOTS`) and `:node_count`.
+      Metadata are:
 
       * `:cluster` - the name of the cluster (the atom passed as `:name`).
       * `:nodes` - the list of primary node addresses (as `"host:port"` strings).
