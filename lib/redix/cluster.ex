@@ -492,7 +492,7 @@ defmodule Redix.Cluster do
 
   """
   @spec pipeline(atom(), [Redix.command()], keyword()) ::
-          {:ok, [Redix.Protocol.redis_value()]}
+          {:ok, [Redix.Protocol.redis_value() | Redix.ConnectionError.t()]}
           | {:error, atom() | Redix.Error.t() | Redix.ConnectionError.t()}
   def pipeline(cluster, commands, opts \\ []) when is_atom(cluster) and is_list(commands) do
     execute_pipeline(cluster, commands, opts)
@@ -501,7 +501,8 @@ defmodule Redix.Cluster do
   @doc """
   Same as `pipeline/3` but raises on errors.
   """
-  @spec pipeline!(atom(), [Redix.command()], keyword()) :: [Redix.Protocol.redis_value()]
+  @spec pipeline!(atom(), [Redix.command()], keyword()) ::
+          [Redix.Protocol.redis_value() | Redix.ConnectionError.t()]
   def pipeline!(cluster, commands, opts \\ []) do
     case pipeline(cluster, commands, opts) do
       {:ok, response} -> response
