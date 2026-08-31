@@ -48,7 +48,9 @@ defmodule Redix.Cluster.FakeNodeTest do
       route_slot(cluster, slot, owner)
 
       assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
-      assert [{_pid, :replica}] = Registry.lookup(:"#{cluster}_registry", {target.id, 2})
+
+      assert [{_pid, {:replica, :connected}}] =
+               Registry.lookup(:"#{cluster}_registry", {target.id, 2})
     end
 
     test "follows an ASK -> ASK chain to the final node", %{cluster: cluster} do
@@ -362,7 +364,7 @@ defmodule Redix.Cluster.FakeNodeTest do
       assert FakeNode.connections_accepted(node) == baseline
 
       assert Registry.lookup(registry, {"localhost:#{node.port}", 0}) == []
-      assert [{_pid, :primary}] = Registry.lookup(registry, {node.id, 0})
+      assert [{_pid, {:primary, :connected}}] = Registry.lookup(registry, {node.id, 0})
     end
 
     # Reproduces issue #325: redirect messages are server-controlled input, so a
@@ -1366,7 +1368,13 @@ defmodule Redix.Cluster.FakeNodeTest do
 
     pid =
       spawn(fn ->
-        {:ok, _} = Registry.register(:"#{cluster}_registry", {node_id, 0}, _value = :primary)
+        {:ok, _} =
+          Registry.register(
+            :"#{cluster}_registry",
+            {node_id, 0},
+            _value = {:primary, :connected}
+          )
+
         send(test, {:registered, self()})
 
         receive do
@@ -1411,7 +1419,9 @@ defmodule Redix.Cluster.FakeNodeTest do
   defp registry_members(registry, node_id) do
     Registry.select(
       registry,
-      [{{{node_id, :"$1"}, :"$2", :"$3"}, [], [{{:"$1", :"$2", :"$3"}}]}]
+      [
+        {{{node_id, :"$1"}, :"$2", {:"$3", :_}}, [], [{{:"$1", :"$2", :"$3"}}]}
+      ]
     )
   end
 end

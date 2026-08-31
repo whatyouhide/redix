@@ -138,25 +138,37 @@ defmodule Redix.Cluster.Manager do
   end
 
   @doc """
-  Returns any available **primary** connection PID from the cluster.
+  Returns a connected **primary** connection PID from the cluster when possible.
 
   Used for keyless commands like `PING`, `INFO`, and so on. Primaries are preferred
   so that keyless *write* commands (such as `FLUSHALL`) don't land on a read-only
   replica; if no primary is registered yet, it falls back to any connection (so in
-  that rare window a keyless write could hit a replica and bounce back `MOVED`).
+  that rare window a keyless write could hit a replica and bounce back `MOVED`). If no
+  connection is connected, it returns any registered connection so the command fails
+  fast with the connection's current error.
   """
   @spec get_random_connection(atom()) :: {:ok, pid()} | :error
   def get_random_connection(registry) do
     guard_missing_table(
       fn ->
-        case Registry.select(registry, [{{{:_, :_}, :"$1", :primary}, [], [:"$1"]}]) do
+        case Registry.select(registry, [
+               {{{:_, :_}, :"$1", {:primary, :connected}}, [], [:"$1"]}
+             ]) do
           [_ | _] = pids ->
             {:ok, Enum.random(pids)}
 
           [] ->
-            case Registry.select(registry, [{{{:_, :_}, :"$1", :_}, [], [:"$1"]}]) do
-              [] -> :error
-              pids -> {:ok, Enum.random(pids)}
+            case Registry.select(registry, [
+                   {{{:_, :_}, :"$1", {:replica, :connected}}, [], [:"$1"]}
+                 ]) do
+              [_ | _] = pids ->
+                {:ok, Enum.random(pids)}
+
+              [] ->
+                case Registry.select(registry, [{{{:_, :_}, :"$1", :_}, [], [:"$1"]}]) do
+                  [] -> :error
+                  pids -> {:ok, Enum.random(pids)}
+                end
             end
         end
       end,
@@ -580,21 +592,25 @@ defmodule Redix.Cluster.Manager do
     index = :erlang.phash2(self(), pool_size)
 
     case Registry.lookup(registry, {node_id, index}) do
-      [{pid, _value}] ->
+      [{pid, {_role, :connected}}] ->
         {:ok, pid}
 
+      [{pid, _value}] ->
+        lookup_other_connection(registry, node_id, index, pool_size, {:ok, pid})
+
       [] ->
-        lookup_other_connection(registry, node_id, index, pool_size)
+        lookup_other_connection(registry, node_id, index, pool_size, :error)
     end
   end
 
-  defp lookup_other_connection(registry, node_id, preferred_index, pool_size) do
+  defp lookup_other_connection(registry, node_id, preferred_index, pool_size, default) do
     0..(pool_size - 1)
     |> Enum.reject(&(&1 == preferred_index))
-    |> Enum.find_value(:error, fn index ->
+    |> Enum.reduce_while(default, fn index, fallback ->
       case Registry.lookup(registry, {node_id, index}) do
-        [{pid, _value}] -> {:ok, pid}
-        [] -> false
+        [{pid, {_role, :connected}}] -> {:halt, {:ok, pid}}
+        [{pid, _value}] when fallback == :error -> {:cont, {:ok, pid}}
+        _other -> {:cont, fallback}
       end
     end)
   end
@@ -604,18 +620,26 @@ defmodule Redix.Cluster.Manager do
   defp lookup_node_connection(registry, node_id, caller, default \\ :error) do
     members =
       registry
-      |> Registry.select([{{{node_id, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-      |> Enum.filter(fn {_index, pid} -> Process.alive?(pid) end)
-      |> Enum.sort_by(&elem(&1, 0))
+      |> Registry.select([
+        {{{node_id, :"$1"}, :"$2", {:_, :"$3"}}, [], [{{:"$1", :"$2", :"$3"}}]}
+      ])
+      |> Enum.filter(fn {_index, pid, _state} -> Process.alive?(pid) end)
+      |> Enum.sort_by(fn {index, _pid, state} -> {state != :connected, index} end)
 
     case members do
       [] ->
         default
 
       members ->
-        {last_index, _pid} = List.last(members)
-        preferred_index = :erlang.phash2(caller, last_index + 1)
-        {_index, pid} = List.keyfind(members, preferred_index, 0, hd(members))
+        pool_size = members |> Enum.map(&elem(&1, 0)) |> Enum.max() |> Kernel.+(1)
+        preferred_index = :erlang.phash2(caller, pool_size)
+
+        {_index, pid, _state} =
+          case List.keyfind(members, preferred_index, 0) do
+            {_index, _pid, :connected} = member -> member
+            _member -> Enum.find(members, hd(members), &(elem(&1, 2) == :connected))
+          end
+
         {:ok, pid}
     end
   end
@@ -692,7 +716,7 @@ defmodule Redix.Cluster.Manager do
   # slot map covered.
   defp get_known_nodes(data) do
     data.registry
-    |> Registry.select([{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
+    |> Registry.select([{{{:"$1", :_}, :_, {:_, :_}}, [], [:"$1"]}])
     |> Enum.uniq()
     |> Enum.map(fn node_id ->
       {:ok, _canonical_host, port} = split_host_port(node_id)
@@ -966,7 +990,7 @@ defmodule Redix.Cluster.Manager do
     registered_nodes =
       data.registry
       |> Registry.select([
-        {{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+        {{{:"$1", :"$2"}, :"$3", {:"$4", :_}}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
       ])
       |> Enum.group_by(&elem(&1, 0), fn {_node_id, index, pid, role} -> {index, pid, role} end)
 
@@ -1160,9 +1184,10 @@ defmodule Redix.Cluster.Manager do
         host: host,
         port: port,
         sync_connect: false,
-        # The Registry value records the node's role so keyless commands can be
-        # routed to primaries (see `get_random_connection/1`).
-        name: {:via, Registry, {registry, {node_id, index}, role}}
+        # The Registry value records the node's role and live connection state so
+        # routing can skip a pool member while it reconnects.
+        name: {:via, Registry, {registry, {node_id, index}, {role, :disconnected}}},
+        __cluster_member__: {registry, {node_id, index}}
       )
       |> maybe_put_readonly(role)
 

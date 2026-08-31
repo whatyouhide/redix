@@ -21,10 +21,19 @@ defmodule Redix.Cluster.ManagerTest do
       {Redix.Cluster, nodes: @nodes, name: cluster_name, primary_pool_size: 3, sync_connect: true}
     )
 
+    registry = :"#{cluster_name}_registry"
+
+    wait_until_passes(2_000, fn ->
+      connected_members =
+        Registry.select(registry, [{{{:_, :_}, :_, {:primary, :connected}}, [], [true]}])
+
+      assert length(connected_members) >= 9
+    end)
+
     %{
       cluster: cluster_name,
       manager: :"#{cluster_name}_manager",
-      registry: :"#{cluster_name}_registry"
+      registry: registry
     }
   end
 
@@ -117,7 +126,9 @@ defmodule Redix.Cluster.ManagerTest do
       registered =
         Registry.select(
           registry,
-          [{{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}]
+          [
+            {{{:"$1", :"$2"}, :"$3", {:"$4", :_}}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+          ]
         )
 
       # A 3-primary cluster should have at least 3 pools of 3 connections.
@@ -270,6 +281,113 @@ defmodule Redix.Cluster.ManagerTest do
     end
   end
 
+  describe "connected pool member routing" do
+    test "commands skip a disconnected sticky member for many callers" do
+      %{cluster: cluster, registry: registry, slot_table: slot_table} =
+        start_routing_cluster(backoff_initial: 5_000, backoff_max: 5_000)
+
+      key = "connected-pool-member"
+      node_id = primary_node_for_key(slot_table, key)
+      disconnected_index = 0
+
+      assert Redix.Cluster.command(cluster, ["SET", key, "value"]) == {:ok, "OK"}
+      disconnected_pid = force_disconnect(registry, node_id, disconnected_index)
+
+      results =
+        for _ <- 1..20 do
+          call_from_pool_index(disconnected_index, 3, fn ->
+            Redix.Cluster.command(cluster, ["GET", key])
+          end)
+        end
+
+      assert results |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 20
+      assert Enum.all?(results, fn {_caller, result} -> result == {:ok, "value"} end)
+
+      assert [{^disconnected_pid, {:primary, :disconnected}}] =
+               Registry.lookup(registry, {node_id, disconnected_index})
+    end
+
+    test "commands return closed when all members of a node are disconnected" do
+      %{cluster: cluster, registry: registry, slot_table: slot_table} =
+        start_routing_cluster(backoff_initial: 5_000, backoff_max: 5_000)
+
+      key = "disconnected-pool"
+      node_id = primary_node_for_key(slot_table, key)
+
+      assert Redix.Cluster.command(cluster, ["SET", key, "value"]) == {:ok, "OK"}
+
+      for index <- 0..2 do
+        force_disconnect(registry, node_id, index)
+      end
+
+      assert Redix.Cluster.command(cluster, ["GET", key]) ==
+               {:error, %Redix.ConnectionError{reason: :closed}}
+    end
+
+    test "a reconnected member becomes eligible for its sticky callers again" do
+      %{cluster: cluster, registry: registry, slot_table: slot_table} =
+        start_routing_cluster(backoff_initial: 500, backoff_max: 500)
+
+      key = "reconnected-pool-member"
+      node_id = primary_node_for_key(slot_table, key)
+      reconnected_index = 0
+
+      assert Redix.Cluster.command(cluster, ["SET", key, "value"]) == {:ok, "OK"}
+      reconnected_pid = force_disconnect(registry, node_id, reconnected_index)
+
+      wait_until_passes(2_000, fn ->
+        assert [{^reconnected_pid, {:primary, :connected}}] =
+                 Registry.lookup(registry, {node_id, reconnected_index})
+      end)
+
+      test_pid = self()
+      event_ref = make_ref()
+      handler_id = "reconnected_member_#{System.unique_integer([:positive])}"
+
+      :telemetry.attach(
+        handler_id,
+        [:redix, :pipeline, :start],
+        fn _event, _measurements, metadata, _config ->
+          if metadata.extra_metadata[:cluster] == cluster do
+            send(test_pid, {event_ref, metadata.connection})
+          end
+        end,
+        :no_config
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      {_caller, result} =
+        call_from_pool_index(reconnected_index, 3, fn ->
+          Redix.Cluster.command(cluster, ["GET", key])
+        end)
+
+      assert result == {:ok, "value"}
+      assert_receive {^event_ref, ^reconnected_pid}, 1_000
+    end
+
+    test "keyless commands skip disconnected primary members" do
+      %{cluster: cluster, registry: registry} =
+        start_routing_cluster(backoff_initial: 5_000, backoff_max: 5_000)
+
+      primary_members =
+        Registry.select(registry, [
+          {{{:"$1", :"$2"}, :"$3", {:primary, :connected}}, [], [{{:"$1", :"$2", :"$3"}}]}
+        ])
+
+      random_seed = :rand.export_seed()
+      {node_id, index, expected_old_pid} = Enum.random(primary_members)
+      :rand.seed(random_seed)
+
+      force_disconnect(registry, node_id, index)
+
+      assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
+
+      assert [{^expected_old_pid, {:primary, :disconnected}}] =
+               Registry.lookup(registry, {node_id, index})
+    end
+  end
+
   describe "monitor cleanup" do
     test "old monitor ref is removed when connection dies", %{
       cluster: _cluster,
@@ -363,6 +481,79 @@ defmodule Redix.Cluster.ManagerTest do
 
       {_state, data} = :sys.get_state(manager)
       refute Enum.any?(data.monitors, fn {_ref, {id, _index, _role}} -> id == fake_id end)
+    end
+  end
+
+  defp start_routing_cluster(conn_opts) do
+    cluster = :"pool_routing_#{System.unique_integer([:positive])}"
+
+    opts =
+      Keyword.merge(
+        [nodes: @nodes, name: cluster, primary_pool_size: 3, sync_connect: true],
+        conn_opts
+      )
+
+    start_supervised!({Redix.Cluster, opts}, id: cluster)
+
+    registry = :"#{cluster}_registry"
+
+    wait_until_passes(2_000, fn ->
+      connected_members =
+        Registry.select(registry, [{{{:_, :_}, :_, {:primary, :connected}}, [], [true]}])
+
+      assert length(connected_members) == 9
+    end)
+
+    %{
+      cluster: cluster,
+      registry: registry,
+      slot_table: :"#{cluster}_slots"
+    }
+  end
+
+  defp primary_node_for_key(slot_table, key) do
+    slot = Redix.Cluster.Hash.hash_slot(key)
+    [{^slot, node_id, _replica_ids}] = :ets.lookup(slot_table, slot)
+    node_id
+  end
+
+  defp force_disconnect(registry, node_id, index) do
+    [{pid, {role, :connected}}] = Registry.lookup(registry, {node_id, index})
+    {:connected, data} = :sys.get_state(pid)
+    send(data.socket_owner, {:force_disconnect, pid, :closed})
+
+    wait_until_passes(1_000, fn ->
+      assert [{^pid, {^role, :disconnected}}] = Registry.lookup(registry, {node_id, index})
+    end)
+
+    pid
+  end
+
+  defp call_from_pool_index(index, pool_size, fun) do
+    parent = self()
+    ref = make_ref()
+
+    pid =
+      spawn(fn ->
+        send(parent, {ref, self(), :erlang.phash2(self(), pool_size)})
+
+        receive do
+          {:run, ^ref} -> send(parent, {ref, :result, fun.()})
+          {:stop, ^ref} -> :ok
+        end
+      end)
+
+    receive do
+      {^ref, ^pid, ^index} ->
+        send(pid, {:run, ref})
+
+        receive do
+          {^ref, :result, result} -> {pid, result}
+        end
+
+      {^ref, ^pid, _other_index} ->
+        send(pid, {:stop, ref})
+        call_from_pool_index(index, pool_size, fun)
     end
   end
 

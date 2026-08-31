@@ -431,7 +431,7 @@ defmodule Redix.ClusterTest do
                  Registry.select(
                    registry,
                    [
-                     {{{:"$1", :"$2"}, :"$3", :"$4"}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+                     {{{:"$1", :"$2"}, :"$3", {:"$4", :_}}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
                    ]
                  )
 
@@ -1101,7 +1101,7 @@ defmodule Redix.ClusterTest do
   end
 
   defp replica_pids(registry) do
-    Registry.select(registry, [{{{:_, :_}, :"$1", :replica}, [], [:"$1"]}])
+    Registry.select(registry, [{{{:_, :_}, :"$1", {:replica, :_}}, [], [:"$1"]}])
   end
 
   defp wait_until(fun, attempts \\ 50) do

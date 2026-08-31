@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.8.1
+
+  * Route `Redix.Cluster` commands around disconnected pool members while another member for the same node remains connected.
+
 ## v1.8.0
 
   * Introduce the `:address_mapper` option in `Redix.Cluster`.
@@ -14,49 +18,12 @@
   * Add support for **Redis Cluster**. This is a major feature and this its first release, so use with care—I only tested it (extensively) in non-production-grade scenarios; it was tested on various synthetic environments (like with AWS ElastiCache and locally via Docker) but it has not seen the horrors of production traffic. See the `Redix.Cluster` documentation to get started.
   * Add `Redix.PubSub.ping/2`.
   * Fix Elixir 1.19/1.20 warnings.
-
-## Unreleased
-
-### New features
-
-  * Add support for **reading from replicas** in `Redix.Cluster`. Start the cluster with
-    `read_from_replicas: true` to open and supervise a connection to every replica (each
-    one gets a `READONLY` after connecting), then pass `route: :replica` or
-    `route: :prefer_replica` to `Redix.Cluster.command/3` and `Redix.Cluster.pipeline/3`
-    to send reads to replicas. The default routing stays `:primary`, so existing behavior
-    is unchanged.
-  * Route commands outside `Redix.Cluster`'s built-in command table to the correct node.
-    Previously commands the driver didn't recognize were treated as keyless and sent to a
-    random node; now their keys are resolved against the server (via `COMMAND INFO`, with a
-    `COMMAND GETKEYS` fallback for commands with movable keys) and the result is cached per
-    command name, so repeated calls add no extra round-trips. The built-in table also grew
-    to cover more commands directly (bit commands, the blocking `B*` list/sorted-set pops,
-    hash-field expiration commands, `XSETID`, and `BITOP`).
-  * Add a `:readonly` option to `Redix.start_link/1` that issues `READONLY` after every
-    (re)connection.
-  * Add a `:health_check_interval` option to `Redix.start_link/1` that detects *half-open*
-    connections (the socket is open but the server stopped replying) and reconnects. This
-    fixes slow recovery after a Sentinel failover where the old primary is paused (for
-    example via `CLIENT PAUSE`): the reconnection re-queries the sentinels and lands on the
-    new primary instead of staying wedged. Defaults to `:infinity` (disabled).
-
-### Changes
-
-  * Verify SSL server hostnames the way browsers do (RFC 6125) by default, which accepts
-    the **wildcard certificates** used by servers such as Amazon ElastiCache. This sets
-    `customize_hostname_check` automatically; you can still override it (or any other
-    default SSL option) through `:socket_opts`.
+  * Add a `:readonly` option to `Redix.start_link/1` that issues `READONLY` after every (re)connection.
+  * Add a `:health_check_interval` option to `Redix.start_link/1` that detects *half-open* connections (the socket is open but the server stopped replying) and reconnects. This fixes slow recovery after a Sentinel failover where the old primary is paused (for example via `CLIENT PAUSE`): the reconnection re-queries the sentinels and lands on the new primary instead of staying wedged. Defaults to `:infinity` (disabled).
 
 ### Bug fixes
 
-  * Bound the total wall-clock of a steady-state `Redix.Cluster` topology refresh. The
-    refresh runs on the cluster manager's process and probes seed/known nodes serially,
-    so a few *black-holed* nodes (which accept the connection but never reply) used to
-    block the manager—and every connection restart or `MOVED`/`ASK` redirect that needs
-    it—for up to one connection `:timeout` *per node*, i.e. tens of seconds. A refresh
-    now stops probing once it exhausts a single `:timeout` budget, relying on the next
-    refresh for any skipped nodes. The initial topology discovery stays unbounded so
-    startup reliably reaches a reachable seed.
+  * Verify SSL server hostnames the way browsers do (RFC 6125) by default, which accepts the **wildcard certificates** used by servers such as AWS ElastiCache. This sets `:customize_hostname_check` automatically; you can still override it (or any other default SSL option) through `:socket_opts`.
 
 ## v1.5.3
 

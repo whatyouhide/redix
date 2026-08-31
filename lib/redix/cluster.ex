@@ -233,6 +233,12 @@ defmodule Redix.Cluster do
   cluster mode (the cluster supervises node connections and handles disconnections
   itself).
 
+  ## Pooling
+
+  Redix routes commands to connected pool members. If a member disconnects, Redix skips
+  it while it reconnects and uses another connected member for that node. If all members
+  for the node are disconnected, the command returns a connection error as before.
+
   ## Resources
 
   Each cluster uses:

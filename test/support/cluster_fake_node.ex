@@ -122,7 +122,7 @@ defmodule Redix.Cluster.FakeNode do
          host: node.host,
          port: node.port,
          sync_connect: true,
-         name: {:via, Registry, {:"#{cluster}_registry", {node.id, index}, role}}
+         name: {:via, Registry, {:"#{cluster}_registry", {node.id, index}, {role, :connected}}}
        ] ++ socket_opts},
       id: {:conn, node.id, index}
     )

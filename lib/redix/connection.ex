@@ -25,7 +25,9 @@ defmodule Redix.Connection do
   ## Public API
 
   def start_link(opts) when is_list(opts) do
+    {cluster_member, opts} = Keyword.pop(opts, :__cluster_member__)
     opts = StartOptions.sanitize(:redix, opts)
+    opts = maybe_put_cluster_member(opts, cluster_member)
     {gen_statem_opts, opts} = Keyword.split(opts, [:hibernate_after, :debug, :spawn_opt])
 
     case Keyword.fetch(opts, :name) do
@@ -159,6 +161,7 @@ defmodule Redix.Connection do
           })
 
           data = %__MODULE__{data | socket: socket, connected_address: address}
+          data = update_cluster_connection_state(data, :connected)
           {:ok, :connected, data, health_check_actions(data)}
 
         {:stopped, ^socket_owner, reason} ->
@@ -239,6 +242,8 @@ defmodule Redix.Connection do
         health_marker: nil
     }
 
+    data = update_cluster_connection_state(data, :connected)
+
     {:next_state, :connected, %{data | socket: socket}, health_check_actions(data)}
   end
 
@@ -279,7 +284,7 @@ defmodule Redix.Connection do
           # See https://github.com/whatyouhide/redix/issues/265.
           :ok = data.transport.close(data.socket)
           send(data.socket_owner, {:send_errored, self()})
-          {:next_state, :disconnected, data}
+          {:next_state, :disconnected, update_cluster_connection_state(data, :disconnected)}
       end
     else
       reply(from, {:ok, []})
@@ -340,6 +345,23 @@ defmodule Redix.Connection do
 
   ## Helpers
 
+  defp maybe_put_cluster_member(opts, nil), do: opts
+
+  defp maybe_put_cluster_member(opts, cluster_member) do
+    Keyword.put(opts, :__cluster_member__, cluster_member)
+  end
+
+  defp update_cluster_connection_state(data, state) do
+    case data.opts[:__cluster_member__] do
+      {registry, key} ->
+        Registry.update_value(registry, key, fn {role, _old_state} -> {role, state} end)
+        data
+
+      nil ->
+        data
+    end
+  end
+
   defp health_check_actions(%__MODULE__{opts: opts}) do
     case Keyword.fetch!(opts, :health_check_interval) do
       :infinity -> []
@@ -393,12 +415,15 @@ defmodule Redix.Connection do
     send(alias_ref, {alias_ref, reply})
   end
 
-  defp disconnect(_data, %Redix.Error{} = error) do
+  defp disconnect(data, %Redix.Error{} = error) do
+    update_cluster_connection_state(data, :disconnected)
     Logger.error("Disconnected from Redis due to error: #{Exception.message(error)}")
     {:stop, error}
   end
 
   defp disconnect(data, reason) do
+    data = update_cluster_connection_state(data, :disconnected)
+
     if data.opts[:exit_on_disconnection] do
       {:stop, %ConnectionError{reason: reason}}
     else
