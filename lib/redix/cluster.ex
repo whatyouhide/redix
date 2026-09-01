@@ -169,7 +169,9 @@ defmodule Redix.Cluster do
       The number of connections to open to **each** primary node in the cluster. During
       normal routing, commands from one caller process use the same connection in a node's
       pool while that connection is available. Redirects keep the original caller choice.
-      If the selected connection is unavailable, Redix uses another live pool member.
+      If the selected connection process is dead or its socket is connecting or disconnected,
+      Redix uses another pool member whose socket is connected. If no member is connected,
+      Redix uses the caller's selected member and the command returns its connection error.
       Workloads with few caller processes might not use all pool members. Redis is
       single-threaded anyways, so use this only if it makes sense for your workload (and
       possibly after benchmarking!). *Available since 1.7.0*.
@@ -181,8 +183,11 @@ defmodule Redix.Cluster do
       doc: """
       The number of connections to open to **each** replica node when `read_from_replicas: true`
       is set. This is independent from `:primary_pool_size`, because primary and replica
-      traffic can need different pool sizes. Redis is single-threaded anyways, so use
-      this only if it makes sense for your workload (and possibly after benchmarking!).
+      traffic can need different pool sizes. Routing skips members whose sockets are connecting
+      or disconnected while another member of the same pool is connected. If no member is
+      connected, Redix uses the caller's selected member and the command returns its connection
+      error. Redis is single-threaded anyways, so use this only if it makes sense for your
+      workload (and possibly after benchmarking!).
       *Available since 1.7.0*.
       """
     ],

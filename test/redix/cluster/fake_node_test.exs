@@ -991,6 +991,59 @@ defmodule Redix.Cluster.FakeNodeTest do
   end
 
   describe "pooled connection lifecycle" do
+    test "routes around a disconnected member while its process stays alive" do
+      cluster = :"disconnected_member_#{System.unique_integer([:positive])}"
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node, []}])
+        ["GET", _key] -> "$2\r\nok\r\n"
+        _other -> "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster,
+         nodes: ["redis://#{node}"],
+         primary_pool_size: 3,
+         backoff_initial: 30_000,
+         sync_connect: true}
+      )
+
+      registry = :"#{cluster}_registry"
+      slot_table = :"#{cluster}_slots"
+      slot = Hash.hash_slot("key")
+      preferred_index = :erlang.phash2(self(), 3)
+
+      wait_until(fn ->
+        Registry.select(
+          registry,
+          [{{{node.id, :_}, :_, {:primary, :connected}}, [], [true]}]
+        )
+        |> length() == 3
+      end)
+
+      [{preferred_pid, {:primary, :connected}}] =
+        Registry.lookup(registry, {node.id, preferred_index})
+
+      {:connected, data} = :sys.get_state(preferred_pid)
+      send(data.socket_owner, {:force_disconnect, preferred_pid, :test_socket_drop})
+
+      wait_until(fn ->
+        Registry.lookup(registry, {node.id, preferred_index}) ==
+          [{preferred_pid, {:primary, :disconnected}}]
+      end)
+
+      assert Process.alive?(preferred_pid)
+
+      assert {:ok, sibling_pid} =
+               Redix.Cluster.Manager.get_connection(slot_table, registry, slot, 3)
+
+      assert sibling_pid != preferred_pid
+      assert Redix.Cluster.command(cluster, ["GET", "key"]) == {:ok, "ok"}
+      assert Process.alive?(preferred_pid)
+    end
+
     @tag :capture_log
     test "a semantic exit parks one member until a topology refresh" do
       cluster = :"park_member_#{System.unique_integer([:positive])}"

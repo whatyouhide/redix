@@ -106,14 +106,16 @@ defmodule Redix.Cluster.Manager do
       fn ->
         case :ets.lookup(slot_table, slot) do
           [{^slot, _primary_id, replica_ids}] when replica_ids != [] ->
-            replica_ids
-            |> Enum.shuffle()
-            |> Enum.find_value(:error, fn replica_id ->
-              case lookup_connection(registry, replica_id, pool_size) do
-                {:ok, pid} -> {:ok, pid}
-                :error -> false
-              end
-            end)
+            results =
+              replica_ids
+              |> Enum.shuffle()
+              |> Enum.map(&lookup_connection_with_state(registry, &1, pool_size))
+
+            case Enum.find(results, &match?({:ok, _pid, :connected}, &1)) ||
+                   Enum.find(results, &match?({:ok, _pid, _state}, &1)) do
+              {:ok, pid, _state} -> {:ok, pid}
+              nil -> :error
+            end
 
           _other ->
             :error
@@ -589,14 +591,21 @@ defmodule Redix.Cluster.Manager do
   end
 
   defp lookup_connection(registry, node_id, pool_size) do
+    case lookup_connection_with_state(registry, node_id, pool_size) do
+      {:ok, pid, _state} -> {:ok, pid}
+      :error -> :error
+    end
+  end
+
+  defp lookup_connection_with_state(registry, node_id, pool_size) do
     index = :erlang.phash2(self(), pool_size)
 
     case Registry.lookup(registry, {node_id, index}) do
       [{pid, {_role, :connected}}] ->
-        {:ok, pid}
+        {:ok, pid, :connected}
 
-      [{pid, _value}] ->
-        lookup_other_connection(registry, node_id, index, pool_size, {:ok, pid})
+      [{pid, {_role, state}}] ->
+        lookup_other_connection(registry, node_id, index, pool_size, {:ok, pid, state})
 
       [] ->
         lookup_other_connection(registry, node_id, index, pool_size, :error)
@@ -608,8 +617,8 @@ defmodule Redix.Cluster.Manager do
     |> Enum.reject(&(&1 == preferred_index))
     |> Enum.reduce_while(default, fn index, fallback ->
       case Registry.lookup(registry, {node_id, index}) do
-        [{pid, {_role, :connected}}] -> {:halt, {:ok, pid}}
-        [{pid, _value}] when fallback == :error -> {:cont, {:ok, pid}}
+        [{pid, {_role, :connected}}] -> {:halt, {:ok, pid, :connected}}
+        [{pid, {_role, state}}] when fallback == :error -> {:cont, {:ok, pid, state}}
         _other -> {:cont, fallback}
       end
     end)
@@ -633,11 +642,15 @@ defmodule Redix.Cluster.Manager do
       members ->
         pool_size = members |> Enum.map(&elem(&1, 0)) |> Enum.max() |> Kernel.+(1)
         preferred_index = :erlang.phash2(caller, pool_size)
+        preferred = List.keyfind(members, preferred_index, 0)
 
         {_index, pid, _state} =
-          case List.keyfind(members, preferred_index, 0) do
-            {_index, _pid, :connected} = member -> member
-            _member -> Enum.find(members, hd(members), &(elem(&1, 2) == :connected))
+          case preferred do
+            {_index, _pid, :connected} = member ->
+              member
+
+            _member ->
+              Enum.find(members, &(elem(&1, 2) == :connected)) || preferred || hd(members)
           end
 
         {:ok, pid}

@@ -464,6 +464,95 @@ defmodule Redix.ClusterTest do
                  {:ok, "value"}
              end)
     end
+
+    test "routes around a pool member while its socket reconnects" do
+      name = :"socket_drop_cluster_#{System.unique_integer([:positive])}"
+      pool_size = 3
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: name,
+         nodes: @nodes,
+         primary_pool_size: pool_size,
+         backoff_initial: 30_000,
+         sync_connect: true},
+        id: name
+      )
+
+      registry = :"#{name}_registry"
+      slot_table = :"#{name}_slots"
+      key = "socket-drop-key"
+      slot = Redix.Cluster.Hash.hash_slot(key)
+      [{^slot, node_id, _replica_ids}] = :ets.lookup(slot_table, slot)
+      preferred_index = :erlang.phash2(self(), pool_size)
+
+      assert wait_until(fn ->
+               Registry.select(
+                 registry,
+                 [{{{node_id, :_}, :_, {:primary, :connected}}, [], [true]}]
+               )
+               |> length() == pool_size
+             end)
+
+      [{preferred_pid, {:primary, :connected}}] =
+        Registry.lookup(registry, {node_id, preferred_index})
+
+      assert Redix.Cluster.Manager.get_connection(
+               slot_table,
+               registry,
+               slot,
+               pool_size
+             ) == {:ok, preferred_pid}
+
+      {:connected, connection_data} = :sys.get_state(preferred_pid)
+      monitor = Process.monitor(preferred_pid)
+
+      # Stop the socket owner, which closes this member's socket. The Redix.Connection
+      # process stays alive and waits for its reconnect timer.
+      send(
+        connection_data.socket_owner,
+        {:force_disconnect, preferred_pid, :test_socket_drop}
+      )
+
+      assert wait_until(fn ->
+               Registry.lookup(registry, {node_id, preferred_index}) ==
+                 [{preferred_pid, {:primary, :disconnected}}] and
+                 match?({:disconnected, _data}, :sys.get_state(preferred_pid))
+             end)
+
+      assert Process.alive?(preferred_pid)
+      refute_receive {:DOWN, ^monitor, :process, ^preferred_pid, _reason}
+
+      assert {:ok, sibling_pid} =
+               Redix.Cluster.Manager.get_connection(slot_table, registry, slot, pool_size)
+
+      assert sibling_pid != preferred_pid
+      assert Redix.Cluster.command(name, ["SET", key, "one"]) == {:ok, "OK"}
+
+      other_key =
+        Stream.iterate(0, &(&1 + 1))
+        |> Stream.map(&"socket-fanout-key-#{&1}")
+        |> Enum.find(fn candidate ->
+          candidate_slot = Redix.Cluster.Hash.hash_slot(candidate)
+
+          case :ets.lookup(slot_table, candidate_slot) do
+            [{^candidate_slot, other_node_id, _replicas}] -> other_node_id != node_id
+            [] -> false
+          end
+        end)
+
+      assert Redix.Cluster.pipeline(name, [
+               ["SET", key, "one"],
+               ["SET", other_key, "two"],
+               ["GET", key],
+               ["GET", other_key]
+             ]) == {:ok, ["OK", "OK", "one", "two"]}
+
+      assert Process.alive?(preferred_pid)
+
+      assert Registry.lookup(registry, {node_id, preferred_index}) ==
+               [{preferred_pid, {:primary, :disconnected}}]
+    end
   end
 
   describe "error handling" do
