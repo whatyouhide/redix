@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.8.2
+
+  * Improve the `Redix.Cluster` command routing fix from 1.8.1 so that it essentially takes more conditions into consideration, like nodes connections being "stuck" or in a *connecting* state.
+
 ## v1.8.1
 
   * Route `Redix.Cluster` commands around disconnected pool members while another member for the same node remains connected.
