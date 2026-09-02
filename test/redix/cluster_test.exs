@@ -1,6 +1,8 @@
 defmodule Redix.ClusterTest do
   use ExUnit.Case
 
+  doctest Redix.Cluster, import: true
+
   @moduletag :cluster
 
   @nodes ["redis://localhost:7000", "redis://localhost:7001", "redis://localhost:7002"]

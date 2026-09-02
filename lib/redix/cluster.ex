@@ -399,6 +399,32 @@ defmodule Redix.Cluster do
   end
 
   @doc """
+  Computes the Redis Cluster hash slot for the given key.
+
+  Hash tags are supported. Keys with the same non-empty text between the first
+  `{` and the next `}` have the same slot.
+
+  The returned slot **does not identify a cluster node**. The cluster topology
+  determines which node owns the slot, and that owner can change. This function
+  is only useful as a building block for your own application, routing,
+  or anything like that.
+
+  ## Examples
+
+      iex> hash_slot("foo")
+      12182
+
+      iex> hash_slot("{user:1}.name") == hash_slot("{user:1}.email")
+      true
+
+  """
+  @doc since: "1.9.0"
+  @spec hash_slot(binary()) :: 0..16_383
+  def hash_slot(key) when is_binary(key) do
+    Hash.hash_slot(key)
+  end
+
+  @doc """
   Issues a command on the Redis Cluster.
 
   The command is routed to the correct node based on the key's hash slot.

@@ -4,6 +4,17 @@ defmodule Redix.Cluster.HashTest do
 
   alias Redix.Cluster.Hash
 
+  describe "Redix.Cluster.hash_slot/1" do
+    test "computes the slot through the public cluster API" do
+      assert Redix.Cluster.hash_slot("foo") == 12_182
+    end
+
+    test "supports hash tags" do
+      assert Redix.Cluster.hash_slot("{user:1}.name") ==
+               Redix.Cluster.hash_slot("{user:1}.email")
+    end
+  end
+
   describe "crc16/1" do
     # Reference values from the Redis Cluster specification.
     test "computes CRC16-XMODEM correctly" do
