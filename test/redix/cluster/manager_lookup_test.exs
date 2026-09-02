@@ -39,9 +39,9 @@ defmodule Redix.Cluster.ManagerLookupTest do
        } do
     node_id = "127.0.0.1:7001"
     address = {"127.0.0.1", 7001}
-    pool_size = 3
+    pool_size = 2
     preferred_index = :erlang.phash2(self(), pool_size)
-    other_index = Enum.find(0..(pool_size - 1), &(&1 != preferred_index))
+    other_index = 1 - preferred_index
 
     preferred = register_member(registry, {node_id, preferred_index}, {:primary, :disconnected})
     other = register_member(registry, {node_id, other_index}, {:primary, :connected})
