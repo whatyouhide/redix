@@ -9,6 +9,9 @@ defmodule Redix.Telemetry do
       connection to Redis. There are no measurements associated with this event.
       Metadata are:
 
+      * `:cluster` - the cluster name (the atom passed as `:name` to
+        `Redix.Cluster.start_link/1`). Only cluster connections include this field.
+        *Available since v1.9.0*.
       * `:connection` - the PID of the Redix connection that emitted the event.
       * `:connection_name` - the name (passed to the `:name` option when the
       connection is started) of the Redix connection that emitted the event.
@@ -22,6 +25,9 @@ defmodule Redix.Telemetry do
       with the Redis server. There are no measurements associated with
       this event. Metadata are:
 
+      * `:cluster` - the cluster name (the atom passed as `:name` to
+        `Redix.Cluster.start_link/1`). Only cluster connections include this field.
+        *Available since v1.9.0*.
       * `:connection` - the PID of the Redix connection that emitted the event.
       * `:connection_name` - the name (passed to the `:name` option when the
       * `:address` - the address the connection was connected to.
@@ -34,6 +40,9 @@ defmodule Redix.Telemetry do
       after a disconnection. There are no measurements associated with this event.
       Metadata are:
 
+      * `:cluster` - the cluster name (the atom passed as `:name` to
+        `Redix.Cluster.start_link/1`). Only cluster connections include this field.
+        *Available since v1.9.0*.
       * `:connection` - the PID of the Redix connection that emitted the event.
       * `:connection_name` - the name (passed to the `:name` option when the
         connection is started) of the Redix connection that emitted the event.

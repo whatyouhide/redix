@@ -1139,6 +1139,7 @@ defmodule Redix.Cluster.Manager do
   # Callers that only care about the updated data can discard the result.
   defp start_and_monitor_connection(data, node_id, index, host, port, role) do
     case start_connection(
+           data.cluster_name,
            data.pool_supervisor,
            data.registry,
            node_id,
@@ -1181,6 +1182,7 @@ defmodule Redix.Cluster.Manager do
   end
 
   defp start_connection(
+         cluster_name,
          pool_supervisor,
          registry,
          node_id,
@@ -1200,7 +1202,7 @@ defmodule Redix.Cluster.Manager do
         # The Registry value records the node's role and live connection state so
         # routing can skip a pool member while it reconnects.
         name: {:via, Registry, {registry, {node_id, index}, {role, :disconnected}}},
-        __cluster_member__: {registry, {node_id, index}}
+        __cluster_member__: {cluster_name, registry, {node_id, index}}
       )
       |> maybe_put_readonly(role)
 

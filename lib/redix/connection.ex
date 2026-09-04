@@ -153,9 +153,7 @@ defmodule Redix.Connection do
       # connect/3 down the pipe.
       receive do
         {:connected, ^socket_owner, socket, address} ->
-          :telemetry.execute([:redix, :connection], %{}, %{
-            connection: self(),
-            connection_name: data.opts[:name],
+          execute_telemetry_connection_event(data, :connection, %{
             address: address,
             reconnection: false
           })
@@ -211,9 +209,7 @@ defmodule Redix.Connection do
   # the socket owner to die so that it can finish processing the data it's processing. When it's
   # dead, we go ahead and notify the remaining clients, setup backoff, and so on.
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
-    :telemetry.execute([:redix, :disconnection], %{}, %{
-      connection: self(),
-      connection_name: data.opts[:name],
+    execute_telemetry_connection_event(data, :disconnection, %{
       address: data.connected_address,
       reason: %ConnectionError{reason: reason}
     })
@@ -227,9 +223,7 @@ defmodule Redix.Connection do
         {:connected, owner, socket, address},
         %__MODULE__{socket_owner: owner} = data
       ) do
-    :telemetry.execute([:redix, :connection], %{}, %{
-      connection: self(),
-      connection_name: data.opts[:name],
+    execute_telemetry_connection_event(data, :connection, %{
       address: address,
       reconnection: not is_nil(data.backoff_current)
     })
@@ -253,9 +247,7 @@ defmodule Redix.Connection do
 
   def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     # We log this when the socket owner stopped while connecting.
-    :telemetry.execute([:redix, :failed_connection], %{}, %{
-      connection: self(),
-      connection_name: data.opts[:name],
+    execute_telemetry_connection_event(data, :failed_connection, %{
       address: format_address(data),
       reason: %ConnectionError{reason: reason}
     })
@@ -293,9 +285,7 @@ defmodule Redix.Connection do
   end
 
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
-    :telemetry.execute([:redix, :disconnection], %{}, %{
-      connection: self(),
-      connection_name: data.opts[:name],
+    execute_telemetry_connection_event(data, :disconnection, %{
       address: data.connected_address,
       reason: %ConnectionError{reason: reason}
     })
@@ -345,6 +335,18 @@ defmodule Redix.Connection do
 
   ## Helpers
 
+  defp execute_telemetry_connection_event(data, event, metadata) do
+    metadata = Map.merge(%{connection: self(), connection_name: data.opts[:name]}, metadata)
+
+    metadata =
+      case data.opts[:__cluster_member__] do
+        {cluster, _registry, _key} -> Map.put(metadata, :cluster, cluster)
+        nil -> metadata
+      end
+
+    :telemetry.execute([:redix, event], %{}, metadata)
+  end
+
   defp maybe_put_cluster_member(opts, nil), do: opts
 
   defp maybe_put_cluster_member(opts, cluster_member) do
@@ -353,7 +355,7 @@ defmodule Redix.Connection do
 
   defp update_cluster_connection_state(data, state) do
     case data.opts[:__cluster_member__] do
-      {registry, key} ->
+      {_cluster, registry, key} ->
         Registry.update_value(registry, key, fn {role, _old_state} -> {role, state} end)
         data
 
