@@ -30,9 +30,9 @@ defmodule Redix.Telemetry do
         *Available since v1.9.0*.
       * `:connection` - the PID of the Redix connection that emitted the event.
       * `:connection_name` - the name (passed to the `:name` option when the
-      * `:address` - the address the connection was connected to.
         connection is started) of the Redix connection that emitted the event.
         `nil` if the connection was not registered with a name.
+      * `:address` - the address the connection was connected to.
       * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
 
     * `[:redix, :failed_connection]` - executed when Redix can't connect to

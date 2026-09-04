@@ -10,6 +10,15 @@ defmodule Redix.StartOptionsTest do
       assert opts[:host] == ~c"foo.com"
       assert opts[:backoff_max] == 0
       assert opts[:sync_connect] == true
+      assert opts[:address_selection] == :first
+    end
+
+    test "validates address selection" do
+      assert sanitize(address_selection: :random)[:address_selection] == :random
+
+      assert_raise NimbleOptions.ValidationError, ~r/invalid value for :address_selection/, fn ->
+        sanitize(address_selection: :round_robin)
+      end
     end
 
     test "raises on unknown options" do

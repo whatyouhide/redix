@@ -26,10 +26,11 @@ defmodule Redix.Connector do
 
   defp connect_directly(host, port, opts) do
     transport = if opts[:ssl], do: :ssl, else: :gen_tcp
-    socket_opts = build_socket_opts(transport, opts[:socket_opts])
+    socket_opts = build_socket_opts(transport, opts[:socket_opts], host)
     timeout = Keyword.fetch!(opts, :timeout)
 
-    with {:ok, socket} <- transport.connect(host, port, socket_opts, timeout),
+    with {:ok, socket} <-
+           connect_socket(transport, host, port, socket_opts, timeout, opts[:address_selection]),
          :ok <- setup_socket_buffers(transport, socket) do
       # Here, we should stop if AUTHing or SELECTing a DB fails with a *semantic* error
       # because disconnecting and retrying doesn't make sense, but we should not
@@ -42,6 +43,107 @@ defmodule Redix.Connector do
         {:error, :extra_bytes_after_reply} -> {:stop, :extra_bytes_after_reply}
         {:error, reason} -> {:error, reason}
       end
+    end
+  end
+
+  # Public for testing DNS and connection failures without replacing OTP modules.
+  @doc false
+  @spec connect_socket(
+          module(),
+          :inet.socket_address() | charlist(),
+          :inet.port_number(),
+          list(),
+          timeout(),
+          :first | :random | nil,
+          (charlist(), :inet.address_family() -> {:ok, [:inet.ip_address()]} | {:error, term()})
+        ) ::
+          {:ok, :gen_tcp.socket() | :ssl.sslsocket()} | {:error, term()}
+  def connect_socket(
+        transport,
+        host,
+        port,
+        socket_opts,
+        timeout,
+        selection,
+        lookup \\ &:inet.getaddrs/2
+      ) do
+    if selection == :random and hostname?(host) do
+      deadline =
+        if timeout == :infinity,
+          do: :infinity,
+          else: System.monotonic_time(:millisecond) + timeout
+
+      with {:ok, addresses} <-
+             lookup_addresses(host, address_family(socket_opts), timeout, lookup) do
+        Enum.reduce_while(Enum.shuffle(addresses), {:error, :nxdomain}, fn address, _last_error ->
+          timeout =
+            if deadline == :infinity,
+              do: :infinity,
+              else: deadline - System.monotonic_time(:millisecond)
+
+          if timeout == :infinity or timeout > 0 do
+            case transport.connect(address, port, socket_opts, timeout) do
+              {:ok, socket} -> {:halt, {:ok, socket}}
+              {:error, :timeout} = error -> {:halt, error}
+              {:error, _reason} = error -> {:cont, error}
+            end
+          else
+            {:halt, {:error, :timeout}}
+          end
+        end)
+      end
+    else
+      transport.connect(host, port, socket_opts, timeout)
+    end
+  end
+
+  # Mirrors how gen_tcp picks inet_tcp or inet6_tcp on OTP 24 to 28: the first of
+  # :inet, :inet6, or tcp_module: wins, then the last bind address, then the inet_db
+  # default. OTP 29 lets the last tcp_module: override an earlier family atom.
+  defp address_family(socket_opts) do
+    tcp_module_overrides? = String.to_integer(System.otp_release()) >= 29
+
+    family =
+      Enum.reduce(socket_opts, nil, fn
+        :inet, family ->
+          family || :inet
+
+        :inet6, family ->
+          family || :inet6
+
+        {:tcp_module, :inet_tcp}, family ->
+          if tcp_module_overrides?, do: :inet, else: family || :inet
+
+        {:tcp_module, :inet6_tcp}, family ->
+          if tcp_module_overrides?, do: :inet6, else: family || :inet6
+
+        _other, family ->
+          family
+      end)
+
+    bind_address =
+      List.last(for {key, address} <- socket_opts, key in [:ip, :ifaddr], do: address)
+
+    cond do
+      family -> family
+      is_tuple(bind_address) and tuple_size(bind_address) == 8 -> :inet6
+      match?(%{family: :inet6}, bind_address) -> :inet6
+      List.keyfind(:inet.get_rc(), :tcp, 0) == {:tcp, :inet6_tcp} -> :inet6
+      true -> :inet
+    end
+  end
+
+  defp lookup_addresses(_host, _family, 0, _lookup), do: {:error, :timeout}
+  defp lookup_addresses(host, family, :infinity, lookup), do: lookup.(host, family)
+
+  defp lookup_addresses(host, family, timeout, lookup) do
+    # getaddrs/2 follows the configured resolver but has no timeout argument.
+    # Task.shutdown/2 stops a late lookup and removes its reply and monitor.
+    task = Task.async(fn -> lookup.(host, family) end)
+
+    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
+      nil -> {:error, :timeout}
     end
   end
 
@@ -138,7 +240,7 @@ defmodule Redix.Connector do
   end
 
   defp connect_through_sentinel([sentinel | rest], sentinel_opts, opts, transport, conn_pid) do
-    case connect_to_sentinel(sentinel, sentinel_opts, transport) do
+    case connect_to_sentinel(sentinel, sentinel_opts, transport, opts[:address_selection]) do
       {:ok, sent_socket} ->
         _ = Logger.debug(fn -> "Connected to sentinel #{inspect(sentinel)}" end)
 
@@ -197,11 +299,11 @@ defmodule Redix.Connector do
     address
   end
 
-  defp connect_to_sentinel(sentinel, sentinel_opts, transport) do
+  defp connect_to_sentinel(sentinel, sentinel_opts, transport, selection) do
     host = Keyword.fetch!(sentinel, :host)
     port = Keyword.fetch!(sentinel, :port)
-    socket_opts = build_socket_opts(transport, sentinel_opts[:socket_opts])
-    transport.connect(host, port, socket_opts, sentinel_opts[:timeout])
+    socket_opts = build_socket_opts(transport, sentinel_opts[:socket_opts], host)
+    connect_socket(transport, host, port, socket_opts, sentinel_opts[:timeout], selection)
   end
 
   defp ask_sentinel_for_server(transport, sent_socket, sentinel_opts) do
@@ -256,30 +358,34 @@ defmodule Redix.Connector do
   # the SSL defaults with user-provided options) is security-sensitive enough to
   # warrant direct unit tests.
   @doc false
-  def build_socket_opts(:gen_tcp, user_socket_opts) do
+  @spec build_socket_opts(:gen_tcp | :ssl, list(), :inet.socket_address() | charlist()) :: list()
+  def build_socket_opts(:gen_tcp, user_socket_opts, _host) do
     @socket_opts ++ user_socket_opts
   end
 
-  def build_socket_opts(:ssl, user_socket_opts) do
+  def build_socket_opts(:ssl, user_socket_opts, host) do
     # Needs to be dynamic to avoid compile-time warnings.
     ca_store_mod = CAStore
 
-    default_opts =
+    ca_opts =
       if Keyword.has_key?(user_socket_opts, :cacertfile) or
            Keyword.has_key?(user_socket_opts, :cacerts) do
-        default_ssl_opts()
+        []
       else
         try do
-          [{:cacerts, :public_key.cacerts_get()} | default_ssl_opts()]
+          [cacerts: :public_key.cacerts_get()]
         rescue
           _ ->
             if Code.ensure_loaded?(ca_store_mod) do
-              [{:cacertfile, ca_store_mod.file_path()} | default_ssl_opts()]
+              [cacertfile: ca_store_mod.file_path()]
             else
-              default_ssl_opts()
+              []
             end
         end
       end
+
+    default_opts =
+      (ca_opts ++ default_ssl_opts(host))
       |> Keyword.drop(Keyword.keys(user_socket_opts))
 
     @socket_opts ++ user_socket_opts ++ default_opts
@@ -294,15 +400,23 @@ defmodule Redix.Connector do
   # by servers like Amazon ElastiCache. Without it, the stricter default match
   # function in :ssl rejects them. Requires OTP 21.0+, always satisfied since we
   # require Elixir 1.15+ (OTP 24+).
-  defp default_ssl_opts do
-    [
+  defp default_ssl_opts(host) do
+    opts = [
       verify: :verify_peer,
       depth: 3,
       customize_hostname_check: [
         match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
       ]
     ]
+
+    # :ssl only defaults SNI (and the hostname check) to the host when it connects
+    # with a host name. Random address selection connects with an IP address, so
+    # the host name has to be passed explicitly.
+    if hostname?(host), do: [{:server_name_indication, host} | opts], else: opts
   end
+
+  defp hostname?(host) when is_list(host), do: match?({:error, _}, :inet.parse_address(host))
+  defp hostname?(_host), do: false
 
   # Setups the `:buffer` option of the given socket.
   defp setup_socket_buffers(transport, socket) do
