@@ -123,8 +123,17 @@ defmodule Redix.ConnectorAddressSelectionTest do
     assert length(Agent.get(state, & &1.lookups)) == 12
   end
 
-  test "first mode leaves hostname resolution to the transport", context do
-    Agent.update(context.state, &%{&1 | results: %{@host => {{:error, :econnrefused}, 0}}})
+  test "system mode keeps the resolver's address order", %{state: state} = context do
+    addresses = [@unreachable, @loopback]
+
+    Agent.update(
+      state,
+      &%{
+        &1
+        | addresses: {:ok, addresses},
+          results: Map.new(addresses, fn address -> {address, {{:error, :econnrefused}, 0}} end)
+      }
+    )
 
     assert {:error, :econnrefused} =
              Connector.connect_socket(
@@ -133,12 +142,14 @@ defmodule Redix.ConnectorAddressSelectionTest do
                0,
                [test_state: context.state],
                5000,
-               :first,
+               :system,
                context.lookup
              )
 
-    assert [{@host, 5000}] = Agent.get(context.state, & &1.attempts)
-    assert Agent.get(context.state, & &1.lookups) == []
+    assert Enum.map(Agent.get(state, & &1.attempts), fn {address, _timeout} -> address end) ==
+             addresses
+
+    assert Agent.get(state, & &1.lookups) == [{@host, :inet}]
   end
 
   test "shares the timeout across lookup and connection attempts", %{state: state} = context do
@@ -155,15 +166,18 @@ defmodule Redix.ConnectorAddressSelectionTest do
     )
 
     # The elapsed difference works even when the monotonic timestamps are negative.
-    started = System.monotonic_time(:millisecond)
-    assert {:error, :timeout} = connect(context, 0, 600)
-    assert System.monotonic_time(:millisecond) - started < 1000
-    attempts = Agent.get(state, & &1.attempts)
-    assert length(attempts) == 3
-    [{_, first_timeout} | _] = attempts
-    assert first_timeout in 1..180
-    assert Enum.all?(attempts, fn {_address, timeout} -> timeout > 0 end)
-    assert Enum.sum(for {_address, timeout} <- attempts, do: timeout) <= 540
+    for selection <- [:system, :random] do
+      Agent.update(state, &%{&1 | attempts: []})
+      started = System.monotonic_time(:millisecond)
+      assert {:error, :timeout} = connect(context, 0, 600, selection)
+      assert System.monotonic_time(:millisecond) - started < 1000
+      attempts = Agent.get(state, & &1.attempts)
+      assert length(attempts) == 3
+      [{_, first_timeout} | _] = attempts
+      assert first_timeout in 1..180
+      assert Enum.all?(attempts, fn {_address, timeout} -> timeout > 0 end)
+      assert Enum.sum(for {_address, timeout} <- attempts, do: timeout) <= 540
+    end
   end
 
   test "stops a late DNS lookup and removes its reply and monitor", context do
@@ -235,7 +249,7 @@ defmodule Redix.ConnectorAddressSelectionTest do
 
   for client <- [Redix, Redix.PubSub],
       sync_connect <- [false, true],
-      selection <- [:first, :random] do
+      selection <- [:system, :random] do
     @client client
     @sync_connect sync_connect
     @selection selection
@@ -312,14 +326,14 @@ defmodule Redix.ConnectorAddressSelectionTest do
     :gen_tcp.close(socket)
   end
 
-  defp connect(context, port, timeout \\ 5000) do
+  defp connect(context, port, timeout \\ 5000, selection \\ :random) do
     Connector.connect_socket(
       Transport,
       @host,
       port,
       [test_state: context.state, active: false],
       timeout,
-      :random,
+      selection,
       context.lookup
     )
   end

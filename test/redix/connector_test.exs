@@ -165,7 +165,7 @@ defmodule Redix.ConnectorTest do
         ip = if family == :inet6, do: {0, 0, 0, 0, 0, 0, 0, 1}, else: {127, 0, 0, 1}
         {listener, port} = listen([family, ip: ip])
 
-        for selection <- [:first, :random] do
+        for selection <- [:system, :random] do
           opts =
             Redix.StartOptions.sanitize(:redix,
               host: "localhost",

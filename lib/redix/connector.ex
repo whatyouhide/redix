@@ -70,7 +70,7 @@ defmodule Redix.Connector do
           :inet.port_number(),
           list(),
           timeout(),
-          :first | :random | nil,
+          :system | :random | nil,
           (charlist(), :inet.address_family() -> {:ok, [:inet.ip_address()]} | {:error, term()})
         ) ::
           {:ok, :gen_tcp.socket() | :ssl.sslsocket()} | {:error, term()}
@@ -83,7 +83,7 @@ defmodule Redix.Connector do
         selection,
         lookup \\ &:inet.getaddrs/2
       ) do
-    if selection == :random and hostname?(host) do
+    if selection in [:system, :random] and hostname?(host) do
       deadline =
         if timeout == :infinity,
           do: :infinity,
@@ -94,7 +94,7 @@ defmodule Redix.Connector do
         address_count = length(addresses)
 
         addresses
-        |> Enum.shuffle()
+        |> select_addresses(selection)
         |> Enum.with_index()
         |> Enum.reduce_while({:error, :nxdomain}, fn {address, index}, _last_error ->
           timeout =
@@ -122,6 +122,9 @@ defmodule Redix.Connector do
       transport.connect(host, port, socket_opts, timeout)
     end
   end
+
+  defp select_addresses(addresses, :system), do: addresses
+  defp select_addresses(addresses, :random), do: Enum.shuffle(addresses)
 
   # Mirrors how gen_tcp picks inet_tcp or inet6_tcp on OTP 24 to 28: the first of
   # :inet, :inet6, or tcp_module: wins, then the last bind address, then the inet_db
