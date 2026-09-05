@@ -65,20 +65,45 @@ defmodule Redix.StartOptions do
       default: :system,
       doc: """
       controls how Redix selects an address when a host name resolves to **more than one IP
-      address**. `:system` tries the IP addresses in the order returned by the configured
-      system resolver. `:random` shuffles that list first. Both modes resolve the host name
-      on each connection attempt and try the addresses within one connection timeout,
-      including DNS lookup. Each address gets an equal share of the time left for the
-      remaining addresses. A failed or timed-out attempt moves to the next address while
-      time remains. With `timeout: :infinity`, each attempt has no time limit. This applies
-      to both Redis and Sentinel connections.
+      address**. The default (`:system`) keeps the resolver's address order.
+      `:random` shuffles the addresses on each connection attempt. The separate
+      `:connect_timeout_allocation` option controls the time allowed for each address.
+      Both options apply to Redis and Sentinel connections.
+
       Unix sockets and IP addresses need no DNS lookup. Connection and disconnection
       telemetry keep the original host and port in `:address` and report the connected
-      IP address and port in `:peer_address` in both modes. Address selection uses
-      `:inet.getaddrs/2` for host names. The first of `:inet`, `:inet6`, or `tcp_module:`
-      in `:socket_opts` decides the DNS address family on OTP 24 to 28. On OTP 29 and
-      later, the last `tcp_module:` takes priority. With a custom TCP module, set
-      `:inet` or `:inet6` before it. *Available since v1.9.0*.
+      IP address and port in `:peer_address` in both modes. When Redix resolves addresses
+      for random order or split timeouts, it uses `:inet.getaddrs/2` for host names
+      and follows the selected OTP backend's rules for the DNS address family.
+      If OTP selects a custom TCP module, Redix passes
+      the host name and timeout to that module in both modes. The module controls
+      address lookup, order, and retries; Redix does not shuffle its addresses.
+      *Available since v1.9.0*.
+      """
+    ],
+    connect_timeout_allocation: [
+      type: {:in, [:remaining, :split]},
+      default: :remaining,
+      doc: """
+      controls the time allowed for each IP address during a connection attempt.
+      `:remaining` lets each address use all the time left. With the default
+      `address_selection: :system`, Redix passes the host name and full timeout
+      directly to OTP to preserve the existing connection behavior.
+
+      `:split` divides the time left by the number of addresses still to try.
+      Each address gets at least two seconds if that much time remains, but never
+      more than the time left. For example, five addresses with five seconds left
+      get about two seconds, two seconds, then one second if each attempt times out.
+      A one-second budget never becomes two seconds. This can leave some addresses
+      untried when the budget runs out.
+
+      DNS lookup and all address attempts share one timeout budget. A failed or
+      timed-out address leaves only the unused time for the next address; the budget
+      does not restart. With `timeout: :infinity`, each address has no time limit.
+      This option applies to both Redis and Sentinel connections. A Sentinel uses
+      its own `:timeout` as the budget. IP literals and Unix sockets need only one
+      attempt. Custom TCP modules keep control of their own timeouts and retries.
+      *Available since v1.9.0*.
       """
     ],
     health_check_interval: [

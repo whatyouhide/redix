@@ -75,7 +75,7 @@ defmodule Redix.ConnectorAddressSelectionTest do
     assert [{@unreachable, first_timeout}, {@loopback, second_timeout}] =
              Agent.get(context.state, & &1.attempts)
 
-    assert second_timeout > first_timeout
+    assert second_timeout <= first_timeout
   end
 
   test "tries the next address after a connection timeout", %{state: state} = context do
@@ -83,7 +83,7 @@ defmodule Redix.ConnectorAddressSelectionTest do
     seed_for_fallback()
     Agent.update(state, &%{&1 | results: %{@unreachable => {{:error, :timeout}, 5000}}})
 
-    assert {:ok, socket} = connect(context, port, 400)
+    assert {:ok, socket} = connect(context, port, 4500, :random, :split)
     assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
     :gen_tcp.close(socket)
     :gen_tcp.close(server_socket)
@@ -91,9 +91,9 @@ defmodule Redix.ConnectorAddressSelectionTest do
     assert [{@unreachable, first_timeout}, {@loopback, second_timeout}] =
              Agent.get(state, & &1.attempts)
 
-    assert first_timeout in 1..200
+    assert first_timeout in 2000..2250
     assert second_timeout > 0
-    assert first_timeout + second_timeout <= 400
+    assert first_timeout + second_timeout <= 4500
   end
 
   test "shuffles all addresses and returns the last error", %{state: state} = context do
@@ -123,36 +123,46 @@ defmodule Redix.ConnectorAddressSelectionTest do
     assert length(Agent.get(state, & &1.lookups)) == 12
   end
 
-  test "system mode keeps the resolver's address order", %{state: state} = context do
-    addresses = [@unreachable, @loopback]
+  test "the default system mode gives a slow connection the full timeout", context do
+    %{state: state, lookup: lookup} = context
+    {listener, port} = listen()
+    host = ~c"localhost"
+    addresses = [@loopback, @unreachable, {192, 0, 2, 2}, {192, 0, 2, 3}, {192, 0, 2, 4}]
 
+    # A 200 ms connection fits in 500 ms, but not in a 100 ms share for each IP.
     Agent.update(
       state,
       &%{
         &1
         | addresses: {:ok, addresses},
-          results: Map.new(addresses, fn address -> {address, {{:error, :econnrefused}, 0}} end)
+          results: Map.new([host | addresses], fn address -> {address, {:connect, 200}} end)
       }
     )
 
-    assert {:error, :econnrefused} =
+    selection = Redix.StartOptions.sanitize(:redix, [])[:address_selection]
+
+    assert {:ok, socket} =
              Connector.connect_socket(
                Transport,
-               @host,
-               0,
-               [test_state: context.state],
-               5000,
-               :system,
-               context.lookup
+               host,
+               port,
+               [test_state: state, active: false],
+               500,
+               selection,
+               :remaining,
+               lookup
              )
 
-    assert Enum.map(Agent.get(state, & &1.attempts), fn {address, _timeout} -> address end) ==
-             addresses
+    :gen_tcp.close(socket)
+    assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
+    :gen_tcp.close(server_socket)
 
-    assert Agent.get(state, & &1.lookups) == [{@host, :inet}]
+    assert Agent.get(state, & &1.attempts) == [{host, 500}]
+    assert Agent.get(state, & &1.lookups) == []
   end
 
-  test "shares the timeout across lookup and connection attempts", %{state: state} = context do
+  test "random mode shares the timeout across lookup and connection attempts",
+       %{state: state} = context do
     addresses = [@loopback, @unreachable, {192, 0, 2, 2}]
 
     Agent.update(
@@ -165,19 +175,95 @@ defmodule Redix.ConnectorAddressSelectionTest do
       }
     )
 
-    # The elapsed difference works even when the monotonic timestamps are negative.
-    for selection <- [:system, :random] do
+    # The two-second minimum cannot extend the budget left after DNS lookup.
+    for allocation <- [:remaining, :split] do
       Agent.update(state, &%{&1 | attempts: []})
       started = System.monotonic_time(:millisecond)
-      assert {:error, :timeout} = connect(context, 0, 600, selection)
+      assert {:error, :timeout} = connect(context, 0, 600, :random, allocation)
       assert System.monotonic_time(:millisecond) - started < 1000
-      attempts = Agent.get(state, & &1.attempts)
-      assert length(attempts) == 3
-      [{_, first_timeout} | _] = attempts
-      assert first_timeout in 1..180
-      assert Enum.all?(attempts, fn {_address, timeout} -> timeout > 0 end)
-      assert Enum.sum(for {_address, timeout} <- attempts, do: timeout) <= 540
+      assert [{_, first_timeout}] = Agent.get(state, & &1.attempts)
+      assert first_timeout in 1..540
     end
+  end
+
+  test "system order and split timeouts can be selected together", context do
+    %{state: state} = context
+    addresses = [@unreachable, @loopback, {192, 0, 2, 2}, {192, 0, 2, 3}, {192, 0, 2, 4}]
+
+    Agent.update(state, fn state ->
+      %{
+        state
+        | addresses: {:ok, addresses},
+          results: Map.new(addresses, &{&1, {{:error, :timeout}, 10_000}})
+      }
+    end)
+
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :timeout} = connect(context, 0, 5000, :system, :split)
+    assert System.monotonic_time(:millisecond) - started < 5500
+
+    assert [{@unreachable, 2000}, {@loopback, 2000}, {{192, 0, 2, 2}, last_timeout}] =
+             Agent.get(state, & &1.attempts)
+
+    assert last_timeout in 1..1000
+  end
+
+  test "a one-second split budget cannot grow to two seconds", %{state: state} = context do
+    Agent.update(state, fn state ->
+      %{
+        state
+        | addresses: {:ok, [@unreachable, @loopback]},
+          results: %{@unreachable => {{:error, :timeout}, 5000}}
+      }
+    end)
+
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :timeout} = connect(context, 0, 1000, :system, :split)
+    assert System.monotonic_time(:millisecond) - started < 1500
+    assert [{@unreachable, timeout}] = Agent.get(state, & &1.attempts)
+    assert timeout in 1..1000
+  end
+
+  test "split timeouts cap the minimum and retain larger shares", %{state: state} = context do
+    addresses = [@unreachable, @loopback, {192, 0, 2, 2}, {192, 0, 2, 3}, {192, 0, 2, 4}]
+
+    Agent.update(state, fn state ->
+      %{
+        state
+        | addresses: {:ok, addresses},
+          results: Map.new(addresses, &{&1, {{:error, :econnrefused}, 0}})
+      }
+    end)
+
+    for {budget, first_range} <- [
+          {1000, 1..1000},
+          {1999, 1..1999},
+          {2000, 1..2000},
+          {2500, 2000..2000},
+          {5000, 2000..2000},
+          {15_000, 2500..3000}
+        ] do
+      Agent.update(state, &%{&1 | attempts: []})
+      assert {:error, :econnrefused} = connect(context, 0, budget, :system, :split)
+      [{_, first_timeout} | _] = attempts = Agent.get(state, & &1.attempts)
+      assert first_timeout in first_range
+      assert Enum.map(attempts, &elem(&1, 0)) == addresses
+      assert Enum.all?(attempts, fn {_address, timeout} -> timeout > 0 and timeout <= budget end)
+    end
+  end
+
+  test "random order does not split the timeout by default", %{state: state} = context do
+    Agent.update(state, fn state ->
+      %{
+        state
+        | results: Map.new([@loopback, @unreachable], &{&1, {{:error, :econnrefused}, 0}})
+      }
+    end)
+
+    assert {:error, :econnrefused} = connect(context, 0)
+    [{_, first_timeout}, {_, second_timeout}] = Agent.get(state, & &1.attempts)
+    assert first_timeout in 4000..5000
+    assert second_timeout > 0 and second_timeout <= first_timeout
   end
 
   test "stops a late DNS lookup and removes its reply and monitor", context do
@@ -200,15 +286,22 @@ defmodule Redix.ConnectorAddressSelectionTest do
   end
 
   test "zero timeout skips DNS and connection attempts", context do
-    assert {:error, :timeout} = connect(context, 0, 0)
+    for {selection, allocation} <- [{:random, :remaining}, {:random, :split}, {:system, :split}] do
+      assert {:error, :timeout} = connect(context, 0, 0, selection, allocation)
+    end
+
     assert Agent.get(context.state, & &1.lookups) == []
     assert Agent.get(context.state, & &1.attempts) == []
   end
 
   test "supports an infinite timeout", %{state: state} = context do
     Agent.update(state, &%{&1 | addresses: {:ok, [@unreachable]}})
-    assert {:error, :econnrefused} = connect(context, 0, :infinity)
-    assert [{@unreachable, :infinity}] = Agent.get(state, & &1.attempts)
+
+    for {selection, allocation} <- [{:random, :remaining}, {:random, :split}, {:system, :split}] do
+      Agent.update(state, &%{&1 | attempts: []})
+      assert {:error, :econnrefused} = connect(context, 0, :infinity, selection, allocation)
+      assert [{@unreachable, :infinity}] = Agent.get(state, & &1.attempts)
+    end
   end
 
   test "resolves again on each attempt, including after DNS errors", %{state: state} = context do
@@ -237,11 +330,19 @@ defmodule Redix.ConnectorAddressSelectionTest do
           {[:inet, ip: ipv6], :inet},
           {[:inet6, tcp_module: :inet_tcp], if(tcp_module_overrides?, do: :inet, else: :inet6)},
           {[{:tcp_module, :inet_tcp}, :inet6], :inet},
-          {[:inet, :inet6], :inet},
-          {[:inet6, tcp_module: CustomTCP], :inet6}
+          {[:inet, :inet6], :inet}
         ] do
       assert {:error, :nxdomain} =
-               Connector.connect_socket(:gen_tcp, @host, 0, opts, 5000, :random, lookup)
+               Connector.connect_socket(
+                 :gen_tcp,
+                 @host,
+                 0,
+                 opts,
+                 5000,
+                 :random,
+                 :remaining,
+                 lookup
+               )
 
       assert List.last(Agent.get(state, & &1.lookups)) == {@host, family}
     end
@@ -249,12 +350,14 @@ defmodule Redix.ConnectorAddressSelectionTest do
 
   for client <- [Redix, Redix.PubSub],
       sync_connect <- [false, true],
-      selection <- [:system, :random] do
+      selection <- [:system, :random],
+      allocation <- [:remaining, :split] do
     @client client
     @sync_connect sync_connect
     @selection selection
+    @allocation allocation
 
-    test "reports peer addresses for #{client}, sync_connect: #{sync_connect}, selection: #{selection}",
+    test "reports peer addresses for #{client}, sync_connect: #{sync_connect}, selection: #{selection}, allocation: #{allocation}",
          %{test: test} do
       {listener, port} = listen()
       parent = self()
@@ -278,7 +381,8 @@ defmodule Redix.ConnectorAddressSelectionTest do
         port: port,
         sync_connect: @sync_connect,
         backoff_initial: 20,
-        address_selection: @selection
+        address_selection: @selection,
+        connect_timeout_allocation: @allocation
       ]
 
       start_supervised!(%{id: @client, start: {@client, :start_link, [opts]}})
@@ -306,7 +410,7 @@ defmodule Redix.ConnectorAddressSelectionTest do
     end
   end
 
-  test "applies random selection to Sentinel discovery" do
+  test "applies both address options to Sentinel discovery" do
     primary = FakeNode.start(fn ["ROLE"] -> "*1\r\n$6\r\nmaster\r\n" end)
     primary_port = Integer.to_string(primary.port)
 
@@ -315,18 +419,61 @@ defmodule Redix.ConnectorAddressSelectionTest do
         "*2\r\n$9\r\nlocalhost\r\n$#{byte_size(primary_port)}\r\n#{primary_port}\r\n"
       end)
 
-    opts =
-      Redix.StartOptions.sanitize(:redix,
-        address_selection: :random,
-        sentinel: [sentinels: [[host: "localhost", port: sentinel.port]], group: "main"]
-      )
-
     address = "localhost:#{primary.port}"
-    assert {:ok, socket, ^address} = Connector.connect(opts, self())
-    :gen_tcp.close(socket)
+
+    for selection <- [:system, :random], allocation <- [:remaining, :split] do
+      opts =
+        Redix.StartOptions.sanitize(:redix,
+          address_selection: selection,
+          connect_timeout_allocation: allocation,
+          sentinel: [sentinels: [[host: "localhost", port: sentinel.port]], group: "main"]
+        )
+
+      assert {:ok, socket, ^address} = Connector.connect(opts, self())
+      :gen_tcp.close(socket)
+    end
   end
 
-  defp connect(context, port, timeout \\ 5000, selection \\ :random) do
+  test "split timeouts bound a stalled TLS handshake", _context do
+    {_listener, port} = listen()
+
+    opts =
+      Redix.StartOptions.sanitize(:redix,
+        host: "localhost",
+        port: port,
+        ssl: true,
+        socket_opts: [verify: :verify_none],
+        timeout: 1000,
+        connect_timeout_allocation: :split
+      )
+
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :timeout} = Connector.connect(opts, self())
+    assert System.monotonic_time(:millisecond) - started < 1500
+  end
+
+  test "a Sentinel's split budget uses its own timeout", _context do
+    {_listener, port} = listen()
+
+    opts =
+      Redix.StartOptions.sanitize(:redix,
+        timeout: 5000,
+        connect_timeout_allocation: :split,
+        sentinel: [
+          sentinels: [[host: "localhost", port: port]],
+          group: "main",
+          ssl: true,
+          socket_opts: [verify: :verify_none],
+          timeout: 1000
+        ]
+      )
+
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :no_viable_sentinel_connection} = Connector.connect(opts, self())
+    assert System.monotonic_time(:millisecond) - started < 1500
+  end
+
+  defp connect(context, port, timeout \\ 5000, selection \\ :random, allocation \\ :remaining) do
     Connector.connect_socket(
       Transport,
       @host,
@@ -334,6 +481,7 @@ defmodule Redix.ConnectorAddressSelectionTest do
       [test_state: context.state, active: false],
       timeout,
       selection,
+      allocation,
       context.lookup
     )
   end
