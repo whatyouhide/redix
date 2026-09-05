@@ -60,6 +60,28 @@ defmodule Redix.StartOptions do
       connection timeout (in milliseconds) directly passed to the network layer.
       """
     ],
+    address_selection: [
+      type: {:in, [:system, :random]},
+      default: :system,
+      doc: """
+      controls how Redix selects an address when a host name resolves to **more than one IP
+      address**. `:system` tries the IP addresses in the order returned by the configured
+      system resolver. `:random` shuffles that list first. Both modes resolve the host name
+      on each connection attempt and try the addresses within one connection timeout,
+      including DNS lookup. Each address gets an equal share of the time left for the
+      remaining addresses. A failed or timed-out attempt moves to the next address while
+      time remains. With `timeout: :infinity`, each attempt has no time limit. This applies
+      to both Redis and Sentinel connections.
+      Unix sockets and IP addresses need no DNS lookup. Connection and disconnection
+      telemetry keep the original host and port in `:address` and report the connected
+      IP address and port in `:peer_address` in both modes. Address selection uses
+      `:inet.getaddrs/2` for host names and follows the selected OTP backend's rules
+      for the DNS address family. If OTP selects a custom TCP module, Redix passes
+      the host name and timeout to that module in both modes. The module controls
+      address lookup, order, and retries; Redix does not shuffle its addresses.
+      *Available since v1.9.0*.
+      """
+    ],
     health_check_interval: [
       type: :timeout,
       default: :infinity,

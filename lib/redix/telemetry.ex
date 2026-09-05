@@ -16,7 +16,10 @@ defmodule Redix.Telemetry do
       * `:connection_name` - the name (passed to the `:name` option when the
       connection is started) of the Redix connection that emitted the event.
       `nil` if the connection was not registered with a name.
-      * `:address` - the address the connection successfully connected to.
+      * `:address` - the original host and port used to connect, or the Unix socket path.
+      * `:peer_address` - the connected socket's IP address and port as a string,
+        or its Unix socket path. `nil` if the peer address is unavailable.
+        *Available since v1.9.0*.
       * `:reconnection` - a boolean that specifies whether this was a first
         connection to Redis or a reconnection after a disconnection. This can
         be useful for more granular logging.
@@ -30,9 +33,12 @@ defmodule Redix.Telemetry do
         *Available since v1.9.0*.
       * `:connection` - the PID of the Redix connection that emitted the event.
       * `:connection_name` - the name (passed to the `:name` option when the
-      * `:address` - the address the connection was connected to.
         connection is started) of the Redix connection that emitted the event.
         `nil` if the connection was not registered with a name.
+      * `:address` - the original host and port used to connect, or the Unix socket path.
+      * `:peer_address` - the peer address saved when the connection opened, in the
+        same format as the connection event. `nil` if the peer address was unavailable.
+        *Available since v1.9.0*.
       * `:reason` - the disconnection reason as a `Redix.ConnectionError` struct.
 
     * `[:redix, :failed_connection]` - executed when Redix can't connect to
