@@ -8,6 +8,22 @@ defmodule Redix.Connector do
 
   require Logger
 
+  @spec peer_address(:gen_tcp | :ssl, :gen_tcp.socket() | :ssl.sslsocket()) :: String.t() | nil
+  def peer_address(transport, socket) do
+    inet_mod = if transport == :ssl, do: :ssl, else: :inet
+
+    case inet_mod.peername(socket) do
+      {:ok, {ip, port}} when is_tuple(ip) and tuple_size(ip) in [4, 8] ->
+        Format.format_host_and_port(ip, port)
+
+      {:ok, {:local, path}} when path != <<>> ->
+        IO.chardata_to_string(path)
+
+      _other ->
+        nil
+    end
+  end
+
   @spec connect(keyword(), pid()) ::
           {:ok, socket, connected_address} | {:error, term} | {:stop, term}
         when socket: :gen_tcp.socket() | :ssl.sslsocket(),
@@ -75,16 +91,26 @@ defmodule Redix.Connector do
 
       with {:ok, addresses} <-
              lookup_addresses(host, address_family(socket_opts), timeout, lookup) do
-        Enum.reduce_while(Enum.shuffle(addresses), {:error, :nxdomain}, fn address, _last_error ->
+        address_count = length(addresses)
+
+        addresses
+        |> Enum.shuffle()
+        |> Enum.with_index()
+        |> Enum.reduce_while({:error, :nxdomain}, fn {address, index}, _last_error ->
           timeout =
             if deadline == :infinity,
               do: :infinity,
               else: deadline - System.monotonic_time(:millisecond)
 
           if timeout == :infinity or timeout > 0 do
-            case transport.connect(address, port, socket_opts, timeout) do
+            # Divide the time left among the addresses still to try.
+            attempt_timeout =
+              if timeout == :infinity,
+                do: :infinity,
+                else: max(div(timeout, address_count - index), 1)
+
+            case transport.connect(address, port, socket_opts, attempt_timeout) do
               {:ok, socket} -> {:halt, {:ok, socket}}
-              {:error, :timeout} = error -> {:halt, error}
               {:error, _reason} = error -> {:cont, error}
             end
           else

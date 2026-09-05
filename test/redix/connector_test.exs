@@ -81,6 +81,23 @@ defmodule Redix.ConnectorTest do
   end
 
   describe "connect/2" do
+    test "reads the peer address of a TLS socket" do
+      port = Redix.TestPorts.port(:stunnel)
+
+      opts =
+        Redix.StartOptions.sanitize(:redix,
+          host: "localhost",
+          port: port,
+          ssl: true,
+          socket_opts: [verify: :verify_none],
+          address_selection: :random
+        )
+
+      assert {:ok, socket, _address} = Connector.connect(opts, self())
+      on_exit(fn -> :ssl.close(socket) end)
+      assert Connector.peer_address(:ssl, socket) == "127.0.0.1:#{port}"
+    end
+
     test "keeps the host name with address_selection: :random" do
       assert_connected_address(address_selection: :random)
     end
@@ -100,6 +117,7 @@ defmodule Redix.ConnectorTest do
       opts = Redix.StartOptions.sanitize(:redix, host: {:local, path}, address_selection: :random)
 
       assert {:ok, socket, ^path} = Connector.connect(opts, self())
+      assert Connector.peer_address(:gen_tcp, socket) == path
       assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
       :gen_tcp.close(socket)
       :gen_tcp.close(server_socket)
@@ -127,6 +145,7 @@ defmodule Redix.ConnectorTest do
 
         expected_address = "::1:#{port}"
         assert {:ok, socket, ^expected_address} = Connector.connect(opts, self())
+        assert Connector.peer_address(:gen_tcp, socket) == expected_address
         assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
         :gen_tcp.close(socket)
         :gen_tcp.close(server_socket)
@@ -171,9 +190,11 @@ defmodule Redix.ConnectorTest do
     expected_address = "localhost:#{port}"
 
     assert {:ok, socket, ^expected_address} = Connector.connect(opts, self())
+    assert Connector.peer_address(:gen_tcp, socket) == "127.0.0.1:#{port}"
     assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
 
     :ok = :gen_tcp.close(socket)
+    assert Connector.peer_address(:gen_tcp, socket) == nil
     :ok = :gen_tcp.close(server_socket)
   end
 

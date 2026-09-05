@@ -13,6 +13,7 @@ defmodule Redix.PubSub.Connection do
     :backoff_current,
     :last_disconnect_reason,
     :connected_address,
+    :peer_address,
     :client_id,
     subscriptions: %{},
     monitors: %{},
@@ -30,13 +31,14 @@ defmodule Redix.PubSub.Connection do
     data = %__MODULE__{opts: opts, transport: transport}
 
     if opts[:sync_connect] do
-      with {:ok, socket, address, client_id} <- connect(data) do
+      with {:ok, socket, address, client_id, peer_address} <- connect(data) do
         data = %__MODULE__{
           data
           | socket: socket,
             last_disconnect_reason: nil,
             backoff_current: nil,
             connected_address: address,
+            peer_address: peer_address,
             client_id: client_id
         }
 
@@ -72,6 +74,7 @@ defmodule Redix.PubSub.Connection do
       connection: self(),
       connection_name: data.opts[:name],
       address: data.connected_address,
+      peer_address: data.peer_address,
       reason: data.last_disconnect_reason
     })
 
@@ -95,7 +98,7 @@ defmodule Redix.PubSub.Connection do
             {target_key, {:disconnected, resubscribers}}
         end)
 
-      data = %{data | subscriptions: subscriptions, connected_address: nil}
+      data = %{data | subscriptions: subscriptions, connected_address: nil, peer_address: nil}
 
       {:keep_state, data}
     end
@@ -106,15 +109,8 @@ defmodule Redix.PubSub.Connection do
   end
 
   def disconnected(:internal, :connect, data) do
-    with {:ok, socket, address, client_id} <- connect(data) do
-      :telemetry.execute([:redix, :connection], %{}, %{
-        connection: self(),
-        connection_name: data.opts[:name],
-        address: address,
-        reconnection: not is_nil(data.last_disconnect_reason)
-      })
-
-      data = update_pubsub_connection(data, client_id, address, socket)
+    with {:ok, socket, address, client_id, peer_address} <- connect(data) do
+      data = update_pubsub_connection(data, client_id, address, socket, peer_address)
 
       {:next_state, :connected, data, {:next_event, :internal, :handle_connection}}
     else
@@ -220,13 +216,14 @@ defmodule Redix.PubSub.Connection do
     {:keep_state, %{data | subscriptions: subscriptions}}
   end
 
-  defp update_pubsub_connection(%__MODULE__{} = data, client_id, address, socket) do
+  defp update_pubsub_connection(%__MODULE__{} = data, client_id, address, socket, peer_address) do
     %{
       data
       | socket: socket,
         last_disconnect_reason: nil,
         backoff_current: nil,
         connected_address: address,
+        peer_address: peer_address,
         client_id: client_id
     }
   end
@@ -661,7 +658,17 @@ defmodule Redix.PubSub.Connection do
     with {:ok, socket, address} <- Connector.connect(opts, _conn_pid = self()),
          {:ok, client_id} <- maybe_fetch_client_id(fetch_client_id?, transport, socket, timeout),
          :ok <- setopts(data, socket, active: :once) do
-      {:ok, socket, address, client_id}
+      peer_address = Connector.peer_address(transport, socket)
+
+      :telemetry.execute([:redix, :connection], %{}, %{
+        connection: self(),
+        connection_name: opts[:name],
+        address: address,
+        peer_address: peer_address,
+        reconnection: not is_nil(data.last_disconnect_reason)
+      })
+
+      {:ok, socket, address, client_id, peer_address}
     end
   end
 

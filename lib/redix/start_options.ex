@@ -67,9 +67,13 @@ defmodule Redix.StartOptions do
       controls how Redix selects an address when a host name resolves to **more than one IP
       address**. `:first` uses the resolver's order. `:random` resolves the host name on each
       connection attempt, shuffles the IP addresses, and tries them in that order within
-      one connection timeout. This applies to both Redis and Sentinel connections.
+      one connection timeout, including DNS lookup. Each address gets an equal share of
+      the time left for the remaining addresses. A failed or timed-out attempt moves to
+      the next address while time remains. With `timeout: :infinity`, each attempt has
+      no time limit. This applies to both Redis and Sentinel connections.
       Unix sockets and IP addresses need no DNS lookup. Connection and disconnection
-      telemetry keep the original host and port in both modes. Random selection uses
+      telemetry keep the original host and port in `:address` and report the connected
+      IP address and port in `:peer_address` in both modes. Random selection uses
       `:inet.getaddrs/2` for host names. The first of `:inet`, `:inet6`, or `tcp_module:`
       in `:socket_opts` decides the DNS address family on OTP 24 to 28. On OTP 29 and
       later, the last `tcp_module:` takes priority. With a custom TCP module, set

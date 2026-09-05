@@ -15,6 +15,7 @@ defmodule Redix.Connection do
     :socket,
     :backoff_current,
     :connected_address,
+    :peer_address,
     :health_marker,
     counter: 0,
     client_reply: :on
@@ -152,13 +153,20 @@ defmodule Redix.Connection do
       # We don't need to handle a timeout here because we're using a timeout in
       # connect/3 down the pipe.
       receive do
-        {:connected, ^socket_owner, socket, address} ->
+        {:connected, ^socket_owner, socket, address, peer_address} ->
           execute_telemetry_connection_event(data, :connection, %{
             address: address,
+            peer_address: peer_address,
             reconnection: false
           })
 
-          data = %__MODULE__{data | socket: socket, connected_address: address}
+          data = %__MODULE__{
+            data
+            | socket: socket,
+              connected_address: address,
+              peer_address: peer_address
+          }
+
           data = update_cluster_connection_state(data, :connected)
           {:ok, :connected, data, health_check_actions(data)}
 
@@ -211,20 +219,22 @@ defmodule Redix.Connection do
   def disconnected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     execute_telemetry_connection_event(data, :disconnection, %{
       address: data.connected_address,
+      peer_address: data.peer_address,
       reason: %ConnectionError{reason: reason}
     })
 
-    data = %{data | connected_address: nil}
+    data = %{data | connected_address: nil, peer_address: nil}
     disconnect(data, reason)
   end
 
   def connecting(
         :info,
-        {:connected, owner, socket, address},
+        {:connected, owner, socket, address, peer_address},
         %__MODULE__{socket_owner: owner} = data
       ) do
     execute_telemetry_connection_event(data, :connection, %{
       address: address,
+      peer_address: peer_address,
       reconnection: not is_nil(data.backoff_current)
     })
 
@@ -233,6 +243,7 @@ defmodule Redix.Connection do
       | socket: socket,
         backoff_current: nil,
         connected_address: address,
+        peer_address: peer_address,
         health_marker: nil
     }
 
@@ -287,10 +298,11 @@ defmodule Redix.Connection do
   def connected(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
     execute_telemetry_connection_event(data, :disconnection, %{
       address: data.connected_address,
+      peer_address: data.peer_address,
       reason: %ConnectionError{reason: reason}
     })
 
-    data = %{data | connected_address: nil}
+    data = %{data | connected_address: nil, peer_address: nil}
     disconnect(data, reason)
   end
 

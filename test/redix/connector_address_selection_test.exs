@@ -72,7 +72,28 @@ defmodule Redix.ConnectorAddressSelectionTest do
     :gen_tcp.close(socket)
     :gen_tcp.close(server_socket)
 
-    assert [{@unreachable, _}, {@loopback, _}] = Agent.get(context.state, & &1.attempts)
+    assert [{@unreachable, first_timeout}, {@loopback, second_timeout}] =
+             Agent.get(context.state, & &1.attempts)
+
+    assert second_timeout > first_timeout
+  end
+
+  test "tries the next address after a connection timeout", %{state: state} = context do
+    {listener, port} = listen()
+    seed_for_fallback()
+    Agent.update(state, &%{&1 | results: %{@unreachable => {{:error, :timeout}, 5000}}})
+
+    assert {:ok, socket} = connect(context, port, 400)
+    assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
+    :gen_tcp.close(socket)
+    :gen_tcp.close(server_socket)
+
+    assert [{@unreachable, first_timeout}, {@loopback, second_timeout}] =
+             Agent.get(state, & &1.attempts)
+
+    assert first_timeout in 1..200
+    assert second_timeout > 0
+    assert first_timeout + second_timeout <= 400
   end
 
   test "shuffles all addresses and returns the last error", %{state: state} = context do
@@ -129,20 +150,20 @@ defmodule Redix.ConnectorAddressSelectionTest do
         &1
         | addresses: {:ok, addresses},
           resolve_delay: 60,
-          results: Map.new(addresses, fn address -> {address, {{:error, :econnrefused}, 100}} end)
+          results: Map.new(addresses, fn address -> {address, {{:error, :timeout}, 5000}} end)
       }
     )
 
     # The elapsed difference works even when the monotonic timestamps are negative.
-    assert {:error, :timeout} = connect(context, 0, 250)
+    started = System.monotonic_time(:millisecond)
+    assert {:error, :timeout} = connect(context, 0, 600)
+    assert System.monotonic_time(:millisecond) - started < 1000
     attempts = Agent.get(state, & &1.attempts)
-    assert length(attempts) in 1..2
+    assert length(attempts) == 3
     [{_, first_timeout} | _] = attempts
-    assert first_timeout <= 190
-
-    for [{_, earlier}, {_, later}] <- Enum.chunk_every(attempts, 2, 1, :discard) do
-      assert later < earlier
-    end
+    assert first_timeout in 1..180
+    assert Enum.all?(attempts, fn {_address, timeout} -> timeout > 0 end)
+    assert Enum.sum(for {_address, timeout} <- attempts, do: timeout) <= 540
   end
 
   test "stops a late DNS lookup and removes its reply and monitor", context do
@@ -212,42 +233,63 @@ defmodule Redix.ConnectorAddressSelectionTest do
     end
   end
 
-  test "keeps telemetry addresses on connection, disconnection, and reconnection", %{test: test} do
-    {listener, port} = listen()
-    parent = self()
-    events = [[:redix, :connection], [:redix, :disconnection]]
+  for client <- [Redix, Redix.PubSub],
+      sync_connect <- [false, true],
+      selection <- [:first, :random] do
+    @client client
+    @sync_connect sync_connect
+    @selection selection
 
-    :ok =
-      :telemetry.attach_many(
-        test,
-        events,
-        fn event, _, meta, _ ->
-          if meta.connection_name == test, do: send(parent, {event, meta})
-        end,
-        nil
-      )
+    test "reports peer addresses for #{client}, sync_connect: #{sync_connect}, selection: #{selection}",
+         %{test: test} do
+      {listener, port} = listen()
+      parent = self()
+      events = [[:redix, :connection], [:redix, :disconnection]]
 
-    on_exit(fn -> :telemetry.detach(test) end)
+      :ok =
+        :telemetry.attach_many(
+          test,
+          events,
+          fn event, _, meta, _ ->
+            if meta.connection_name == test, do: send(parent, {event, meta})
+          end,
+          nil
+        )
 
-    start_supervised!(
-      {Redix,
-       name: test,
-       host: "localhost",
-       port: port,
-       sync_connect: true,
-       backoff_initial: 20,
-       address_selection: :random}
-    )
+      on_exit(fn -> :telemetry.detach(test) end)
 
-    address = "localhost:#{port}"
-    assert_receive {[:redix, :connection], %{address: ^address, reconnection: false}}
-    assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
-    :gen_tcp.close(server_socket)
-    assert_receive {[:redix, :disconnection], %{address: ^address}}, 1000
-    assert_receive {[:redix, :connection], %{address: ^address, reconnection: true}}, 1000
-    assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
-    stop_supervised(Redix)
-    :gen_tcp.close(server_socket)
+      opts = [
+        name: test,
+        host: "localhost",
+        port: port,
+        sync_connect: @sync_connect,
+        backoff_initial: 20,
+        address_selection: @selection
+      ]
+
+      start_supervised!(%{id: @client, start: {@client, :start_link, [opts]}})
+
+      address = "localhost:#{port}"
+      peer_address = "127.0.0.1:#{port}"
+
+      assert_receive {[:redix, :connection],
+                      %{address: ^address, peer_address: ^peer_address, reconnection: false}}
+
+      assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
+      :gen_tcp.close(server_socket)
+
+      assert_receive {[:redix, :disconnection],
+                      %{address: ^address, peer_address: ^peer_address}},
+                     1000
+
+      assert_receive {[:redix, :connection],
+                      %{address: ^address, peer_address: ^peer_address, reconnection: true}},
+                     1000
+
+      assert {:ok, server_socket} = :gen_tcp.accept(listener, 1000)
+      stop_supervised(@client)
+      :gen_tcp.close(server_socket)
+    end
   end
 
   test "applies random selection to Sentinel discovery" do
