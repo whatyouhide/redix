@@ -75,10 +75,11 @@ defmodule Redix.StartOptions do
       Unix sockets and IP addresses need no DNS lookup. Connection and disconnection
       telemetry keep the original host and port in `:address` and report the connected
       IP address and port in `:peer_address` in both modes. Address selection uses
-      `:inet.getaddrs/2` for host names. The first of `:inet`, `:inet6`, or `tcp_module:`
-      in `:socket_opts` decides the DNS address family on OTP 24 to 28. On OTP 29 and
-      later, the last `tcp_module:` takes priority. With a custom TCP module, set
-      `:inet` or `:inet6` before it. *Available since v1.9.0*.
+      `:inet.getaddrs/2` for host names and follows the selected OTP backend's rules
+      for the DNS address family. If OTP selects a custom TCP module, Redix passes
+      the host name and timeout to that module in both modes. The module controls
+      address lookup, order, and retries; Redix does not shuffle its addresses.
+      *Available since v1.9.0*.
       """
     ],
     health_check_interval: [

@@ -83,14 +83,18 @@ defmodule Redix.Connector do
         selection,
         lookup \\ &:inet.getaddrs/2
       ) do
-    if selection in [:system, :random] and hostname?(host) do
+    family =
+      if selection in [:system, :random] and hostname?(host),
+        do: address_family(socket_opts)
+
+    if family in [:inet, :inet6] do
       deadline =
         if timeout == :infinity,
           do: :infinity,
           else: System.monotonic_time(:millisecond) + timeout
 
       with {:ok, addresses} <-
-             lookup_addresses(host, address_family(socket_opts), timeout, lookup) do
+             lookup_addresses(host, family, timeout, lookup) do
         address_count = length(addresses)
 
         addresses
@@ -126,39 +130,28 @@ defmodule Redix.Connector do
   defp select_addresses(addresses, :system), do: addresses
   defp select_addresses(addresses, :random), do: Enum.shuffle(addresses)
 
-  # Mirrors how gen_tcp picks inet_tcp or inet6_tcp on OTP 24 to 28: the first of
-  # :inet, :inet6, or tcp_module: wins, then the last bind address, then the inet_db
-  # default. OTP 29 lets the last tcp_module: override an earlier family atom.
+  # Use the same OTP selectors as gen_tcp for option order and runtime defaults.
+  # The socket backend converts family atoms to tcp_module options first.
+  # Leave custom modules in charge of their own address lookup and connection.
   defp address_family(socket_opts) do
-    tcp_module_overrides? = String.to_integer(System.otp_release()) >= 29
+    {backend, socket_opts} = :inet.gen_tcp_module(socket_opts)
 
-    family =
-      Enum.reduce(socket_opts, nil, fn
-        :inet, family ->
-          family || :inet
+    socket_opts =
+      if backend == :gen_tcp_socket do
+        Enum.map(socket_opts, fn
+          :inet -> {:tcp_module, :inet_tcp}
+          :inet6 -> {:tcp_module, :inet6_tcp}
+          :local -> {:tcp_module, :local_tcp}
+          option -> option
+        end)
+      else
+        socket_opts
+      end
 
-        :inet6, family ->
-          family || :inet6
-
-        {:tcp_module, :inet_tcp}, family ->
-          if tcp_module_overrides?, do: :inet, else: family || :inet
-
-        {:tcp_module, :inet6_tcp}, family ->
-          if tcp_module_overrides?, do: :inet6, else: family || :inet6
-
-        _other, family ->
-          family
-      end)
-
-    bind_address =
-      List.last(for {key, address} <- socket_opts, key in [:ip, :ifaddr], do: address)
-
-    cond do
-      family -> family
-      is_tuple(bind_address) and tuple_size(bind_address) == 8 -> :inet6
-      match?(%{family: :inet6}, bind_address) -> :inet6
-      List.keyfind(:inet.get_rc(), :tcp, 0) == {:tcp, :inet6_tcp} -> :inet6
-      true -> :inet
+    case :inet.tcp_module(socket_opts) do
+      {:inet_tcp, _opts} -> :inet
+      {:inet6_tcp, _opts} -> :inet6
+      {_custom_module, _opts} -> :custom
     end
   end
 

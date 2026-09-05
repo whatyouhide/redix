@@ -237,8 +237,7 @@ defmodule Redix.ConnectorAddressSelectionTest do
           {[:inet, ip: ipv6], :inet},
           {[:inet6, tcp_module: :inet_tcp], if(tcp_module_overrides?, do: :inet, else: :inet6)},
           {[{:tcp_module, :inet_tcp}, :inet6], :inet},
-          {[:inet, :inet6], :inet},
-          {[:inet6, tcp_module: CustomTCP], :inet6}
+          {[:inet, :inet6], :inet}
         ] do
       assert {:error, :nxdomain} =
                Connector.connect_socket(:gen_tcp, @host, 0, opts, 5000, :random, lookup)
