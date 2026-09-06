@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.0
+
+  * Add `Redix.Cluster.hash_slot/1`, which exposes the hashing algorithm used by `Redix.Cluster`.
+  * Add `:cluster` metadata field to connection-specific telemetry events (only if connections are part of a cluster).
+  * Support for resolving multiple peer addresses from an initial address. Redix now supports two strategies: `:system`, which tries resolved addresses in the order returned by the system resolver, or `:random`, which shuffles addresses every time. This comes in conjunction with a new `:connect_timeout_allocation` option which lets you control how long Redix attempts to connect to each address. This change should improve usage of Redix against some servers, such as AWS ElastiCache in serverless mode.
+
 ## v1.8.2
 
   * Improve the `Redix.Cluster` command routing fix from 1.8.1 so that it essentially takes more conditions into consideration, like nodes connections being "stuck" or in a *connecting* state.
