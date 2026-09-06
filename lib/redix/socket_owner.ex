@@ -42,7 +42,8 @@ defmodule Redix.SocketOwner do
   def handle_info(:connect, state) do
     with {:ok, socket, address} <- Connector.connect(state.opts, state.conn),
          :ok <- setopts(state, socket, active: :once) do
-      send(state.conn, {:connected, self(), socket, address})
+      peer_address = Connector.peer_address(state.transport, socket)
+      send(state.conn, {:connected, self(), socket, address, peer_address})
       {:noreply, %{state | socket: socket}}
     else
       {:error, reason} -> stop(reason, state)

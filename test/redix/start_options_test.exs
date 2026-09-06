@@ -10,6 +10,36 @@ defmodule Redix.StartOptionsTest do
       assert opts[:host] == ~c"foo.com"
       assert opts[:backoff_max] == 0
       assert opts[:sync_connect] == true
+      assert opts[:address_selection] == :system
+      assert opts[:connect_timeout_allocation] == :remaining
+    end
+
+    test "validates address selection" do
+      assert sanitize(address_selection: :system)[:address_selection] == :system
+      assert sanitize(address_selection: :random)[:address_selection] == :random
+
+      for selection <- [:first, :round_robin] do
+        assert_raise NimbleOptions.ValidationError,
+                     ~r/invalid value for :address_selection/,
+                     fn ->
+                       sanitize(address_selection: selection)
+                     end
+      end
+    end
+
+    test "validates timeout allocation independently of address selection" do
+      for selection <- [:system, :random], allocation <- [:remaining, :split] do
+        opts = sanitize(address_selection: selection, connect_timeout_allocation: allocation)
+        assert opts[:connect_timeout_allocation] == allocation
+      end
+
+      for allocation <- [:per_address, :equal, 1000] do
+        assert_raise NimbleOptions.ValidationError,
+                     ~r/invalid value for :connect_timeout_allocation/,
+                     fn ->
+                       sanitize(connect_timeout_allocation: allocation)
+                     end
+      end
     end
 
     test "raises on unknown options" do

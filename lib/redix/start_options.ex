@@ -60,6 +60,52 @@ defmodule Redix.StartOptions do
       connection timeout (in milliseconds) directly passed to the network layer.
       """
     ],
+    address_selection: [
+      type: {:in, [:system, :random]},
+      default: :system,
+      doc: """
+      controls how Redix selects an address when a host name resolves to **more than one IP
+      address**. The default (`:system`) keeps the resolver's address order.
+      `:random` shuffles the addresses on each connection attempt. The separate
+      `:connect_timeout_allocation` option controls the time allowed for each address.
+      Both options apply to Redis and Sentinel connections.
+
+      Unix sockets and IP addresses need no DNS lookup. Connection and disconnection
+      telemetry keep the original host and port in `:address` and report the connected
+      IP address and port in `:peer_address` in both modes. When Redix resolves addresses
+      for random order or split timeouts, it uses `:inet.getaddrs/2` for host names
+      and follows the selected OTP backend's rules for the DNS address family.
+      If OTP selects a custom TCP module, Redix passes
+      the host name and timeout to that module in both modes. The module controls
+      address lookup, order, and retries; Redix does not shuffle its addresses.
+      *Available since v1.9.0*.
+      """
+    ],
+    connect_timeout_allocation: [
+      type: {:in, [:remaining, :split]},
+      default: :remaining,
+      doc: """
+      controls the time allowed for each IP address during a connection attempt.
+      `:remaining` lets each address use all the time left. With the default
+      `address_selection: :system`, Redix passes the host name and full timeout
+      directly to OTP to preserve the existing connection behavior.
+
+      `:split` divides the time left by the number of addresses still to try.
+      Each address gets at least two seconds if that much time remains, but never
+      more than the time left. For example, five addresses with five seconds left
+      get about two seconds, two seconds, then one second if each attempt times out.
+      A one-second budget never becomes two seconds. This can leave some addresses
+      untried when the budget runs out.
+
+      DNS lookup and all address attempts share one timeout budget. A failed or
+      timed-out address leaves only the unused time for the next address; the budget
+      does not restart. With `timeout: :infinity`, each address has no time limit.
+      This option applies to both Redis and Sentinel connections. A Sentinel uses
+      its own `:timeout` as the budget. IP literals and Unix sockets need only one
+      attempt. Custom TCP modules keep control of their own timeouts and retries.
+      *Available since v1.9.0*.
+      """
+    ],
     health_check_interval: [
       type: :timeout,
       default: :infinity,
