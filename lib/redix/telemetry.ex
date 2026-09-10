@@ -152,19 +152,28 @@ defmodule Redix.Telemetry do
       *Available since 1.7.0.*
 
     * `[:redix, :cluster, :topology_change]` - executed every time the cluster
-      topology is successfully fetched, **whether or not it changed** (sorry,
-      confusing name). In steady state that is once per
-      `:topology_refresh_interval` per cluster, plus the reactive refreshes
-      triggered by redirections, so a counter on this event measures refreshes,
-      not changes. Handlers that want actual changes can compare `:nodes` or
-      `:node_info` with the values from the previous event. Measurements are
-      `:duration` (the time spent fetching `CLUSTER SLOTS`) and `:node_count`.
+      topology is successfully fetched, **whether or not it changed**. Generally
+      this is fired once per `:topology_refresh_interval`. It's also fired on
+      refreshes caused by redirections. Handlers can use the `:changed` metadata
+      field to count **changes** specifically (compared to uneventful
+      refreshes). Measurements are `:duration` (the time spent fetching and
+      applying the topology) and `:node_count`.
+
       Metadata are:
 
       * `:cluster` - the name of the cluster (the atom passed as `:name`).
-      * `:nodes` - the list of primary node addresses (as `"host:port"` strings).
+      * `:changed` - `true` on the first successful fetch, or when the set of
+        nodes, their roles, or the slot map differs from the last successful
+        fetch. DNS address changes and pool member restarts do not count as
+        topology changes. Replicas only count when `:read_from_replicas` is enabled.
+        *This field is present since v1.9.1*.
+      * `:nodes` - the list of node addresses (as `"host:port"` strings) for
+        every node the cluster connects to.
       * `:node_info` - a list of maps with `:id`, `:host`, `:port`, and `:role`
         (`:primary` or `:replica`) for every node the cluster connects to.
+
+      Node IDs keep the host returned by `CLUSTER SLOTS`, after `:address_mapper`
+      runs.
 
     * `[:redix, :cluster, :failed_topology_refresh]` - executed when the cluster
       manager fails to refresh the topology (no reachable node). Measurements

@@ -295,17 +295,10 @@ defmodule Redix.Cluster.FakeNodeTest do
       assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
     end
 
-    # Reproduces issue #340: a MOVED/ASK redirect can announce a node under a
-    # different address form than CLUSTER SLOTS does for that same node (IP vs
-    # hostname, typical of `cluster-preferred-endpoint-type` in managed/NAT'd
-    # deployments). Node identity used to be the raw "host:port" string, so the
-    # redirect's form never matched the Registry key CLUSTER SLOTS had already
-    # registered under: every redirect to that node opened a *second*,
-    # short-lived connection that the next topology refresh tore down as
-    # "unneeded" — a connect/teardown cycle on every redirect. Node identity is
-    # now canonicalized to the resolved IP, so a redirect to "localhost" and a
-    # CLUSTER SLOTS entry for "127.0.0.1" (the same loopback address) resolve to
-    # the same connection instead of each getting their own.
+    # Reproduces issue #340: a redirect can use a different address form from
+    # CLUSTER SLOTS. Here the topology contains an IP and ASK returns a hostname.
+    # The Manager resolves that hostname and caches it as an alias for the
+    # existing pool, so the redirect does not open a second connection.
     #
     # Uses ASK rather than MOVED so the assertion isn't racing the reactive
     # refresh a MOVED unconditionally triggers (which opens its own, unrelated
