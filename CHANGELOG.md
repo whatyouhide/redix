@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.1
+
+  * Keep `Redix.Cluster` node pools when DNS returns a different address or address order for the same hostname. Use all resolved IPv4 and IPv6 addresses to match redirects to known pools, with no DNS lookup in command routing. This results in significant less connection/reconnection churn for setups like AWS ElastiCache in serverless mode.
+  * Add `:changed` metadata to `[:redix, :cluster, :topology_change]`. The event still runs after every successful refresh.
+  * Node IDs in cluster telemetry now keep hostnames from `CLUSTER SLOTS` after address mapping, instead of resolved IPs.
+
 ## v1.9.0
 
   * Add `Redix.Cluster.hash_slot/1`, which exposes the hashing algorithm used by `Redix.Cluster`.
