@@ -23,22 +23,21 @@ defmodule Redix.Cluster.Manager do
     :refresh_interval,
     :primary_pool_size,
     :replica_pool_size,
+    # Internal DNS hook for deterministic tests. Only the Manager calls it.
+    :inet_lookup_fun,
     # Tracks the exponential backoff between initial topology fetch attempts
     # while in the :disconnected state (async connect).
     :backoff_current,
     read_from_replicas: false,
+    topology_fetched?: false,
     # Optional (host, port -> {host, port}) function applied to announced addresses.
     address_mapper: nil,
     # Maps a monitor ref to `{node_id, index, role}` so a crashed pool member is
     # restarted with the same index and role (and therefore the same READONLY behavior).
     monitors: %{},
-    # Maps a node_id (canonical, resolved-IP form) to the literal host it was
-    # actually reached at (a hostname or an IP, whichever the server gave us).
-    # Reconnects) and refresh seeding must dial this exact host again rather
-    # than the resolved IP: with TLS + hostname verification, dialing the IP
-    # would fail the handshake even though the node is perfectly reachable.
-    # Dropped when a node is torn down for good.
-    node_addresses: %{}
+    # Published as Registry metadata so redirect lookups need no DNS or Manager call.
+    # :ambiguous marks IPs shared by several nodes; redirects must not reassign them.
+    node_aliases: %{}
   ]
 
   ## Public API
@@ -134,7 +133,23 @@ defmodule Redix.Cluster.Manager do
           {:ok, pid()} | :error
   def get_connection_by_node(registry, {host, port}, caller) do
     guard_missing_table(
-      fn -> lookup_node_connection(registry, canonical_node_id(host, port), caller) end,
+      fn ->
+        node_id = canonical_node_id(host, port)
+
+        node_id =
+          case Registry.meta(registry, :node_aliases) do
+            {:ok, aliases} ->
+              case Map.get(aliases, node_id) do
+                id when is_binary(id) -> id
+                _unknown_or_ambiguous -> node_id
+              end
+
+            :error ->
+              node_id
+          end
+
+        lookup_node_connection(registry, node_id, caller)
+      end,
       :error
     )
   end
@@ -269,7 +284,8 @@ defmodule Redix.Cluster.Manager do
     # slow refresh against a partially-down cluster blocks every on-demand connect
     # (and thus every MOVED/ASK redirect) for the whole refresh (issue #327). On
     # timeout the `:exit` is caught and degrades to the documented error path.
-    :gen_statem.call(manager, {:connect_to_node, host, port, caller}, timeout)
+    deadline = deadline_from_timeout(timeout)
+    :gen_statem.call(manager, {:connect_to_node, host, port, caller, deadline}, timeout)
   catch
     :exit, reason -> {:error, reason}
   end
@@ -327,6 +343,7 @@ defmodule Redix.Cluster.Manager do
       primary_pool_size: primary_pool_size,
       replica_pool_size: replica_pool_size,
       read_from_replicas: read_from_replicas,
+      inet_lookup_fun: Keyword.get(opts, :inet_lookup_fun, &:inet.getaddrs/2),
       address_mapper: address_mapper
     }
 
@@ -461,8 +478,8 @@ defmodule Redix.Cluster.Manager do
     {:keep_state, handle_down(data, ref, reason)}
   end
 
-  defp handle_common_event({:call, from}, {:connect_to_node, host, port, caller}, data) do
-    handle_connect_to_node(from, host, port, caller, data)
+  defp handle_common_event({:call, from}, {:connect_to_node, host, port, caller, deadline}, data) do
+    handle_connect_to_node(from, host, port, caller, deadline, data)
   end
 
   defp handle_common_event({:call, from}, :await_topology_discovery, _data) do
@@ -496,8 +513,8 @@ defmodule Redix.Cluster.Manager do
     {backoff_current, %{data | backoff_current: backoff_current}}
   end
 
-  defp handle_connect_to_node(from, host, port, caller, data) do
-    node_id = canonical_node_id(host, port)
+  defp handle_connect_to_node(from, host, port, caller, deadline, data) do
+    {node_id, data} = resolve_redirect_node(data, host, port, deadline)
 
     case lookup_node_connection(data.registry, node_id, caller) do
       {:ok, pid} ->
@@ -506,11 +523,13 @@ defmodule Redix.Cluster.Manager do
         # still be registered/connected as a readonly replica), so a write can bounce
         # back MOVED — but that's bounded by @max_redirections and self-heals once the
         # MOVED-triggered refresh reconciles roles in ensure_connections/2.
-        {:keep_state_and_data, [{:reply, from, {:ok, pid}}]}
+        {:keep_state, data, [{:reply, from, {:ok, pid}}]}
 
       :error ->
         # MOVED is authoritative and always points at the slot's primary, so an
         # on-demand pool is registered as primary connections.
+        # The resolved ID keeps the dial hostname needed for TLS checks.
+        {:ok, host, port} = split_host_port(node_id)
         {first_result, data} = start_and_monitor_node_pool(data, node_id, host, port, :primary)
         result = lookup_node_connection(data.registry, node_id, caller, first_result)
         {:keep_state, data, [{:reply, from, result}]}
@@ -551,8 +570,7 @@ defmodule Redix.Cluster.Manager do
   # to its own :disconnected state and reconnects) rather than stopping, so this
   # path can't degenerate into a fast restart loop.
   defp handle_node_down(data, node_id, index, role, reason) do
-    {:ok, _canonical_host, port} = split_host_port(node_id)
-    host = Map.fetch!(data.node_addresses, node_id)
+    {:ok, host, port} = split_host_port(node_id)
 
     :telemetry.execute([:redix, :cluster, :node_connection_restarted], %{}, %{
       cluster: data.cluster_name,
@@ -682,8 +700,13 @@ defmodule Redix.Cluster.Manager do
         # Map announced addresses once here, so the slot table and the node pools
         # only ever see mapped addresses.
         slots_data = map_slots_addresses(data.address_mapper, slots_data)
-        update_slot_map(data, slots_data)
-        data = ensure_connections(data, slots_data)
+        nodes = nodes_to_connect(data, slots_data)
+
+        slots_changed? = update_slot_map(data, slots_data)
+        changed? = slots_changed? or not data.topology_fetched?
+        data = refresh_node_aliases(data, nodes, deadline)
+        data = ensure_connections(data, nodes)
+        data = %{data | topology_fetched?: true}
 
         # Marks that the initial topology fetch attempt has completed (the
         # :disconnected state sets the same marker on failure). Callers check this
@@ -696,7 +719,7 @@ defmodule Redix.Cluster.Manager do
         :ets.insert(data.slot_table, {:discovery_attempted, true})
 
         nodes =
-          for {node_id, host, port, role} <- nodes_to_connect(data, slots_data),
+          for {node_id, host, port, role} <- nodes,
               do: %{id: node_id, host: host, port: port, role: role}
 
         :telemetry.execute(
@@ -704,6 +727,7 @@ defmodule Redix.Cluster.Manager do
           %{duration: System.monotonic_time() - start_time, node_count: length(nodes)},
           %{
             cluster: data.cluster_name,
+            changed: changed?,
             nodes: Enum.map(nodes, & &1.id),
             node_info: nodes
           }
@@ -732,8 +756,8 @@ defmodule Redix.Cluster.Manager do
     |> Registry.select([{{{:"$1", :_}, :_, {:_, :_}}, [], [:"$1"]}])
     |> Enum.uniq()
     |> Enum.map(fn node_id ->
-      {:ok, _canonical_host, port} = split_host_port(node_id)
-      {Map.fetch!(data.node_addresses, node_id), port}
+      {:ok, host, port} = split_host_port(node_id)
+      {host, port}
     end)
   end
 
@@ -792,28 +816,142 @@ defmodule Redix.Cluster.Manager do
     end
   end
 
-  # Builds the node identity used as the Registry key/slot-table entry: `host`
-  # resolved to its underlying IP, so the same physical node reached under two
-  # different address forms (a hostname from CLUSTER SLOTS vs the raw IP a
-  # MOVED/ASK redirect gives it, or vice versa, common with
-  # `cluster-preferred-endpoint-type` in managed/NAT'd deployments) converges on
-  # one Registry entry instead of each form getting its own connection that the
-  # next refresh tears down as "not needed" (because it was computed from the
-  # *other* form). `host` itself is never used to dial the node. Resolution
-  # failure falls back to the literal host.
+  # DNS must not decide identity. Keep the server's host (after address mapping),
+  # and normalize only literal IPs so equivalent IPv6 forms keep the same key.
   defp canonical_node_id(host, port) do
     host = to_charlist(host)
 
     canonical_host =
-      with {:error, :einval} <- :inet.parse_address(host),
-           {:error, _reason} <- :inet.getaddr(host, :inet),
-           {:error, _reason} <- :inet.getaddr(host, :inet6) do
-        host
-      else
+      case :inet.parse_address(host) do
         {:ok, ip} -> :inet.ntoa(ip)
+        {:error, _reason} -> host
       end
 
     "#{canonical_host}:#{port}"
+  end
+
+  defp resolve_host(host, inet_lookup_fun, deadline) do
+    host = to_charlist(host)
+
+    case :inet.parse_address(host) do
+      {:ok, ip} ->
+        [ip]
+
+      {:error, _reason} ->
+        Enum.flat_map([:inet, :inet6], fn family ->
+          case lookup_addresses(host, family, inet_lookup_fun, deadline) do
+            {:ok, addresses} -> addresses
+            {:error, _reason} -> []
+          end
+        end)
+    end
+  end
+
+  defp lookup_addresses(host, family, inet_lookup_fun, :infinity) do
+    inet_lookup_fun.(host, family)
+  end
+
+  defp lookup_addresses(host, family, inet_lookup_fun, deadline) do
+    remaining = deadline - System.monotonic_time(:millisecond)
+
+    if remaining <= 0 do
+      {:error, :timeout}
+    else
+      # Use the same timed Task pattern as Connector: getaddrs/2 has no timeout.
+      # All hosts and families share the refresh deadline. Stop and drain late tasks.
+      task = Task.async(fn -> inet_lookup_fun.(host, family) end)
+
+      case Task.yield(task, remaining) || Task.shutdown(task, :brutal_kill) do
+        {:ok, result} -> result
+        nil -> {:error, :timeout}
+      end
+    end
+  end
+
+  defp refresh_node_aliases(data, nodes, deadline) do
+    # Resolve each host once per family, even if it owns many slot ranges or ports.
+    addresses =
+      nodes
+      |> MapSet.new(fn {_id, host, _port, _role} -> host end)
+      |> Map.new(fn host -> {host, resolve_host(host, data.inet_lookup_fun, deadline)} end)
+
+    aliases =
+      for {node_id, host, port, _role} <- nodes,
+          ip <- Map.fetch!(addresses, host) do
+        {canonical_node_id(:inet.ntoa(ip), port), node_id}
+      end
+
+    aliases =
+      aliases
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+      |> Map.new(fn {address, ids} ->
+        # Keep shared IPs marked so a later redirect cannot claim them.
+        case Enum.uniq(ids) do
+          [node_id] -> {address, node_id}
+          _ambiguous -> {address, :ambiguous}
+        end
+      end)
+
+    # An explicit topology address takes precedence over a DNS alias.
+    aliases =
+      Enum.reduce(nodes, aliases, fn {node_id, _host, _port, _role}, acc ->
+        Map.put(acc, node_id, node_id)
+      end)
+
+    put_node_aliases(data, aliases)
+  end
+
+  defp put_node_aliases(data, aliases) do
+    # Replace the whole map at once. Removed DNS addresses and nodes cannot leave
+    # stale aliases, and readers never see a partly written map.
+    :ok = Registry.put_meta(data.registry, :node_aliases, aliases)
+    %{data | node_aliases: aliases}
+  end
+
+  defp resolve_redirect_node(data, host, port, deadline) do
+    address = canonical_node_id(host, port)
+
+    case Map.fetch(data.node_aliases, address) do
+      {:ok, :ambiguous} ->
+        {address, data}
+
+      {:ok, node_id} ->
+        {node_id, data}
+
+      :error ->
+        # Discover an unknown redirect hostname in the Manager, then cache it.
+        # This also handles IP topology entries with a hostname in MOVED/ASK.
+        addresses =
+          for ip <- resolve_host(host, data.inet_lookup_fun, deadline),
+              do: canonical_node_id(:inet.ntoa(ip), port)
+
+        known_ids =
+          addresses
+          |> Enum.flat_map(fn ip ->
+            case Map.fetch(data.node_aliases, ip) do
+              {:ok, node_id} -> [node_id]
+              :error -> []
+            end
+          end)
+          |> Enum.uniq()
+
+        node_id =
+          case known_ids do
+            [node_id] when is_binary(node_id) -> node_id
+            _none_or_ambiguous -> address
+          end
+
+        aliases = Map.put(data.node_aliases, address, node_id)
+
+        aliases =
+          if known_ids == [] do
+            Map.merge(aliases, Map.new(addresses, &{&1, node_id}))
+          else
+            aliases
+          end
+
+        {node_id, put_node_aliases(data, aliases)}
+    end
   end
 
   # A finite deadline (System.monotonic_time/1 in ms) past which no *further* node is
@@ -822,11 +960,11 @@ defmodule Redix.Cluster.Manager do
   # partly-down seed list takes). `nil` conn_opts[:timeout] can't happen —
   # StartOptions.sanitize/2 always fills it in — but :infinity can, and means "no bound".
   defp fetch_deadline(%__MODULE__{conn_opts: conn_opts}) do
-    case Keyword.fetch!(conn_opts, :timeout) do
-      :infinity -> :infinity
-      timeout when is_integer(timeout) -> System.monotonic_time(:millisecond) + timeout
-    end
+    deadline_from_timeout(Keyword.fetch!(conn_opts, :timeout))
   end
+
+  defp deadline_from_timeout(:infinity), do: :infinity
+  defp deadline_from_timeout(timeout), do: System.monotonic_time(:millisecond) + timeout
 
   defp past_deadline?(:infinity), do: false
   defp past_deadline?(deadline), do: System.monotonic_time(:millisecond) >= deadline
@@ -947,24 +1085,31 @@ defmodule Redix.Cluster.Manager do
   # range — i.e. became unassigned — are deleted so routing can't point at a node
   # that no longer owns them (see issue #314).
   defp update_slot_map(data, slots_data) do
-    ranges =
-      for slot_range <- slots_data do
+    {ranges, changed?} =
+      Enum.map_reduce(slots_data, false, fn slot_range, changed? ->
         [start_slot, end_slot, [host, port | _] | replica_entries] = slot_range
         primary_id = canonical_node_id(host, port)
 
         replica_ids =
           if data.read_from_replicas do
-            for [r_host, r_port | _] <- replica_entries, do: canonical_node_id(r_host, r_port)
+            replica_entries
+            |> Enum.map(fn [host, port | _] -> canonical_node_id(host, port) end)
+            |> Enum.uniq()
+            |> Enum.sort()
           else
             []
           end
 
-        Enum.each(start_slot..end_slot, fn slot ->
-          :ets.insert(data.slot_table, {slot, primary_id, replica_ids})
-        end)
+        changed? =
+          Enum.reduce(start_slot..end_slot, changed?, fn slot, changed? ->
+            entry = {slot, primary_id, replica_ids}
+            changed? = changed? or :ets.lookup(data.slot_table, slot) != [entry]
+            :ets.insert(data.slot_table, entry)
+            changed?
+          end)
 
-        {start_slot, end_slot}
-      end
+        {{start_slot, end_slot}, changed?}
+      end)
 
     # CLUSTER SLOTS ranges are disjoint, so summing their widths is the covered-slot
     # count. When every slot is covered (the steady state of a healthy cluster) no
@@ -978,28 +1123,28 @@ defmodule Redix.Cluster.Manager do
         acc + (end_slot - start_slot + 1)
       end)
 
-    if covered_count < @hash_slots do
-      prune_uncovered_slots(data.slot_table, ranges)
-    end
-
-    :ok
+    pruned? = covered_count < @hash_slots and prune_uncovered_slots(data.slot_table, ranges)
+    changed? or pruned?
   end
 
   defp prune_uncovered_slots(slot_table, ranges) do
     existing_slots = :ets.select(slot_table, [{{:"$1", :_, :_}, [], [:"$1"]}])
 
-    for slot <- existing_slots, not slot_covered?(slot, ranges) do
-      :ets.delete(slot_table, slot)
-    end
+    Enum.reduce(existing_slots, false, fn slot, pruned? ->
+      if slot_covered?(slot, ranges) do
+        pruned?
+      else
+        :ets.delete(slot_table, slot)
+        true
+      end
+    end)
   end
 
   defp slot_covered?(slot, ranges) do
     Enum.any?(ranges, fn {start_slot, end_slot} -> slot >= start_slot and slot <= end_slot end)
   end
 
-  defp ensure_connections(data, slots_data) do
-    needed_nodes = nodes_to_connect(data, slots_data)
-
+  defp ensure_connections(data, needed_nodes) do
     registered_nodes =
       data.registry
       |> Registry.select([
@@ -1030,7 +1175,6 @@ defmodule Redix.Cluster.Manager do
         # doesn't land in `handle_down/3` and immediately resurrect a node that
         # just left the cluster (see issue #305).
         acc = demonitor_node(acc, node_id)
-        acc = %{acc | node_addresses: Map.delete(acc.node_addresses, node_id)}
 
         Enum.each(members, fn {_index, pid, _role} ->
           if Process.alive?(pid) do
@@ -1151,7 +1295,6 @@ defmodule Redix.Cluster.Manager do
          ) do
       {:ok, pid} ->
         ref = Process.monitor(pid)
-        data = %{data | node_addresses: Map.put(data.node_addresses, node_id, host)}
         {{:ok, pid}, %{data | monitors: Map.put(data.monitors, ref, {node_id, index, role})}}
 
       # A concurrent monitor restart (or the connection's own retry) may have
@@ -1159,8 +1302,6 @@ defmodule Redix.Cluster.Manager do
       # monitoring the live pid, otherwise the Manager would silently stop
       # tracking the node for restart (see issue #305).
       {:error, {:already_started, pid}} ->
-        data = %{data | node_addresses: Map.put(data.node_addresses, node_id, host)}
-
         if monitoring_member?(data, node_id, index) do
           {{:ok, pid}, data}
         else
