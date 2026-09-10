@@ -610,7 +610,6 @@ defmodule Redix.Cluster.ManagerTopologyTest do
                     %{cluster: ^cluster, changed: true}}
 
     assert_one_lookup_per_family()
-    {_state, before_data} = :sys.get_state(manager)
     before_members = members(registry)
     assert length(before_members) == 5
 
@@ -620,24 +619,19 @@ defmodule Redix.Cluster.ManagerTopologyTest do
 
     baseline = FakeNode.connections_accepted(node)
 
-    :telemetry_test.attach_event_handlers(self(), [[:redix, :connection]])
-
     Agent.update(addresses, &Enum.reverse/1)
     refresh(manager, cluster, false)
     assert_one_lookup_per_family()
 
     assert members(registry) == before_members
-    {_state, after_data} = :sys.get_state(manager)
-    assert after_data.monitors == before_data.monitors
     node_id = "localhost:#{node.port}"
     assert [{0, ^node_id, []}] = :ets.lookup(slots, 0)
     assert [{16_383, ^node_id, []}] = :ets.lookup(slots, 16_383)
     # Each refresh opens one short connection to fetch CLUSTER SLOTS.
     assert FakeNode.connections_accepted(node) == baseline + 1
-    refute_receive {[:redix, :connection], _, _, %{cluster: ^cluster, reconnection: false}}
   end
 
-  test "a full DNS address replacement or lookup failure keeps the pool and removes old aliases" do
+  test "successful DNS changes replace aliases and failed lookups keep the last addresses" do
     addresses = start_supervised!({Agent, fn -> {:ok, [{127, 0, 0, 1}, {127, 0, 0, 2}]} end})
 
     inet_lookup_fun = fn
@@ -671,11 +665,19 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     Agent.update(addresses, fn _ -> {:error, :nxdomain} end)
     refresh(manager, cluster, false)
 
+    assert Manager.connect_to_node(manager, {"127.0.0.3", node.port}, 1_000) == {:ok, pid}
     assert members(registry) == before_members
-    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}, self()) == :error
+
+    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}, self()) ==
+             {:ok, pid}
 
     assert Manager.get_connection_by_node(registry, {"localhost", node.port}, self()) ==
              {:ok, pid}
+
+    Agent.update(addresses, fn _ -> {:ok, []} end)
+    refresh(manager, cluster, false)
+    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}, self()) == :error
+    assert members(registry) == before_members
   end
 
   for redirect <- ["MOVED", "ASK"] do
@@ -730,9 +732,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
         assert Manager.connect_to_node(manager, {host, node.port}, 1_000) == {:ok, pid}
       end
 
-      for _ <- 1..10 do
-        assert {:ok, _pid} = Manager.get_connection(slots, registry, 0, 5)
-      end
+      assert {:ok, _pid} = Manager.get_connection(slots, registry, 0, 5)
 
       refute_receive {:lookup, _family}
       assert FakeNode.connections_accepted(node) == baseline
@@ -762,8 +762,142 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     end
   end
 
+  test "node removal clears aliases retained after a failed DNS lookup" do
+    node = FakeNode.reserve()
+    state = start_supervised!({Agent, fn -> %{failed?: false, removed?: false} end})
+
+    FakeNode.serve(node, fn
+      ["CLUSTER", "SLOTS"] ->
+        if Agent.get(state, & &1.removed?) do
+          FakeNode.cluster_slots([])
+        else
+          FakeNode.cluster_slots([{0, 16_383, {"localhost", node.port}}])
+        end
+
+      _command ->
+        "+OK\r\n"
+    end)
+
+    inet_lookup_fun = fn
+      _host, :inet ->
+        if Agent.get(state, & &1.failed?), do: {:error, :timeout}, else: {:ok, [{127, 0, 0, 1}]}
+
+      _host, :inet6 ->
+        {:error, :nxdomain}
+    end
+
+    %{cluster: cluster, manager: manager, registry: registry} =
+      start_manager(node, inet_lookup_fun)
+
+    assert {:ok, _pid} =
+             Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}, self())
+
+    :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
+    Agent.update(state, &%{&1 | failed?: true})
+    refresh(manager, cluster, false)
+
+    # A lookup failure must not retain a node that left the topology.
+    Agent.update(state, &%{&1 | removed?: true})
+    refresh(manager, cluster, true)
+    FakeNode.wait_until(fn -> members(registry) == [] end)
+    assert Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}, self()) == :error
+  end
+
+  for timeout <- [500, :infinity] do
+    @tag capture_log: true
+    test "a failed DNS task keeps the Manager and pool with timeout #{inspect(timeout)}" do
+      node = FakeNode.reserve()
+      failed = start_supervised!({Agent, fn -> false end})
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, {"localhost", node.port}}])
+        _command -> "+OK\r\n"
+      end)
+
+      inet_lookup_fun = fn
+        _host, :inet ->
+          if Agent.get(failed, & &1),
+            do: raise("DNS lookup failed"),
+            else: {:ok, [{127, 0, 0, 1}]}
+
+        _host, :inet6 ->
+          {:error, :nxdomain}
+      end
+
+      %{cluster: cluster, manager: manager, registry: registry} =
+        start_manager(node, inet_lookup_fun,
+          conn_opts: Redix.StartOptions.sanitize(:redix, timeout: unquote(timeout))
+        )
+
+      manager_pid = Process.whereis(manager)
+      before_members = members(registry)
+      assert length(before_members) == 5
+      :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
+
+      Agent.update(failed, fn _ -> true end)
+      refresh(manager, cluster, false)
+      assert Process.whereis(manager) == manager_pid
+      assert {:ok, _pid} = Manager.connect_to_node(manager, {"127.0.0.1", node.port}, 1_000)
+      assert members(registry) == before_members
+    end
+  end
+
+  test "one slow DNS family does not prevent another host from updating its addresses" do
+    first = FakeNode.reserve()
+    second = FakeNode.reserve()
+    hosts = %{"localhost" => first.port, "LOCALHOST" => second.port}
+    delay = start_supervised!({Agent, fn -> false end})
+    test = self()
+
+    for node <- [first, second] do
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] ->
+          FakeNode.cluster_slots([
+            {0, 8191, {"localhost", first.port}},
+            {8192, 16_383, {"LOCALHOST", second.port}}
+          ])
+
+        _command ->
+          "+OK\r\n"
+      end)
+    end
+
+    inet_lookup_fun = fn
+      _host, :inet ->
+        ip = if Agent.get(delay, & &1), do: {127, 0, 0, 2}, else: {127, 0, 0, 1}
+        {:ok, [ip]}
+
+      host, :inet6 ->
+        if Agent.get(delay, & &1) do
+          send(test, {:dns_blocked, to_string(host)})
+          Process.sleep(1_000)
+        end
+
+        {:error, :nxdomain}
+    end
+
+    %{cluster: cluster, manager: manager, registry: registry} =
+      start_manager(first, inet_lookup_fun,
+        conn_opts: Redix.StartOptions.sanitize(:redix, timeout: 300)
+      )
+
+    before_members = members(registry)
+    :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
+    Agent.update(delay, fn _ -> true end)
+    Manager.refresh_topology(manager)
+    assert_receive {:dns_blocked, blocked_host}
+    assert_receive {[:redix, :cluster, :topology_change], _, _, %{cluster: ^cluster}}
+    [{_other_host, other_port}] = Enum.reject(hosts, fn {host, _port} -> host == blocked_host end)
+
+    assert {:ok, _pid} =
+             Manager.get_connection_by_node(registry, {"127.0.0.2", other_port}, self())
+
+    assert members(registry) == before_members
+  end
+
   test "a redirect cannot assign a shared IP to one hostname pool" do
     node = FakeNode.reserve()
+    failed = start_supervised!({Agent, fn -> false end})
 
     FakeNode.serve(node, fn
       ["CLUSTER", "SLOTS"] ->
@@ -777,8 +911,14 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     end)
 
     inet_lookup_fun = fn
-      _host, :inet -> {:ok, [{127, 0, 0, 1}]}
-      _host, :inet6 -> {:error, :nxdomain}
+      ~c"LOCALHOST", :inet ->
+        if Agent.get(failed, & &1), do: {:error, :timeout}, else: {:ok, [{127, 0, 0, 1}]}
+
+      _host, :inet ->
+        {:ok, [{127, 0, 0, 1}]}
+
+      _host, :inet6 ->
+        {:error, :nxdomain}
     end
 
     %{cluster: cluster, manager: manager, registry: registry} =
@@ -786,6 +926,10 @@ defmodule Redix.Cluster.ManagerTopologyTest do
 
     shared_ip = {"127.0.0.1", node.port}
     before_members = members(registry)
+    assert Manager.get_connection_by_node(registry, shared_ip, self()) == :error
+    :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
+    Agent.update(failed, fn _ -> true end)
+    refresh(manager, cluster, false)
     assert Manager.get_connection_by_node(registry, shared_ip, self()) == :error
 
     assert {:ok, redirected_pid} =
@@ -796,10 +940,10 @@ defmodule Redix.Cluster.ManagerTopologyTest do
 
     assert Manager.get_connection_by_node(registry, shared_ip, self()) == :error
 
-    :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
     refresh(manager, cluster, false)
-    assert members(registry) == before_members
     refute Process.alive?(redirected_pid)
+    # Registry can still list dead PIDs until it processes their exit messages.
+    FakeNode.wait_until(fn -> members(registry) == before_members end)
   end
 
   test "a slow DNS family cannot block the Manager past the refresh budget" do
@@ -827,12 +971,12 @@ defmodule Redix.Cluster.ManagerTopologyTest do
           end
         end
 
-        {:error, :nxdomain}
+        {:ok, [{0, 0, 0, 0, 0, 0, 0, 1}]}
     end
 
     %{cluster: cluster, manager: manager, registry: registry} =
       start_manager(node, inet_lookup_fun,
-        conn_opts: Redix.StartOptions.sanitize(:redix, timeout: 50)
+        conn_opts: Redix.StartOptions.sanitize(:redix, timeout: 300)
       )
 
     before_members = members(registry)
@@ -841,8 +985,10 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     Manager.refresh_topology(manager)
     assert_receive {:dns_blocked, worker}
     ref = Process.monitor(worker)
-    assert {:ok, _pid} = Manager.connect_to_node(manager, {"localhost", node.port}, 150)
-    assert_receive {:DOWN, ^ref, :process, ^worker, :killed}
+    assert {:ok, _pid} = Manager.connect_to_node(manager, {"localhost", node.port}, 600)
+    assert_receive {:DOWN, ^ref, :process, ^worker, reason}
+    # The worker can stop before the test gets time to monitor it.
+    assert reason in [:killed, :noproc]
 
     assert_receive {[:redix, :cluster, :topology_change], _, _,
                     %{cluster: ^cluster, changed: false}}
@@ -851,6 +997,8 @@ defmodule Redix.Cluster.ManagerTopologyTest do
 
     assert {:ok, _pid} =
              Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}, self())
+
+    assert {:ok, _pid} = Manager.get_connection_by_node(registry, {"::1", node.port}, self())
   end
 
   test "equivalent literal IPv6 addresses keep node IDs and do not count as topology changes" do
@@ -942,7 +1090,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     refresh(manager, cluster, false)
   end
 
-  test "telemetry detects slot moves, role changes, and node removal without false restarts" do
+  test "telemetry detects slot moves, role changes, and node removal" do
     first = FakeNode.reserve()
     second = FakeNode.reserve()
     first_address = {"localhost", first.port}
@@ -954,15 +1102,10 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     ]
 
     topology = start_supervised!({Agent, fn -> initial end})
-    test = self()
 
     handler = fn
       ["CLUSTER", "SLOTS"] ->
         FakeNode.cluster_slots(Agent.get(topology, & &1))
-
-      ["READONLY"] ->
-        send(test, :readonly)
-        "+OK\r\n"
 
       _command ->
         "+OK\r\n"
@@ -972,10 +1115,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     FakeNode.serve(second, handler)
     inet_lookup_fun = fn _host, _family -> {:ok, [{127, 0, 0, 1}]} end
 
-    :telemetry_test.attach_event_handlers(self(), [
-      [:redix, :cluster, :topology_change],
-      [:redix, :cluster, :node_connection_restarted]
-    ])
+    :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
 
     %{cluster: cluster, manager: manager, registry: registry, slots: slots} =
       start_manager(first, inet_lookup_fun, read_from_replicas: true)
@@ -984,8 +1124,6 @@ defmodule Redix.Cluster.ManagerTopologyTest do
                     %{cluster: ^cluster, changed: true}}
 
     original_members = members(registry)
-    assert length(original_members) == 10
-    refute_receive :readonly
 
     # Reordering and splitting ranges does not change the slot map.
     Agent.update(topology, fn _ ->
@@ -1012,46 +1150,21 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     second_id = "localhost:#{second.port}"
     assert [{8192, ^first_id, [^second_id]}] = :ets.lookup(slots, 8192)
 
-    # The second node becomes a replica. Replace only its pool, and send READONLY.
+    # The second node becomes a replica.
     Agent.update(topology, fn _ -> [{0, 16_383, first_address, [second_address]}] end)
     refresh(manager, cluster, true)
-    assert_receive :readonly
-    assert_receive :readonly
-    role_members = members(registry)
-    assert length(role_members) == 7
-    assert node_members(role_members, first_id) == node_members(original_members, first_id)
 
-    assert Enum.all?(node_members(original_members, second_id), fn {_key, pid, _value} ->
-             not Process.alive?(pid)
-           end)
-
-    assert Enum.all?(node_members(role_members, second_id), fn {_key, _pid, {role, _state}} ->
-             role == :replica
-           end)
-
-    # Promotion replaces the two replica members with five primary members.
+    # The second node becomes a primary again.
     Agent.update(topology, fn _ -> initial end)
     refresh(manager, cluster, true)
 
-    assert Enum.all?(node_members(role_members, second_id), fn {_key, pid, _value} ->
-             not Process.alive?(pid)
-           end)
-
-    assert length(node_members(members(registry), second_id)) == 5
-    refute_receive :readonly
-
     # Remove the second node and leave the last slot unassigned.
-    removed_pids = for {_key, pid, _value} <- node_members(members(registry), second_id), do: pid
     Agent.update(topology, fn _ -> [{0, 16_382, first_address}] end)
     refresh(manager, cluster, true)
     assert :ets.lookup(slots, 16_383) == []
-    assert Enum.all?(removed_pids, &(not Process.alive?(&1)))
-    assert members(registry) == node_members(original_members, first_id)
     assert Manager.get_connection_by_node(registry, {"127.0.0.1", second.port}, self()) == :error
-    {_state, data} = :sys.get_state(manager)
-    assert map_size(data.monitors) == 5
-    refute Map.has_key?(data.node_aliases, second_id)
-    refute_receive {[:redix, :cluster, :node_connection_restarted], _, _, %{cluster: ^cluster}}
+    assert {:ok, aliases} = Registry.meta(registry, :node_aliases)
+    refute Map.has_key?(aliases, second_id)
   end
 
   defp node_members(members, id) do

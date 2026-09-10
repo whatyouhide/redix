@@ -37,7 +37,9 @@ defmodule Redix.Cluster.Manager do
     monitors: %{},
     # Published as Registry metadata so redirect lookups need no DNS or Manager call.
     # :ambiguous marks IPs shared by several nodes; redirects must not reassign them.
-    node_aliases: %{}
+    node_aliases: %{},
+    # Last successful DNS answers by {host, family}. Failed lookups keep these.
+    resolved_addresses: %{}
   ]
 
   ## Public API
@@ -863,6 +865,7 @@ defmodule Redix.Cluster.Manager do
 
       case Task.yield(task, remaining) || Task.shutdown(task, :brutal_kill) do
         {:ok, result} -> result
+        {:exit, reason} -> {:error, reason}
         nil -> {:error, :timeout}
       end
     end
@@ -870,10 +873,43 @@ defmodule Redix.Cluster.Manager do
 
   defp refresh_node_aliases(data, nodes, deadline) do
     # Resolve each host once per family, even if it owns many slot ranges or ports.
-    addresses =
+    {addresses, lookups} =
       nodes
       |> MapSet.new(fn {_id, host, _port, _role} -> host end)
-      |> Map.new(fn host -> {host, resolve_host(host, data.inet_lookup_fun, deadline)} end)
+      |> Enum.reduce({%{}, []}, fn host, {addresses, lookups} ->
+        case :inet.parse_address(to_charlist(host)) do
+          {:ok, ip} -> {Map.put(addresses, host, [ip]), lookups}
+          {:error, _reason} -> {addresses, [{host, :inet}, {host, :inet6} | lookups]}
+        end
+      end)
+
+    inet_lookup_fun = data.inet_lookup_fun
+    previous_addresses = Map.new(lookups, &{&1, Map.get(data.resolved_addresses, &1, [])})
+
+    # A slow family must not hold up every other host. Each call uses the same
+    # deadline, including calls that wait for a worker. Only current hosts enter
+    # this map, so nodes that left the topology cannot retain cached addresses.
+    resolved_addresses =
+      Task.Supervisor.async_stream_nolink(
+        :"#{data.cluster_name}_task_supervisor",
+        lookups,
+        fn {host, family} = key ->
+          {key, lookup_addresses(to_charlist(host), family, inet_lookup_fun, deadline)}
+        end,
+        max_concurrency: 8,
+        ordered: false,
+        timeout: :infinity
+      )
+      |> Enum.reduce(previous_addresses, fn
+        {:ok, {key, {:ok, ips}}}, acc -> Map.put(acc, key, ips)
+        {:ok, {_key, {:error, _reason}}}, acc -> acc
+        {:exit, _reason}, acc -> acc
+      end)
+
+    addresses =
+      Enum.reduce(resolved_addresses, addresses, fn {{host, _family}, ips}, acc ->
+        Map.update(acc, host, ips, &(ips ++ &1))
+      end)
 
     aliases =
       for {node_id, host, port, _role} <- nodes,
@@ -882,14 +918,12 @@ defmodule Redix.Cluster.Manager do
       end
 
     aliases =
-      aliases
-      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
-      |> Map.new(fn {address, ids} ->
+      Enum.reduce(aliases, %{}, fn {address, node_id}, acc ->
         # Keep shared IPs marked so a later redirect cannot claim them.
-        case Enum.uniq(ids) do
-          [node_id] -> {address, node_id}
-          _ambiguous -> {address, :ambiguous}
-        end
+        Map.update(acc, address, node_id, fn
+          ^node_id -> node_id
+          _other -> :ambiguous
+        end)
       end)
 
     # An explicit topology address takes precedence over a DNS alias.
@@ -898,12 +932,11 @@ defmodule Redix.Cluster.Manager do
         Map.put(acc, node_id, node_id)
       end)
 
-    put_node_aliases(data, aliases)
+    put_node_aliases(%{data | resolved_addresses: resolved_addresses}, aliases)
   end
 
   defp put_node_aliases(data, aliases) do
-    # Replace the whole map at once. Removed DNS addresses and nodes cannot leave
-    # stale aliases, and readers never see a partly written map.
+    # Publish the whole map at once so readers never see a partly written map.
     :ok = Registry.put_meta(data.registry, :node_aliases, aliases)
     %{data | node_aliases: aliases}
   end
