@@ -181,7 +181,7 @@ defmodule Redix.ClusterTest do
 
       conn_for = fn key ->
         slot = Redix.Cluster.Hash.hash_slot(key)
-        {:ok, conn} = Redix.Cluster.Manager.get_connection(slot_table, registry, slot, 1)
+        {:ok, conn} = Redix.Cluster.Manager.get_connection(slot_table, registry, slot)
         conn
       end
 
@@ -422,18 +422,16 @@ defmodule Redix.ClusterTest do
       )
 
       registry = :"#{name}_registry"
-      slot_table = :"#{name}_slots"
 
-      assert :ets.lookup(slot_table, :pool_sizes) == [{:pool_sizes, {3, 2}}]
-      assert :ets.lookup(slot_table, :primary_pool_size) == []
-      assert :ets.lookup(slot_table, :replica_pool_size) == []
+      assert Registry.meta(registry, :pool_sizes) == {:ok, {3, 2}}
 
       assert wait_until(fn ->
                members =
                  Registry.select(
                    registry,
                    [
-                     {{{:"$1", :"$2"}, :"$3", {:"$4", :_}}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+                     {{{:"$1", :"$2"}, :"$3", {:"$4", :_, :_}}, [],
+                      [{{:"$1", :"$2", :"$3", :"$4"}}]}
                    ]
                  )
 
@@ -486,25 +484,18 @@ defmodule Redix.ClusterTest do
       key = "socket-drop-key"
       slot = Redix.Cluster.Hash.hash_slot(key)
       [{^slot, node_id, _replica_ids}] = :ets.lookup(slot_table, slot)
-      preferred_index = :erlang.phash2(self(), pool_size)
+      preferred_index = 0
 
       assert wait_until(fn ->
                Registry.select(
                  registry,
-                 [{{{node_id, :_}, :_, {:primary, :connected}}, [], [true]}]
+                 [{{{node_id, :_}, :_, {:primary, :connected, :_}}, [], [true]}]
                )
                |> length() == pool_size
              end)
 
-      [{preferred_pid, {:primary, :connected}}] =
+      [{preferred_pid, {:primary, :connected, queue_table}}] =
         Registry.lookup(registry, {node_id, preferred_index})
-
-      assert Redix.Cluster.Manager.get_connection(
-               slot_table,
-               registry,
-               slot,
-               pool_size
-             ) == {:ok, preferred_pid}
 
       {:connected, connection_data} = :sys.get_state(preferred_pid)
       monitor = Process.monitor(preferred_pid)
@@ -518,7 +509,7 @@ defmodule Redix.ClusterTest do
 
       assert wait_until(fn ->
                Registry.lookup(registry, {node_id, preferred_index}) ==
-                 [{preferred_pid, {:primary, :disconnected}}] and
+                 [{preferred_pid, {:primary, :disconnected, queue_table}}] and
                  match?({:disconnected, _data}, :sys.get_state(preferred_pid))
              end)
 
@@ -526,7 +517,7 @@ defmodule Redix.ClusterTest do
       refute_receive {:DOWN, ^monitor, :process, ^preferred_pid, _reason}
 
       assert {:ok, sibling_pid} =
-               Redix.Cluster.Manager.get_connection(slot_table, registry, slot, pool_size)
+               Redix.Cluster.Manager.get_connection(slot_table, registry, slot)
 
       assert sibling_pid != preferred_pid
       assert Redix.Cluster.command(name, ["SET", key, "one"]) == {:ok, "OK"}
@@ -553,7 +544,7 @@ defmodule Redix.ClusterTest do
       assert Process.alive?(preferred_pid)
 
       assert Registry.lookup(registry, {node_id, preferred_index}) ==
-               [{preferred_pid, {:primary, :disconnected}}]
+               [{preferred_pid, {:primary, :disconnected, queue_table}}]
     end
   end
 
@@ -791,12 +782,12 @@ defmodule Redix.ClusterTest do
       address = {"127.0.0.1", unknown_port}
 
       # Precondition: the node is not known yet.
-      assert Redix.Cluster.Manager.get_connection_by_node(registry, address, self()) == :error
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == :error
 
       # On-demand connect succeeds and registers the node.
       assert {:ok, pid} = Redix.Cluster.Manager.connect_to_node(manager, address, 5_000)
       assert is_pid(pid)
-      assert Redix.Cluster.Manager.get_connection_by_node(registry, address, self()) == {:ok, pid}
+      assert Redix.Cluster.Manager.get_connection_by_node(registry, address) == {:ok, pid}
 
       # The connection is real and usable.
       assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
@@ -814,7 +805,7 @@ defmodule Redix.ClusterTest do
       address = {host, String.to_integer(port_str)}
 
       assert {:ok, pid} =
-               Redix.Cluster.Manager.get_connection_by_node(registry, address, self())
+               Redix.Cluster.Manager.get_connection_by_node(registry, address)
 
       assert Redix.Cluster.Manager.connect_to_node(manager, address, 5_000) == {:ok, pid}
     end
@@ -849,7 +840,7 @@ defmodule Redix.ClusterTest do
       [node_id | _] = Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
 
       {:ok, pid} =
-        Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id), self())
+        Redix.Cluster.Manager.get_connection_by_node(registry, node_id_address(node_id))
 
       monitor = Process.monitor(pid)
       Process.exit(pid, :kill)
@@ -861,8 +852,7 @@ defmodule Redix.ClusterTest do
                  {:ok, new_pid} when new_pid != pid,
                  Redix.Cluster.Manager.get_connection_by_node(
                    registry,
-                   node_id_address(node_id),
-                   self()
+                   node_id_address(node_id)
                  )
                )
              end)
@@ -1192,7 +1182,7 @@ defmodule Redix.ClusterTest do
   end
 
   defp replica_pids(registry) do
-    Registry.select(registry, [{{{:_, :_}, :"$1", {:replica, :_}}, [], [:"$1"]}])
+    Registry.select(registry, [{{{:_, :_}, :"$1", {:replica, :_, :_}}, [], [:"$1"]}])
   end
 
   defp wait_until(fun, attempts \\ 50) do

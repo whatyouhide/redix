@@ -75,10 +75,25 @@ Redix.Cluster.start_link(
 )
 ```
 
-During normal routing, Redix uses the caller process to select a pool member. One caller
-process uses the same member for a node while that member is available. Redirects keep
-the original caller choice. If the selected member is unavailable, Redix uses another
-live member. A workload with only a few caller processes might not use all members.
+Redix chooses which pool member to route a given request to using a rudimentary
+"least-busy" algorithm, selecting the connection with the fewest commands
+awaiting replies.
+
+An important factor here. Say a `GET foo` command is very slow for some reason,
+taking 3s to come up with a reply; however, say the caller set a
+`Redix.Cluster.command/3` timeout of 1s. In this case, the caller will see a
+timeout but the original `GET foo` will still be in the connection's queue,
+awaiting a response from the Redis server. In this case, the routing algorithm
+still accounts for the `GET foo` command in the connection queue; after all,
+that connection *is* busy with the command, even though the caller is not
+anymore.
+
+> #### Connection State {: .warning}
+> Separate calls have **no connection affinity**. Do not rely on connection
+> state! For example, don't use `CLIENT REPLY OFF` to turn off client replies
+> via `Redix.Cluster.command/3`; that's going to turn off client replies on the
+> least-busy connection, not *all* connections in the pool. You're not
+> guaranteed that a caller will route to the non-replying connection.
 
 ## Pipelines
 
