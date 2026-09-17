@@ -982,6 +982,56 @@ defmodule Redix.Cluster.FakeNodeTest do
   end
 
   describe "pooled connection lifecycle" do
+    test "same-node different-slot commands share one connection" do
+      cluster = :"same_node_pipeline_#{System.unique_integer([:positive])}"
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node, []}])
+        ["SET", _, _] -> "+OK\r\n"
+        _other -> "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster, nodes: ["redis://#{node}"], primary_pool_size: 3, sync_connect: true}
+      )
+
+      wait_until(fn ->
+        Registry.select(
+          :"#{cluster}_registry",
+          [{{{node.id, :_}, :_, {:primary, :connected, :_}}, [], [true]}]
+        )
+        |> length() == 3
+      end)
+
+      assert Hash.hash_slot("a") != Hash.hash_slot("b")
+
+      {test_name, _arity} = __ENV__.function
+      parent = self()
+      ref = make_ref()
+
+      handler = fn _event, measurements, meta, _config ->
+        if meta.cluster == cluster, do: send(parent, {ref, measurements.node_count})
+      end
+
+      :telemetry.attach(
+        "#{test_name}",
+        [:redix, :cluster, :pipeline, :stop],
+        handler,
+        :no_config
+      )
+
+      on_exit(fn -> :telemetry.detach("#{test_name}") end)
+
+      for _attempt <- 1..20 do
+        assert Redix.Cluster.pipeline(cluster, [["SET", "a", "1"], ["SET", "b", "2"]]) ==
+                 {:ok, ["OK", "OK"]}
+
+        assert_receive {^ref, 1}
+      end
+    end
+
     test "a timed-out request keeps its member busy while later calls use healthy members" do
       cluster = :"slow_member_#{System.unique_integer([:positive])}"
       node = FakeNode.reserve()

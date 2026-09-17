@@ -90,6 +90,26 @@ defmodule Redix.Cluster.ManagerLookupTest do
     assert fallback in [mixed_preferred, mixed_other | disconnected_pids]
   end
 
+  test "replica lookup selects the least-busy member across replica nodes", %{
+    registry: registry,
+    slot_table: slot_table
+  } do
+    slot = 2
+    idle_node = "127.0.0.1:7002"
+    busy_node = "127.0.0.1:7003"
+    idle_table = :ets.new(:queue, [:ordered_set, :public])
+    busy_table = :ets.new(:queue, [:ordered_set, :public])
+    :ets.insert(busy_table, [{0, :pending}, {1, :pending}])
+
+    idle = register_member(registry, {idle_node, 0}, {:replica, :connected, idle_table})
+    _busy = register_member(registry, {busy_node, 0}, {:replica, :connected, busy_table})
+    :ets.insert(slot_table, {slot, "127.0.0.1:7000", [idle_node, busy_node]})
+
+    for _attempt <- 1..20 do
+      assert Manager.get_replica_connection(slot_table, registry, slot) == {:ok, idle}
+    end
+  end
+
   test "random lookup prefers connected primaries, then connected replicas, then any member", %{
     registry: registry
   } do

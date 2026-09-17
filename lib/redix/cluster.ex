@@ -823,54 +823,60 @@ defmodule Redix.Cluster do
   end
 
   defp group_by_node(slot_table, registry, indexed_commands, route) do
-    # Resolve a single connection per distinct slot and reuse it for every command
-    # on that slot, so same-slot commands land in one group (and thus one pipeline).
-    # This matters for replica routes: resolve_connection/4 picks a random replica
-    # per call, so without "memoizing", two reads on the same slot could resolve to
-    # different replica pids and be split across parallel tasks (issue #315).
+    # Group commands that target the same Redis node so they share one connection
+    # (one pipeline / one RTT). Same-slot commands are a special case of this
+    # (issue #315). Same-node, different-slot commands must not be split across
+    # pool members either: least-busy selection is per *node*, not per slot.
 
-    resolved_by_slot =
+    group_key_by_slot =
       indexed_commands
       |> Enum.map(fn {_idx, _cmd, slot} -> slot end)
       |> Enum.uniq()
-      |> Map.new(fn
-        :no_slot ->
-          {:no_slot, :random}
-
-        slot ->
-          {slot,
-           resolve_connection(
-             slot_table,
-             registry,
-             slot,
-             route
-           )}
-      end)
+      |> Map.new(fn slot -> {slot, group_key(slot_table, slot)} end)
 
     indexed_commands
-    |> Enum.group_by(fn {_idx, _cmd, slot} -> Map.fetch!(resolved_by_slot, slot) end)
+    |> Enum.group_by(fn {_idx, _cmd, slot} -> Map.fetch!(group_key_by_slot, slot) end)
     |> Enum.map(fn {node_key, commands} ->
       # When resolution fails, carry the appropriate connection error in the conn slot
       # (rather than nil) so execute_groups/3 can surface it for both single- and
       # multi-group pipelines without re-deriving the reason.
-      conn =
-        case node_key do
-          {:ok, pid} ->
-            pid
-
-          :random ->
-            case Manager.get_random_connection(registry) do
-              {:ok, pid} -> pid
-              :error -> %Redix.ConnectionError{reason: :closed}
-            end
-
-          :error ->
-            no_connection_error(route)
-        end
-
+      conn = connection_for_group(slot_table, registry, node_key, commands, route)
       cmds = Enum.map(commands, fn {idx, cmd, _slot} -> {idx, cmd} end)
       {conn, cmds}
     end)
+  end
+
+  defp group_key(_slot_table, :no_slot), do: :random
+
+  defp group_key(slot_table, slot) when is_integer(slot) do
+    case Manager.primary_for_slot(slot_table, slot) do
+      {:ok, primary_id} -> {:node, primary_id}
+      :error -> :error
+    end
+  end
+
+  defp connection_for_group(_slot_table, registry, :random, _commands, _route) do
+    case Manager.get_random_connection(registry) do
+      {:ok, pid} -> pid
+      :error -> %Redix.ConnectionError{reason: :closed}
+    end
+  end
+
+  defp connection_for_group(_slot_table, _registry, :error, _commands, route) do
+    no_connection_error(route)
+  end
+
+  defp connection_for_group(
+         slot_table,
+         registry,
+         {:node, _primary_id},
+         [{_idx, _cmd, slot} | _rest],
+         route
+       ) do
+    case resolve_connection(slot_table, registry, slot, route) do
+      {:ok, pid} -> pid
+      :error -> no_connection_error(route)
+    end
   end
 
   # The error to surface when no connection can be resolved for a slot. A `:replica`

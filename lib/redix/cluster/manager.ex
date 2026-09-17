@@ -95,10 +95,12 @@ defmodule Redix.Cluster.Manager do
   @doc """
   Looks up a **replica** Redix connection PID for a given hash slot.
 
-  Picks a reachable replica at random. Returns `:error` if the slot is unknown or
-  has no reachable replica connection (for example when `:read_from_replicas` is
-  disabled, in which case no replicas are tracked). Callers that want to fall back
-  to the primary should do so explicitly (see `Redix.Cluster`'s `:prefer_replica`).
+  Selects the reachable replica member with the fewest requests awaiting replies,
+  across every replica of the slot's primary (breaking ties at random). Returns
+  `:error` if the slot is unknown or has no reachable replica connection (for
+  example when `:read_from_replicas` is disabled, in which case no replicas are
+  tracked). Callers that want to fall back to the primary should do so explicitly
+  (see `Redix.Cluster`'s `:prefer_replica`).
   """
   @spec get_replica_connection(atom(), atom(), non_neg_integer()) ::
           {:ok, pid()} | :error
@@ -109,19 +111,27 @@ defmodule Redix.Cluster.Manager do
           [{^slot, _primary_id, replica_ids}] when replica_ids != [] ->
             pool_size = pool_size(registry, :replica)
 
-            results =
-              replica_ids
-              |> Enum.shuffle()
-              |> Enum.map(&lookup_connection_with_state(registry, &1, pool_size))
-
-            case Enum.find(results, &match?({:ok, _pid, :connected}, &1)) ||
-                   Enum.find(results, &match?({:ok, _pid, _state}, &1)) do
-              {:ok, pid, _state} -> {:ok, pid}
-              nil -> :error
-            end
+            replica_ids
+            |> Enum.flat_map(&pool_members(registry, &1, pool_size))
+            |> select_connection()
+            |> connection_pid()
 
           _other ->
             :error
+        end
+      end,
+      :error
+    )
+  end
+
+  @doc false
+  @spec primary_for_slot(atom(), non_neg_integer()) :: {:ok, String.t()} | :error
+  def primary_for_slot(slot_table, slot) when is_integer(slot) do
+    guard_missing_table(
+      fn ->
+        case :ets.lookup(slot_table, slot) do
+          [{^slot, primary_id, _replica_ids}] -> {:ok, primary_id}
+          [] -> :error
         end
       end,
       :error
@@ -642,14 +652,16 @@ defmodule Redix.Cluster.Manager do
   # One hash lookup per pool index. Members register with contiguous indices from 0,
   # so this finds every member without scanning the Registry.
   defp lookup_connection_with_state(registry, node_id, pool_size) do
-    0..(pool_size - 1)
-    |> Enum.flat_map(fn index ->
+    registry |> pool_members(node_id, pool_size) |> select_connection()
+  end
+
+  defp pool_members(registry, node_id, pool_size) do
+    Enum.flat_map(0..(pool_size - 1), fn index ->
       case Registry.lookup(registry, {node_id, index}) do
         [{pid, {_role, state, table}}] -> [{pid, state, table}]
         [] -> []
       end
     end)
-    |> select_connection()
   end
 
   defp select_connection(members) do
