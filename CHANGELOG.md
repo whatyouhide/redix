@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.9.2
+
+  * Use "least-busy" routing in `Redix.Cluster` pools. This is considered a bug fix because "sticky routing" (routing to a pool member based on the caller's PID hash) means potentially sticking with a degraded pool member. If you were relying on *connection affinity*, please stop. When you need to do things such as `CLIENT REPLY OFF`, open dedicated connections or use pipelines/transactions.
+
 ## v1.9.1
 
   * Keep `Redix.Cluster` node pools when DNS returns a different address or address order for the same hostname. Use all resolved IPv4 and IPv6 addresses to match redirects to known pools, with no DNS lookup in command routing. This results in significant less connection/reconnection churn for setups like AWS ElastiCache in serverless mode.
