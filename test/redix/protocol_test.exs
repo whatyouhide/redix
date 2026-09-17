@@ -93,6 +93,11 @@ defmodule Redix.ProtocolTest do
       end
     end
 
+    test "rejects negative bulk string and array lengths other than null" do
+      assert_raise ParseError, "invalid bulk string length: -2", fn -> parse("$-2\r\n") end
+      assert_raise ParseError, "invalid array length: -2", fn -> parse("*-2\r\n") end
+    end
+
     property "arrays" do
       assert parse("*0\r\n") == {:ok, [], ""}
       assert parse("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n") == {:ok, ["foo", "bar"], ""}
