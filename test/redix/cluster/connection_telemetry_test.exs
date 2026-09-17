@@ -54,7 +54,7 @@ defmodule Redix.Cluster.ConnectionTelemetryTest do
                       }}
 
       assert Redix.command(conn, ["PING"]) == {:ok, "OK"}
-      assert [{^conn, {^role, :connected}}] = Registry.lookup(registry, {node.id, 0})
+      assert [{^conn, {^role, :connected, _table}}] = Registry.lookup(registry, {node.id, 0})
 
       FakeNode.set_status(node, :down)
       {:connected, data} = :sys.get_state(conn)
@@ -83,7 +83,9 @@ defmodule Redix.Cluster.ConnectionTelemetryTest do
 
       assert replacement != conn
       assert Redix.command(replacement, ["PING"]) == {:ok, "OK"}
-      assert [{^replacement, {^role, :connected}}] = Registry.lookup(registry, {node.id, 0})
+
+      assert [{^replacement, {^role, :connected, _table}}] =
+               Registry.lookup(registry, {node.id, 0})
     end
   end
 

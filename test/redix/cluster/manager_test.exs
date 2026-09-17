@@ -25,7 +25,7 @@ defmodule Redix.Cluster.ManagerTest do
 
     wait_until_passes(2_000, fn ->
       connected_members =
-        Registry.select(registry, [{{{:_, :_}, :_, {:primary, :connected}}, [], [true]}])
+        Registry.select(registry, [{{{:_, :_}, :_, {:primary, :connected, :_}}, [], [true]}])
 
       assert length(connected_members) >= 9
     end)
@@ -127,7 +127,7 @@ defmodule Redix.Cluster.ManagerTest do
         Registry.select(
           registry,
           [
-            {{{:"$1", :"$2"}, :"$3", {:"$4", :_}}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
+            {{{:"$1", :"$2"}, :"$3", {:"$4", :_, :_}}, [], [{{:"$1", :"$2", :"$3", :"$4"}}]}
           ]
         )
 
@@ -176,66 +176,37 @@ defmodule Redix.Cluster.ManagerTest do
       end)
     end
 
-    test "lookup spreads across callers and keeps each caller sticky through redirects", %{
+    test "lookups from one caller spread across the node pool", %{
       registry: registry,
       manager: manager
     } do
-      [node_id | _] =
-        Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
-
+      [node_id | _] = Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
       {:ok, host, port} = Redix.Cluster.Manager.split_host_port(node_id)
       address = {host, port}
+      pool = Registry.select(registry, [{{{node_id, :_}, :"$1", :_}, [], [:"$1"]}])
 
-      same_caller_pids =
-        for _ <- 1..10 do
-          {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, address, self())
+      selected =
+        for _ <- 1..100 do
+          {:ok, pid} = Redix.Cluster.Manager.get_connection_by_node(registry, address)
+
+          assert {:ok, redirected} =
+                   Redix.Cluster.Manager.connect_to_node(manager, address, 5_000)
+
+          assert redirected in pool
           pid
         end
 
-      assert same_caller_pids |> Enum.uniq() |> length() == 1
-
-      caller_pids =
-        1..24
-        |> Task.async_stream(
-          fn _ -> Redix.Cluster.Manager.get_connection_by_node(registry, address, self()) end,
-          ordered: false
-        )
-        |> Enum.map(fn {:ok, {:ok, pid}} -> pid end)
-
-      assert caller_pids |> Enum.uniq() |> length() > 1
-
-      original_caller = self()
-      [expected_pid] = Enum.uniq(same_caller_pids)
-
-      redirected_pids =
-        1..12
-        |> Task.async_stream(
-          fn _ ->
-            Redix.Cluster.Manager.get_connection_by_node(registry, address, original_caller)
-          end,
-          ordered: false
-        )
-        |> Enum.map(fn {:ok, {:ok, pid}} -> pid end)
-
-      assert Enum.uniq(redirected_pids) == [expected_pid]
-
-      manager_result =
-        Task.async(fn ->
-          Redix.Cluster.Manager.connect_to_node(manager, address, 5_000, original_caller)
-        end)
-        |> Task.await()
-
-      assert manager_result == {:ok, expected_pid}
+      assert MapSet.new(selected) == MapSet.new(pool)
     end
 
-    test "lookup uses a sibling while its sticky member is down", %{
+    test "lookup uses a sibling while a member is down", %{
       registry: registry,
       manager: manager
     } do
       [node_id | _] =
         Registry.select(registry, [{{{:"$1", :_}, :_, :_}, [], [:"$1"]}])
 
-      index = :erlang.phash2(self(), 3)
+      index = 0
       [{pid, _role}] = Registry.lookup(registry, {node_id, index})
       {:ok, host, port} = Redix.Cluster.Manager.split_host_port(node_id)
 
@@ -264,7 +235,7 @@ defmodule Redix.Cluster.ManagerTest do
         end)
 
         assert {:ok, sibling_pid} =
-                 Redix.Cluster.Manager.get_connection_by_node(registry, {host, port}, self())
+                 Redix.Cluster.Manager.get_connection_by_node(registry, {host, port})
 
         assert sibling_pid != pid
         assert Process.alive?(sibling_pid)
@@ -282,7 +253,7 @@ defmodule Redix.Cluster.ManagerTest do
   end
 
   describe "connected pool member routing" do
-    test "commands skip a disconnected sticky member for many callers" do
+    test "commands skip a disconnected member for many callers" do
       %{cluster: cluster, registry: registry, slot_table: slot_table} =
         start_routing_cluster(backoff_initial: 5_000, backoff_max: 5_000)
 
@@ -295,7 +266,7 @@ defmodule Redix.Cluster.ManagerTest do
 
       results =
         for _ <- 1..20 do
-          call_from_pool_index(disconnected_index, 3, fn ->
+          call_from_process(fn ->
             Redix.Cluster.command(cluster, ["GET", key])
           end)
         end
@@ -303,7 +274,7 @@ defmodule Redix.Cluster.ManagerTest do
       assert results |> Enum.map(&elem(&1, 0)) |> Enum.uniq() |> length() == 20
       assert Enum.all?(results, fn {_caller, result} -> result == {:ok, "value"} end)
 
-      assert [{^disconnected_pid, {:primary, :disconnected}}] =
+      assert [{^disconnected_pid, {:primary, :disconnected, _table}}] =
                Registry.lookup(registry, {node_id, disconnected_index})
     end
 
@@ -324,7 +295,7 @@ defmodule Redix.Cluster.ManagerTest do
                {:error, %Redix.ConnectionError{reason: :closed}}
     end
 
-    test "a reconnected member becomes eligible for its sticky callers again" do
+    test "a reconnected member becomes eligible again" do
       %{cluster: cluster, registry: registry, slot_table: slot_table} =
         start_routing_cluster(backoff_initial: 500, backoff_max: 500)
 
@@ -336,7 +307,7 @@ defmodule Redix.Cluster.ManagerTest do
       reconnected_pid = force_disconnect(registry, node_id, reconnected_index)
 
       wait_until_passes(2_000, fn ->
-        assert [{^reconnected_pid, {:primary, :connected}}] =
+        assert [{^reconnected_pid, {:primary, :connected, _table}}] =
                  Registry.lookup(registry, {node_id, reconnected_index})
       end)
 
@@ -357,12 +328,10 @@ defmodule Redix.Cluster.ManagerTest do
 
       on_exit(fn -> :telemetry.detach(handler_id) end)
 
-      {_caller, result} =
-        call_from_pool_index(reconnected_index, 3, fn ->
-          Redix.Cluster.command(cluster, ["GET", key])
-        end)
+      for _ <- 1..30 do
+        assert Redix.Cluster.command(cluster, ["GET", key]) == {:ok, "value"}
+      end
 
-      assert result == {:ok, "value"}
       assert_receive {^event_ref, ^reconnected_pid}, 1_000
     end
 
@@ -372,18 +341,16 @@ defmodule Redix.Cluster.ManagerTest do
 
       primary_members =
         Registry.select(registry, [
-          {{{:"$1", :"$2"}, :"$3", {:primary, :connected}}, [], [{{:"$1", :"$2", :"$3"}}]}
+          {{{:"$1", :"$2"}, :"$3", {:primary, :connected, :_}}, [], [{{:"$1", :"$2", :"$3"}}]}
         ])
 
-      random_seed = :rand.export_seed()
       {node_id, index, expected_old_pid} = Enum.random(primary_members)
-      :rand.seed(random_seed)
 
       force_disconnect(registry, node_id, index)
 
       assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
 
-      assert [{^expected_old_pid, {:primary, :disconnected}}] =
+      assert [{^expected_old_pid, {:primary, :disconnected, _table}}] =
                Registry.lookup(registry, {node_id, index})
     end
   end
@@ -499,7 +466,7 @@ defmodule Redix.Cluster.ManagerTest do
 
     wait_until_passes(2_000, fn ->
       connected_members =
-        Registry.select(registry, [{{{:_, :_}, :_, {:primary, :connected}}, [], [true]}])
+        Registry.select(registry, [{{{:_, :_}, :_, {:primary, :connected, :_}}, [], [true]}])
 
       assert length(connected_members) == 9
     end)
@@ -518,43 +485,20 @@ defmodule Redix.Cluster.ManagerTest do
   end
 
   defp force_disconnect(registry, node_id, index) do
-    [{pid, {role, :connected}}] = Registry.lookup(registry, {node_id, index})
+    [{pid, {role, :connected, _table}}] = Registry.lookup(registry, {node_id, index})
     {:connected, data} = :sys.get_state(pid)
     send(data.socket_owner, {:force_disconnect, pid, :closed})
 
     wait_until_passes(1_000, fn ->
-      assert [{^pid, {^role, :disconnected}}] = Registry.lookup(registry, {node_id, index})
+      assert [{^pid, {^role, :disconnected, _table}}] =
+               Registry.lookup(registry, {node_id, index})
     end)
 
     pid
   end
 
-  defp call_from_pool_index(index, pool_size, fun) do
-    parent = self()
-    ref = make_ref()
-
-    pid =
-      spawn(fn ->
-        send(parent, {ref, self(), :erlang.phash2(self(), pool_size)})
-
-        receive do
-          {:run, ^ref} -> send(parent, {ref, :result, fun.()})
-          {:stop, ^ref} -> :ok
-        end
-      end)
-
-    receive do
-      {^ref, ^pid, ^index} ->
-        send(pid, {:run, ref})
-
-        receive do
-          {^ref, :result, result} -> {pid, result}
-        end
-
-      {^ref, ^pid, _other_index} ->
-        send(pid, {:stop, ref})
-        call_from_pool_index(index, pool_size, fun)
-    end
+  defp call_from_process(fun) do
+    Task.async(fn -> {self(), fun.()} end) |> Task.await()
   end
 
   defp wait_until_passes(timeout, fun) when timeout <= 0, do: fun.()
@@ -650,33 +594,48 @@ defmodule Redix.Cluster.ManagerTopologyTest do
       start_manager(node, inet_lookup_fun)
 
     before_members = members(registry)
-    assert {:ok, pid} = Manager.get_connection_by_node(registry, {"127.0.0.2", node.port}, self())
+
+    assert_pool_member(
+      Manager.get_connection_by_node(registry, {"127.0.0.2", node.port}),
+      before_members
+    )
+
     :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
 
     Agent.update(addresses, fn _ -> {:ok, [{127, 0, 0, 3}]} end)
     refresh(manager, cluster, false)
 
     assert members(registry) == before_members
-    assert Manager.get_connection_by_node(registry, {"127.0.0.2", node.port}, self()) == :error
+    assert Manager.get_connection_by_node(registry, {"127.0.0.2", node.port}) == :error
 
-    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}, self()) ==
-             {:ok, pid}
+    assert_pool_member(
+      Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}),
+      before_members
+    )
 
     Agent.update(addresses, fn _ -> {:error, :nxdomain} end)
     refresh(manager, cluster, false)
 
-    assert Manager.connect_to_node(manager, {"127.0.0.3", node.port}, 1_000) == {:ok, pid}
+    assert_pool_member(
+      Manager.connect_to_node(manager, {"127.0.0.3", node.port}, 1_000),
+      before_members
+    )
+
     assert members(registry) == before_members
 
-    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}, self()) ==
-             {:ok, pid}
+    assert_pool_member(
+      Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}),
+      before_members
+    )
 
-    assert Manager.get_connection_by_node(registry, {"localhost", node.port}, self()) ==
-             {:ok, pid}
+    assert_pool_member(
+      Manager.get_connection_by_node(registry, {"localhost", node.port}),
+      before_members
+    )
 
     Agent.update(addresses, fn _ -> {:ok, []} end)
     refresh(manager, cluster, false)
-    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}, self()) == :error
+    assert Manager.get_connection_by_node(registry, {"127.0.0.3", node.port}) == :error
     assert members(registry) == before_members
   end
 
@@ -727,12 +686,18 @@ defmodule Redix.Cluster.ManagerTopologyTest do
       baseline = FakeNode.connections_accepted(node)
 
       for host <- ["localhost", "127.0.0.1", "127.0.0.2", "::1", "0:0:0:0:0:0:0:1"] do
-        assert {:ok, pid} = Manager.get_connection_by_node(registry, {host, node.port}, self())
-        assert Enum.any?(before_members, fn {_key, member, _value} -> member == pid end)
-        assert Manager.connect_to_node(manager, {host, node.port}, 1_000) == {:ok, pid}
+        assert_pool_member(
+          Manager.get_connection_by_node(registry, {host, node.port}),
+          before_members
+        )
+
+        assert_pool_member(
+          Manager.connect_to_node(manager, {host, node.port}, 1_000),
+          before_members
+        )
       end
 
-      assert {:ok, _pid} = Manager.get_connection(slots, registry, 0, 5)
+      assert {:ok, _pid} = Manager.get_connection(slots, registry, 0)
 
       refute_receive {:lookup, _family}
       assert FakeNode.connections_accepted(node) == baseline
@@ -790,7 +755,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
       start_manager(node, inet_lookup_fun)
 
     assert {:ok, _pid} =
-             Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}, self())
+             Manager.get_connection_by_node(registry, {"127.0.0.1", node.port})
 
     :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
     Agent.update(state, &%{&1 | failed?: true})
@@ -800,7 +765,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     Agent.update(state, &%{&1 | removed?: true})
     refresh(manager, cluster, true)
     FakeNode.wait_until(fn -> members(registry) == [] end)
-    assert Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}, self()) == :error
+    assert Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}) == :error
   end
 
   for timeout <- [500, :infinity] do
@@ -890,7 +855,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     [{_other_host, other_port}] = Enum.reject(hosts, fn {host, _port} -> host == blocked_host end)
 
     assert {:ok, _pid} =
-             Manager.get_connection_by_node(registry, {"127.0.0.2", other_port}, self())
+             Manager.get_connection_by_node(registry, {"127.0.0.2", other_port})
 
     assert members(registry) == before_members
   end
@@ -926,19 +891,21 @@ defmodule Redix.Cluster.ManagerTopologyTest do
 
     shared_ip = {"127.0.0.1", node.port}
     before_members = members(registry)
-    assert Manager.get_connection_by_node(registry, shared_ip, self()) == :error
+    assert Manager.get_connection_by_node(registry, shared_ip) == :error
     :telemetry_test.attach_event_handlers(self(), [[:redix, :cluster, :topology_change]])
     Agent.update(failed, fn _ -> true end)
     refresh(manager, cluster, false)
-    assert Manager.get_connection_by_node(registry, shared_ip, self()) == :error
+    assert Manager.get_connection_by_node(registry, shared_ip) == :error
 
     assert {:ok, redirected_pid} =
              Manager.connect_to_node(manager, {"localhost.", node.port}, 1_000)
 
-    assert Manager.get_connection_by_node(registry, {"localhost.", node.port}, self()) ==
-             {:ok, redirected_pid}
+    assert_pool_member(
+      Manager.get_connection_by_node(registry, {"localhost.", node.port}),
+      members(registry) -- before_members
+    )
 
-    assert Manager.get_connection_by_node(registry, shared_ip, self()) == :error
+    assert Manager.get_connection_by_node(registry, shared_ip) == :error
 
     refresh(manager, cluster, false)
     refute Process.alive?(redirected_pid)
@@ -996,9 +963,9 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     assert members(registry) == before_members
 
     assert {:ok, _pid} =
-             Manager.get_connection_by_node(registry, {"127.0.0.1", node.port}, self())
+             Manager.get_connection_by_node(registry, {"127.0.0.1", node.port})
 
-    assert {:ok, _pid} = Manager.get_connection_by_node(registry, {"::1", node.port}, self())
+    assert {:ok, _pid} = Manager.get_connection_by_node(registry, {"::1", node.port})
   end
 
   test "equivalent literal IPv6 addresses keep node IDs and do not count as topology changes" do
@@ -1048,7 +1015,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
 
     FakeNode.wait_until(fn ->
       case Registry.lookup(registry, key) do
-        [{new_pid, {:primary, :connected}}] when new_pid != pid -> true
+        [{new_pid, {:primary, :connected, _table}}] when new_pid != pid -> true
         _other -> false
       end
     end)
@@ -1162,7 +1129,7 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     Agent.update(topology, fn _ -> [{0, 16_382, first_address}] end)
     refresh(manager, cluster, true)
     assert :ets.lookup(slots, 16_383) == []
-    assert Manager.get_connection_by_node(registry, {"127.0.0.1", second.port}, self()) == :error
+    assert Manager.get_connection_by_node(registry, {"127.0.0.1", second.port}) == :error
     assert {:ok, aliases} = Registry.meta(registry, :node_aliases)
     refute Map.has_key?(aliases, second_id)
   end
@@ -1219,10 +1186,16 @@ defmodule Redix.Cluster.ManagerTopologyTest do
     )
 
     FakeNode.wait_until(fn ->
-      Enum.all?(members(registry), fn {_key, _pid, {_role, state}} -> state == :connected end)
+      Enum.all?(members(registry), fn {_key, _pid, {_role, state, _table}} ->
+        state == :connected
+      end)
     end)
 
     %{cluster: cluster, manager: manager, registry: registry, slots: :"#{cluster}_slots"}
+  end
+
+  defp assert_pool_member({:ok, pid}, members) do
+    assert Enum.any?(members, fn {_key, member, _value} -> member == pid end)
   end
 
   defp members(registry) do

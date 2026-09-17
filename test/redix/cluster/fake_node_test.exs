@@ -49,7 +49,7 @@ defmodule Redix.Cluster.FakeNodeTest do
 
       assert Redix.Cluster.command(cluster, ["GET", "x"]) == {:ok, "bar"}
 
-      assert [{_pid, {:replica, :connected}}] =
+      assert [{_pid, {:replica, :connected, _table}}] =
                Registry.lookup(:"#{cluster}_registry", {target.id, 2})
     end
 
@@ -357,7 +357,7 @@ defmodule Redix.Cluster.FakeNodeTest do
       assert FakeNode.connections_accepted(node) == baseline
 
       assert Registry.lookup(registry, {"localhost:#{node.port}", 0}) == []
-      assert [{_pid, {:primary, :connected}}] = Registry.lookup(registry, {node.id, 0})
+      assert [{_pid, {:primary, :connected, _table}}] = Registry.lookup(registry, {node.id, 0})
     end
 
     # Reproduces issue #325: redirect messages are server-controlled input, so a
@@ -563,7 +563,7 @@ defmodule Redix.Cluster.FakeNodeTest do
                {:error, %Redix.ConnectionError{reason: :closed}}
     end
 
-    test "Manager.get_connection/4 and get_replica_connection/4 return :error instead of " <>
+    test "Manager.get_connection/3 and get_replica_connection/3 return :error instead of " <>
            "raising when the slot table is momentarily gone",
          %{cluster: cluster} do
       slot_table = :"#{cluster}_slots"
@@ -571,11 +571,11 @@ defmodule Redix.Cluster.FakeNodeTest do
 
       :ets.delete(slot_table)
 
-      assert Redix.Cluster.Manager.get_connection(slot_table, registry, 0, 1) == :error
-      assert Redix.Cluster.Manager.get_replica_connection(slot_table, registry, 0, 1) == :error
+      assert Redix.Cluster.Manager.get_connection(slot_table, registry, 0) == :error
+      assert Redix.Cluster.Manager.get_replica_connection(slot_table, registry, 0) == :error
     end
 
-    test "Manager.get_random_connection/1 and get_connection_by_node/3 return :error " <>
+    test "Manager.get_random_connection/1 and get_connection_by_node/2 return :error " <>
            "instead of raising when the registry doesn't exist" do
       # A registry name with no backing ETS table at all — whichever moment mid-restart
       # a caller catches, there's no table for that name yet, same as here. (A live
@@ -594,8 +594,7 @@ defmodule Redix.Cluster.FakeNodeTest do
 
       assert Redix.Cluster.Manager.get_connection_by_node(
                registry,
-               {"127.0.0.1", 7000},
-               self()
+               {"127.0.0.1", 7000}
              ) == :error
     end
   end
@@ -676,7 +675,6 @@ defmodule Redix.Cluster.FakeNodeTest do
       # Slots still covered are untouched.
       assert :ets.lookup(slot_table, 0) == [{0, node_id, []}]
       assert :ets.lookup(slot_table, 8_191) == [{8_191, node_id, []}]
-      assert :ets.lookup(slot_table, :pool_sizes) == [{:pool_sizes, {3, 2}}]
     end
 
     # A healthy cluster always covers all 16384 slots, so the "slot becomes
@@ -984,6 +982,48 @@ defmodule Redix.Cluster.FakeNodeTest do
   end
 
   describe "pooled connection lifecycle" do
+    test "a timed-out request keeps its member busy while later calls use healthy members" do
+      cluster = :"slow_member_#{System.unique_integer([:positive])}"
+      node = FakeNode.reserve()
+
+      FakeNode.serve(node, fn
+        ["CLUSTER", "SLOTS"] ->
+          FakeNode.cluster_slots([{0, 16_383, node, []}])
+
+        ["GET", "stall"] ->
+          Process.put(:stalled, true)
+          ""
+
+        ["GET", _key] ->
+          if Process.get(:stalled, false), do: "", else: "+OK\r\n"
+
+        _command ->
+          "+OK\r\n"
+      end)
+
+      start_supervised!(
+        {Redix.Cluster,
+         name: cluster, nodes: ["redis://#{node}"], primary_pool_size: 3, sync_connect: true}
+      )
+
+      members = fn ->
+        Registry.select(:"#{cluster}_registry", [
+          {{{node.id, :_}, :_, {:primary, :connected, :"$1"}}, [], [:"$1"]}
+        ])
+      end
+
+      wait_until(fn -> length(members.()) == 3 end)
+
+      assert Redix.Cluster.command(cluster, ["GET", "stall"], timeout: 50) ==
+               {:error, %Redix.ConnectionError{reason: :timeout}}
+
+      for _ <- 1..30 do
+        assert Redix.Cluster.command(cluster, ["GET", "key"]) == {:ok, "OK"}
+      end
+
+      assert members.() |> Enum.map(&:ets.info(&1, :size)) |> Enum.sort() == [0, 0, 1]
+    end
+
     test "routes around a disconnected member while its process stays alive" do
       cluster = :"disconnected_member_#{System.unique_integer([:positive])}"
       node = FakeNode.reserve()
@@ -1006,17 +1046,17 @@ defmodule Redix.Cluster.FakeNodeTest do
       registry = :"#{cluster}_registry"
       slot_table = :"#{cluster}_slots"
       slot = Hash.hash_slot("key")
-      preferred_index = :erlang.phash2(self(), 3)
+      preferred_index = 0
 
       wait_until(fn ->
         Registry.select(
           registry,
-          [{{{node.id, :_}, :_, {:primary, :connected}}, [], [true]}]
+          [{{{node.id, :_}, :_, {:primary, :connected, :_}}, [], [true]}]
         )
         |> length() == 3
       end)
 
-      [{preferred_pid, {:primary, :connected}}] =
+      [{preferred_pid, {:primary, :connected, queue_table}}] =
         Registry.lookup(registry, {node.id, preferred_index})
 
       {:connected, data} = :sys.get_state(preferred_pid)
@@ -1024,13 +1064,13 @@ defmodule Redix.Cluster.FakeNodeTest do
 
       wait_until(fn ->
         Registry.lookup(registry, {node.id, preferred_index}) ==
-          [{preferred_pid, {:primary, :disconnected}}]
+          [{preferred_pid, {:primary, :disconnected, queue_table}}]
       end)
 
       assert Process.alive?(preferred_pid)
 
       assert {:ok, sibling_pid} =
-               Redix.Cluster.Manager.get_connection(slot_table, registry, slot, 3)
+               Redix.Cluster.Manager.get_connection(slot_table, registry, slot)
 
       assert sibling_pid != preferred_pid
       assert Redix.Cluster.command(cluster, ["GET", "key"]) == {:ok, "ok"}
@@ -1392,11 +1432,11 @@ defmodule Redix.Cluster.FakeNodeTest do
     cluster = :"routing_#{System.unique_integer([:positive])}"
 
     start_supervised!({Registry, keys: :unique, name: :"#{cluster}_registry"})
+    :ok = Registry.put_meta(:"#{cluster}_registry", :pool_sizes, {1, 3})
     start_supervised!({Task.Supervisor, name: :"#{cluster}_task_supervisor"})
 
     :ets.new(:"#{cluster}_slots", [:named_table, :public, :set])
     :ets.insert(:"#{cluster}_slots", {:discovery_attempted, true})
-    :ets.insert(:"#{cluster}_slots", {:pool_sizes, {1, 3}})
 
     %{cluster: cluster}
   end
@@ -1418,7 +1458,7 @@ defmodule Redix.Cluster.FakeNodeTest do
           Registry.register(
             :"#{cluster}_registry",
             {node_id, 0},
-            _value = {:primary, :connected}
+            _value = {:primary, :connected, :ets.new(:queue, [:ordered_set, :public])}
           )
 
         send(test, {:registered, self()})
@@ -1466,7 +1506,7 @@ defmodule Redix.Cluster.FakeNodeTest do
     Registry.select(
       registry,
       [
-        {{{node_id, :"$1"}, :"$2", {:"$3", :_}}, [], [{{:"$1", :"$2", :"$3"}}]}
+        {{{node_id, :"$1"}, :"$2", {:"$3", :_, :_}}, [], [{{:"$1", :"$2", :"$3"}}]}
       ]
     )
   end

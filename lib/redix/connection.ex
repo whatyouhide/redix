@@ -174,7 +174,7 @@ defmodule Redix.Connection do
           {:stop, %Redix.ConnectionError{reason: reason}}
       end
     else
-      {:ok, :connecting, data}
+      {:ok, :connecting, update_cluster_connection_state(data, :connecting)}
     end
   end
 
@@ -368,7 +368,10 @@ defmodule Redix.Connection do
   defp update_cluster_connection_state(data, state) do
     case data.opts[:__cluster_member__] do
       {_cluster, registry, key} ->
-        Registry.update_value(registry, key, fn {role, _old_state} -> {role, state} end)
+        Registry.update_value(registry, key, fn {role, _old_state, _table} ->
+          {role, state, data.table}
+        end)
+
         data
 
       nil ->

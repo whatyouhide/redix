@@ -166,15 +166,11 @@ defmodule Redix.Cluster do
       type: :pos_integer,
       default: 1,
       doc: """
-      The number of connections to open to **each** primary node in the cluster. During
-      normal routing, commands from one caller process use the same connection in a node's
-      pool while that connection is available. Redirects keep the original caller choice.
-      If the selected connection process is dead or its socket is connecting or disconnected,
-      Redix uses another pool member whose socket is connected. If no member is connected,
-      Redix uses the caller's selected member and the command returns its connection error.
-      Workloads with few caller processes might not use all pool members. Redis is
-      single-threaded anyways, so use this only if it makes sense for your workload (and
-      possibly after benchmarking!). *Available since 1.7.0*.
+      The number of connections to open to **each** primary node in the cluster.
+      See [*Pooling*](#start_link/1-pooling) for information about routing.
+      Redis is single-threaded anyways, so parallelizing over multiple connections doesn't
+      automatically increase throughput. Use this option only if it makes sense for your
+      workload (and possibly after benchmarking!). *Available since 1.7.0*.
       """
     ],
     replica_pool_size: [
@@ -183,11 +179,10 @@ defmodule Redix.Cluster do
       doc: """
       The number of connections to open to **each** replica node when `read_from_replicas: true`
       is set. This is independent from `:primary_pool_size`, because primary and replica
-      traffic can need different pool sizes. Routing skips members whose sockets are connecting
-      or disconnected while another member of the same pool is connected. If no member is
-      connected, Redix uses the caller's selected member and the command returns its connection
-      error. Redis is single-threaded anyways, so use this only if it makes sense for your
-      workload (and possibly after benchmarking!).
+      traffic can need different pool sizes. See [*Pooling*](#start_link/1-pooling) for
+      information about routing. Redis is single-threaded anyways, so parallelizing
+      over multiple connections doesn't automatically increase throughput. Use this option
+      only if it makes sense for your workload (and possibly after benchmarking!).
       *Available since 1.7.0*.
       """
     ],
@@ -240,9 +235,17 @@ defmodule Redix.Cluster do
 
   ## Pooling
 
-  Redix routes commands to connected pool members. If a member disconnects, Redix skips
-  it while it reconnects and uses another connected member for that node. If all members
-  for the node are disconnected, the command returns a connection error as before.
+  Redix selects the connected member with the fewest requests awaiting replies
+  (breaking ties at random). Separate calls have no "connection affinity"—that is,
+  two subsequent calls from the same process could be routed to two different connections.
+
+  Selection reads each member's existing queue size from ETS
+  in the caller process. Requests count until their replies arrive, even after the
+  caller times out. Each pipeline sent to a connection counts as one queue entry.
+
+  This applies to primary pools, replica pools, and redirects. Commands without keys,
+  such as `PING`, prefer connected primary members. If no member is connected, Redix
+  returns a member's connection error.
 
   ## Resources
 
@@ -604,13 +607,12 @@ defmodule Redix.Cluster do
     registry = registry_name(cluster)
 
     await_topology_discovery(cluster, slot_table, opts)
-    {primary_pool_size, _replica_pool_size} = pool_sizes(slot_table)
 
     # From here on, the whole transaction—the initial MULTI/EXEC plus every
     # MOVED/ASK hop and on-demand connect it spawns—shares one deadline derived
     # from the caller's :timeout, so a redirect chain can't run for the full
     # timeout per hop (issue #337).
-    opts = put_request_context(opts)
+    opts = put_deadline(opts)
 
     # All commands in a transaction must target the same slot.
     indexed_commands =
@@ -633,7 +635,7 @@ defmodule Redix.Cluster do
 
     case slots do
       [slot] ->
-        case Manager.get_connection(slot_table, registry, slot, primary_pool_size) do
+        case Manager.get_connection(slot_table, registry, slot) do
           {:ok, conn} ->
             record_node_count(opts, 1)
 
@@ -785,7 +787,7 @@ defmodule Redix.Cluster do
     # hop and on-demand connect it spawns—shares one deadline derived from the
     # caller's :timeout, so a redirect chain can't run for the full timeout per
     # hop (issue #337). Each group's task reads the *remaining* budget off it.
-    opts = put_request_context(opts)
+    opts = put_deadline(opts)
 
     # Group commands by target node
     indexed_commands =
@@ -823,10 +825,9 @@ defmodule Redix.Cluster do
   defp group_by_node(slot_table, registry, indexed_commands, route) do
     # Resolve a single connection per distinct slot and reuse it for every command
     # on that slot, so same-slot commands land in one group (and thus one pipeline).
-    # This matters for replica routes: resolve_connection/5 picks a random replica
+    # This matters for replica routes: resolve_connection/4 picks a random replica
     # per call, so without "memoizing", two reads on the same slot could resolve to
     # different replica pids and be split across parallel tasks (issue #315).
-    pool_sizes = pool_sizes(slot_table)
 
     resolved_by_slot =
       indexed_commands
@@ -842,8 +843,7 @@ defmodule Redix.Cluster do
              slot_table,
              registry,
              slot,
-             route,
-             pool_sizes
+             route
            )}
       end)
 
@@ -1008,7 +1008,7 @@ defmodule Redix.Cluster do
         deadline_from_timeout(Keyword.get(opts, :timeout, @default_timeout))
       end)
 
-    opts = opts |> Keyword.delete(:__caller__) |> Keyword.delete(:__stats__)
+    opts = Keyword.delete(opts, :__stats__)
 
     # Tag the per-node [:redix, :pipeline, ...] events with the cluster so node
     # latency can be split per cluster without a cluster-specific event.
@@ -1130,12 +1130,9 @@ defmodule Redix.Cluster do
   # SLOTS, for ASK), so we trust it rather than surfacing a fake "unreachable" error.
   # The next `ensure_connections` adopts the connection or drops it (issues #319, #293).
   defp connect_for_redirect(cluster, host, port, opts) do
-    caller = Keyword.fetch!(opts, :__caller__)
-
     case Manager.get_connection_by_node(
            registry_name(cluster),
-           {host, port},
-           caller
+           {host, port}
          ) do
       {:ok, conn} ->
         {:ok, conn}
@@ -1144,8 +1141,7 @@ defmodule Redix.Cluster do
         Manager.connect_to_node(
           manager_name(cluster),
           {host, port},
-          connect_timeout(opts),
-          caller
+          connect_timeout(opts)
         )
     end
   end
@@ -1289,12 +1285,6 @@ defmodule Redix.Cluster do
     Keyword.put(opts, :__deadline__, deadline)
   end
 
-  defp put_request_context(opts) do
-    opts
-    |> put_deadline()
-    |> Keyword.put(:__caller__, self())
-  end
-
   # Wraps a whole cluster call (every node request plus every MOVED/ASK hop it
   # spawns) in a [:redix, :cluster, :pipeline] span. Per-call stats live in an
   # atomics counter stashed in opts under a private key, because the multi-node
@@ -1382,54 +1372,21 @@ defmodule Redix.Cluster do
   end
 
   # Resolves the connection for a slot according to the routing choice. Returns
-  # `{:ok, pid}` or `:error` (the same shape `Manager.get_connection/4` returns),
+  # `{:ok, pid}` or `:error` (the same shape `Manager.get_connection/3` returns),
   # so the grouping/execution path handles a missing connection uniformly.
-  defp resolve_connection(
-         slot_table,
-         registry,
-         slot,
-         :primary,
-         {primary_pool_size, _replica_pool_size}
-       ) do
-    Manager.get_connection(slot_table, registry, slot, primary_pool_size)
+  defp resolve_connection(slot_table, registry, slot, :primary) do
+    Manager.get_connection(slot_table, registry, slot)
   end
 
-  defp resolve_connection(
-         slot_table,
-         registry,
-         slot,
-         :replica,
-         {_primary_pool_size, replica_pool_size}
-       ) do
-    Manager.get_replica_connection(slot_table, registry, slot, replica_pool_size)
+  defp resolve_connection(slot_table, registry, slot, :replica) do
+    Manager.get_replica_connection(slot_table, registry, slot)
   end
 
-  defp resolve_connection(
-         slot_table,
-         registry,
-         slot,
-         :prefer_replica,
-         {primary_pool_size, replica_pool_size}
-       ) do
-    case Manager.get_replica_connection(slot_table, registry, slot, replica_pool_size) do
+  defp resolve_connection(slot_table, registry, slot, :prefer_replica) do
+    case Manager.get_replica_connection(slot_table, registry, slot) do
       {:ok, _pid} = ok -> ok
-      :error -> Manager.get_connection(slot_table, registry, slot, primary_pool_size)
+      :error -> Manager.get_connection(slot_table, registry, slot)
     end
-  end
-
-  defp pool_sizes(slot_table) do
-    Manager.guard_missing_table(
-      fn ->
-        case :ets.lookup(slot_table, :pool_sizes) do
-          [{:pool_sizes, {primary_pool_size, replica_pool_size}}] ->
-            {primary_pool_size, replica_pool_size}
-
-          [] ->
-            {1, 1}
-        end
-      end,
-      {1, 1}
-    )
   end
 
   defp validate_and_pop_route!(opts) do
