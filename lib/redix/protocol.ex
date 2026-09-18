@@ -184,7 +184,7 @@ defmodule Redix.Protocol do
       -1, rest ->
         {:ok, nil, rest}
 
-      size, _rest when size < 0 ->
+      size, _rest when size < -1 ->
         raise ParseError, message: "invalid bulk string length: #{size}"
 
       size, rest ->
@@ -209,7 +209,7 @@ defmodule Redix.Protocol do
       -1, rest ->
         {:ok, nil, rest}
 
-      size, _rest when size < 0 ->
+      size, _rest when size < -1 ->
         raise ParseError, message: "invalid array length: #{size}"
 
       size, rest ->
