@@ -184,6 +184,9 @@ defmodule Redix.Protocol do
       -1, rest ->
         {:ok, nil, rest}
 
+      size, _rest when size < -1 ->
+        raise ParseError, message: "invalid bulk string length: #{size}"
+
       size, rest ->
         parse_string_of_known_size(rest, _acc = [], _size_left = size)
     end)
@@ -205,6 +208,9 @@ defmodule Redix.Protocol do
     resolve_cont(parse_integer(rest), fn
       -1, rest ->
         {:ok, nil, rest}
+
+      size, _rest when size < -1 ->
+        raise ParseError, message: "invalid array length: #{size}"
 
       size, rest ->
         take_elems(rest, size, [])

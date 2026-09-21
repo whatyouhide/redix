@@ -93,6 +93,25 @@ defmodule Redix.ProtocolTest do
       end
     end
 
+    test "bulk string lengths below -1 raise" do
+      for size <- [-2, -10] do
+        data = "$#{size}\r\n"
+        message = "invalid bulk string length: #{size}"
+        assert_raise ParseError, message, fn -> parse(data) end
+      end
+
+      # Now split at each byte and test the same.
+      data = "$-2\r\n"
+
+      for split <- 1..(byte_size(data) - 1) do
+        <<first::binary-size(^split), rest::binary>> = data
+
+        assert_raise ParseError, "invalid bulk string length: -2", fn ->
+          parse_with_continuations([first, rest])
+        end
+      end
+    end
+
     property "arrays" do
       assert parse("*0\r\n") == {:ok, [], ""}
       assert parse("*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n") == {:ok, ["foo", "bar"], ""}
@@ -141,6 +160,25 @@ defmodule Redix.ProtocolTest do
       assert_raise ParseError, ~S(expected integer, found: "\r"), fn -> parse(":-\r\n") end
       assert_raise ParseError, ~S(expected CRLF, found: "a"), fn -> parse(":43a\r\n") end
       assert_raise ParseError, ~S(expected integer, found: "f"), fn -> parse(":foo\r\n") end
+    end
+
+    test "array lengths below -1 raise" do
+      for size <- [-2, -10] do
+        data = "*#{size}\r\n"
+        message = "invalid array length: #{size}"
+        assert_raise ParseError, message, fn -> parse(data) end
+      end
+
+      # Now split at each byte and test the same.
+      data = "*-2\r\n"
+
+      for split <- 1..(byte_size(data) - 1) do
+        <<first::binary-size(^split), rest::binary>> = data
+
+        assert_raise ParseError, "invalid array length: -2", fn ->
+          parse_with_continuations([first, rest])
+        end
+      end
     end
   end
 
