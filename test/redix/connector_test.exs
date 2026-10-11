@@ -1,6 +1,7 @@
 defmodule Redix.ConnectorTest do
   use ExUnit.Case, async: true
 
+  alias Redix.Cluster.FakeNode
   alias Redix.Connector
 
   describe "build_socket_opts/3 with :ssl" do
@@ -181,6 +182,37 @@ defmodule Redix.ConnectorTest do
         end
       end
     end
+
+    test "closes the server socket when a sentinel reports a server with the wrong role" do
+      replica = FakeNode.start(fn ["ROLE"] -> "*1\r\n$5\r\nslave\r\n" end)
+      primary = FakeNode.start(fn ["ROLE"] -> "*1\r\n$6\r\nmaster\r\n" end)
+
+      [wrong_sentinel, right_sentinel] =
+        for server <- [replica, primary] do
+          port = Integer.to_string(server.port)
+
+          FakeNode.start(fn ["SENTINEL", "get-master-addr-by-name", "main"] ->
+            "*2\r\n$9\r\nlocalhost\r\n$#{byte_size(port)}\r\n#{port}\r\n"
+          end)
+        end
+
+      opts =
+        Redix.StartOptions.sanitize(:redix,
+          sentinel: [
+            sentinels: [
+              [host: "localhost", port: wrong_sentinel.port],
+              [host: "localhost", port: right_sentinel.port]
+            ],
+            group: "main"
+          ]
+        )
+
+      # Sockets are linked to the process that owns them.
+      ports_before = linked_ports()
+      assert {:ok, socket, _address} = Connector.connect(opts, self())
+      assert linked_ports() -- ports_before == [socket]
+      :gen_tcp.close(socket)
+    end
   end
 
   defp assert_connected_address(extra_opts) do
@@ -203,5 +235,10 @@ defmodule Redix.ConnectorTest do
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, port} = :inet.port(listener)
     {listener, port}
+  end
+
+  defp linked_ports do
+    {:links, links} = Process.info(self(), :links)
+    Enum.filter(links, &is_port/1)
   end
 end
