@@ -208,9 +208,10 @@ defmodule Redix.ConnectorTest do
         )
 
       # Sockets are linked to the process that owns them.
-      ports_before = linked_ports()
+      ports_before = self() |> Process.info(:links) |> elem(1) |> Enum.filter(&is_port/1)
       assert {:ok, socket, _address} = Connector.connect(opts, self())
-      assert linked_ports() -- ports_before == [socket]
+      ports_after = self() |> Process.info(:links) |> elem(1) |> Enum.filter(&is_port/1)
+      assert ports_after -- ports_before == [socket]
       :gen_tcp.close(socket)
     end
   end
@@ -235,10 +236,5 @@ defmodule Redix.ConnectorTest do
     on_exit(fn -> :gen_tcp.close(listener) end)
     {:ok, port} = :inet.port(listener)
     {listener, port}
-  end
-
-  defp linked_ports do
-    {:links, links} = Process.info(self(), :links)
-    Enum.filter(links, &is_port/1)
   end
 end

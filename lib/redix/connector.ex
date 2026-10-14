@@ -421,9 +421,10 @@ defmodule Redix.Connector do
 
     # The caller only gets the socket on success, so we close it here. Otherwise it
     # leaks when the connection moves on to the next sentinel.
-    if result != :ok, do: _ = transport.close(server_socket)
-
-    result
+    tap(result, fn
+      :ok -> :ok
+      _other -> _ = transport.close(server_socket)
+    end)
   end
 
   # Public for testing: building the final socket options (and especially merging
