@@ -170,7 +170,7 @@ defmodule Redix.Connection do
           data = update_cluster_connection_state(data, :connected)
           {:ok, :connected, data, health_check_actions(data)}
 
-        {:stopped, ^socket_owner, reason} ->
+        {stopped, ^socket_owner, reason} when stopped in [:stopped, :connector_stop] ->
           {:stop, %Redix.ConnectionError{reason: reason}}
       end
     else
@@ -256,14 +256,18 @@ defmodule Redix.Connection do
     {:keep_state_and_data, :postpone}
   end
 
-  def connecting(:info, {:stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data) do
+  def connecting(:info, {stopped, owner, reason}, %__MODULE__{socket_owner: owner} = data)
+      when stopped in [:stopped, :connector_stop] do
     # We log this when the socket owner stopped while connecting.
     execute_telemetry_connection_event(data, :failed_connection, %{
       address: format_address(data),
       reason: %ConnectionError{reason: reason}
     })
 
-    disconnect(data, reason)
+    case stopped do
+      :stopped -> disconnect(data, reason)
+      :connector_stop -> connector_stop(data, reason)
+    end
   end
 
   def connected(:cast, {:pipeline, commands, from}, data) do
@@ -432,11 +436,15 @@ defmodule Redix.Connection do
     send(alias_ref, {alias_ref, reply})
   end
 
-  defp disconnect(data, %Redix.Error{} = error) do
+  # The connector asked to stop. A Redis error (such as a failed SELECT) stops the
+  # connection. Redix.Cluster relies on that reason to park the node.
+  defp connector_stop(data, %Redix.Error{} = error) do
     update_cluster_connection_state(data, :disconnected)
     Logger.error("Disconnected from Redis due to error: #{Exception.message(error)}")
     {:stop, error}
   end
+
+  defp connector_stop(data, reason), do: disconnect(data, reason)
 
   defp disconnect(data, reason) do
     data = update_cluster_connection_state(data, :disconnected)

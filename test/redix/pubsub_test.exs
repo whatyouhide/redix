@@ -585,6 +585,35 @@ defmodule Redix.PubSubTest do
       assert [{^pid, _}] = Registry.lookup(:redix_pubsub_via_registry, "my_pubsub")
     end
 
+    test "retry_on_auth_error: true closes the socket of each failed attempt" do
+      {test_name, _arity} = __ENV__.function
+      parent = self()
+
+      :telemetry.attach(
+        to_string(test_name),
+        [:redix, :failed_connection],
+        fn _event, _, meta, _ -> send(parent, {:failed_connection, meta.connection}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(to_string(test_name)) end)
+
+      {:ok, pid} =
+        PubSub.start_link(
+          port: Redix.TestPorts.port(:auth),
+          password: "wrong-password",
+          retry_on_auth_error: true,
+          backoff_initial: 10,
+          backoff_max: 10
+        )
+
+      for _attempt <- 1..5, do: assert_receive({:failed_connection, ^pid}, 1000)
+
+      # Sockets are linked to the process that owns them.
+      {:links, links} = Process.info(pid, :links)
+      assert Enum.filter(links, &is_port/1) == []
+    end
+
     test "raises with an invalid name" do
       assert_raise ArgumentError, ~r/expected :name option to be one of/, fn ->
         PubSub.start_link(port: port(), name: "not a valid name")

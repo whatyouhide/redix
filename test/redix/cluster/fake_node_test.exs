@@ -1470,6 +1470,26 @@ defmodule Redix.Cluster.FakeNodeTest do
       # of times, not thousands as in the pre-fix restart storm.
       assert FakeNode.connections_accepted(replica) <= 3
     end
+
+    # With retry_on_auth_error: true, a node that fails AUTH retries on its own
+    # backoff instead of stopping and being parked like the replica above.
+    @tag :capture_log
+    test "retry_on_auth_error: true reconnects a node that fails AUTH instead of parking it" do
+      cluster = start_auth_failing_cluster(retry_on_auth_error: true)
+
+      assert_receive {[:redix, :connection], %{cluster: ^cluster, reconnection: true}}, 1000
+      assert Redix.Cluster.command(cluster, ["PING"]) == {:ok, "PONG"}
+      refute_received {[:redix, :cluster, :node_connection_failed], %{kind: :parked}}
+    end
+
+    @tag :capture_log
+    test "retry_on_auth_error: false parks a node that fails AUTH" do
+      cluster = start_auth_failing_cluster(retry_on_auth_error: false)
+
+      assert_receive {[:redix, :cluster, :node_connection_failed],
+                      %{cluster: ^cluster, kind: :parked, reason: %Redix.Error{}}},
+                     1000
+    end
   end
 
   ## Helpers
@@ -1559,5 +1579,51 @@ defmodule Redix.Cluster.FakeNodeTest do
         {{{node_id, :"$1"}, :"$2", {:"$3", :_, :_}}, [], [{{:"$1", :"$2", :"$3"}}]}
       ]
     )
+  end
+
+  # Starts a one-node cluster whose node connection fails AUTH once: the topology
+  # fetch gets "good", the node connection gets "bad", then "good" from then on.
+  defp start_auth_failing_cluster(opts) do
+    cluster = :"auth_#{System.unique_integer([:positive])}"
+    parent = self()
+    events = [[:redix, :connection], [:redix, :cluster, :node_connection_failed]]
+    handler = fn event, _measurements, meta, _config -> send(parent, {event, meta}) end
+    :telemetry.attach_many(cluster, events, handler, nil)
+    on_exit(fn -> :telemetry.detach(cluster) end)
+
+    node = FakeNode.reserve()
+
+    FakeNode.serve(node, fn
+      ["AUTH", "good"] -> "+OK\r\n"
+      ["AUTH", _password] -> "-WRONGPASS invalid username-password pair\r\n"
+      ["CLUSTER", "SLOTS"] -> FakeNode.cluster_slots([{0, 16_383, node}])
+      ["PING"] -> "+PONG\r\n"
+      _other -> "+OK\r\n"
+    end)
+
+    {:ok, passwords} = Agent.start_link(fn -> ["good", "bad"] end)
+
+    start_supervised!(
+      {Redix.Cluster,
+       [
+         name: cluster,
+         nodes: ["redis://#{node}"],
+         primary_pool_size: 1,
+         sync_connect: true,
+         password: {__MODULE__, :next_password, [passwords]},
+         backoff_initial: 50,
+         backoff_max: 50
+       ] ++ opts}
+    )
+
+    cluster
+  end
+
+  # Password MFA for start_auth_failing_cluster/1: pops queued passwords, then "good".
+  def next_password(agent) do
+    Agent.get_and_update(agent, fn
+      [password | rest] -> {password, rest}
+      [] -> {"good", []}
+    end)
   end
 end

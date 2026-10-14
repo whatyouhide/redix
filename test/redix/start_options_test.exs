@@ -12,6 +12,7 @@ defmodule Redix.StartOptionsTest do
       assert opts[:sync_connect] == true
       assert opts[:address_selection] == :system
       assert opts[:connect_timeout_allocation] == :remaining
+      assert opts[:retry_on_auth_error] == false
     end
 
     test "validates address selection" do

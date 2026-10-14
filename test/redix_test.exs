@@ -139,6 +139,60 @@ defmodule RedixTest do
       System.delete_env("REDIX_MFA_PASSWORD")
     end
 
+    test "retry_on_auth_error: true retries until the MFA returns a valid password" do
+      {test_name, _arity} = __ENV__.function
+      parent = self()
+      events = [[:redix, :failed_connection], [:redix, :connection]]
+
+      :telemetry.attach_many(
+        to_string(test_name),
+        events,
+        fn event, _, meta, _ -> send(parent, {event, meta}) end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(to_string(test_name)) end)
+
+      {:ok, agent} = Agent.start_link(fn -> "wrong-password" end)
+
+      pid =
+        start_supervised!(
+          {Redix,
+           port: with_auth_port(),
+           password: {Agent, :get, [agent, &Function.identity/1]},
+           retry_on_auth_error: true,
+           backoff_initial: 50,
+           backoff_max: 50}
+        )
+
+      assert {:error, %ConnectionError{reason: :closed}} = Redix.command(pid, ["PING"])
+
+      assert_receive {[:redix, :failed_connection], %{connection: ^pid, reason: reason}}
+      assert %ConnectionError{reason: %Error{}} = reason
+
+      Agent.update(agent, fn _old_password -> "some-password" end)
+
+      assert_receive {[:redix, :connection], %{connection: ^pid, reconnection: true}}, 1000
+      assert Redix.command(pid, ["PING"]) == {:ok, "PONG"}
+    end
+
+    test "retry_on_auth_error: true still stops the connection on a SELECT error" do
+      capture_log(fn ->
+        Process.flag(:trap_exit, true)
+
+        {:ok, pid} =
+          Redix.start_link(
+            port: with_auth_port(),
+            password: "some-password",
+            database: 1_000,
+            retry_on_auth_error: true
+          )
+
+        assert_receive {:EXIT, ^pid, %Error{message: message}}, 500
+        assert message in ["ERR invalid DB index", "ERR DB index is out of range"]
+      end)
+    end
+
     test "when unable to connect to Redis with sync_connect: true" do
       Process.flag(:trap_exit, true)
 

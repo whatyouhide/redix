@@ -574,6 +574,8 @@ defmodule Redix.Cluster.Manager do
   # changing the node (or our config) can, and there's no bound on when. So we
   # deliberately do *not* restart it here. Instead we leave it to the periodic
   # topology refresh.
+  # With `retry_on_auth_error: true`, AUTH errors don't reach here: the node
+  # connection reconnects on its own backoff instead of stopping.
   defp handle_node_down(data, node_id, _index, _role, %Redix.Error{} = reason) do
     :telemetry.execute([:redix, :cluster, :node_connection_failed], %{}, %{
       cluster: data.cluster_name,

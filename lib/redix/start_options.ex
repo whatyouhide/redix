@@ -53,6 +53,19 @@ defmodule Redix.StartOptions do
       `{System, :fetch_env!, ["REDIX_PASSWORD"]}`.
       """
     ],
+    retry_on_auth_error: [
+      type: :boolean,
+      default: false,
+      doc: """
+      if `true`, a failed `AUTH` while connecting (such as `WRONGPASS`) is retried with
+      backoff like a network error, instead of stopping the connection. Use this when
+      `:password` is an MFA that returns rotating credentials, such as IAM tokens for
+      Google Cloud Memorystore: the MFA runs again on every attempt. Permanent errors,
+      such as a wrong static password, are then retried forever and only show up in
+      `[:redix, :failed_connection]` telemetry. `Redix.Cluster` nodes retry instead of
+      being parked. Sentinel connections always retry. *Available since v1.10.0.*
+      """
+    ],
     timeout: [
       type: :timeout,
       default: @default_timeout,

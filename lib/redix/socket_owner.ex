@@ -46,8 +46,12 @@ defmodule Redix.SocketOwner do
       send(state.conn, {:connected, self(), socket, address, peer_address})
       {:noreply, %{state | socket: socket}}
     else
-      {:error, reason} -> stop(reason, state)
-      {:stop, reason} -> stop(reason, state)
+      {:error, reason} ->
+        stop(reason, state)
+
+      {:stop, reason} ->
+        send(state.conn, {:connector_stop, self(), reason})
+        {:stop, :normal, state}
     end
   end
 

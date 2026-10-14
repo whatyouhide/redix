@@ -54,21 +54,34 @@ defmodule Redix.Connector do
              timeout,
              opts[:address_selection],
              Keyword.get(opts, :connect_timeout_allocation, :remaining)
-           ),
-         :ok <- setup_socket_buffers(transport, socket) do
-      # Here, we should stop if AUTHing or SELECTing a DB fails with a *semantic* error
-      # because disconnecting and retrying doesn't make sense, but we should not
-      # stop if the issue is at the network layer, because it might happen due to
-      # a race condition where the network conn breaks after connecting but before
-      # AUTH/SELECT.
-      case auth_and_select(transport, socket, opts, timeout) do
-        :ok -> {:ok, socket, Format.format_host_and_port(host, port)}
-        {:error, %Redix.Error{} = error} -> {:stop, error}
-        {:error, :extra_bytes_after_reply} -> {:stop, :extra_bytes_after_reply}
-        {:error, reason} -> {:error, reason}
+           ) do
+      with :ok <- setup_socket_buffers(transport, socket),
+           :ok <- auth_and_select(transport, socket, opts, timeout) do
+        {:ok, socket, Format.format_host_and_port(host, port)}
+      else
+        {:error, reason} ->
+          # Callers only get the socket on success, so we close it here. Otherwise it
+          # leaks in processes that own it and retry, such as Redix.PubSub.
+          _ = transport.close(socket)
+          setup_error(reason, opts)
       end
     end
   end
+
+  # Here, we should stop if AUTHing or SELECTing a DB fails with a *semantic* error
+  # because disconnecting and retrying doesn't make sense, but we should not
+  # stop if the issue is at the network layer, because it might happen due to
+  # a race condition where the network conn breaks after connecting but before
+  # AUTH/SELECT. AUTH errors are retryable with :retry_on_auth_error, since a
+  # password MFA can return a new password next time. Otherwise, they stop with
+  # the plain %Redix.Error{}.
+  defp setup_error({:auth_error, error}, opts) do
+    if opts[:retry_on_auth_error], do: {:error, error}, else: {:stop, error}
+  end
+
+  defp setup_error(%Redix.Error{} = error, _opts), do: {:stop, error}
+  defp setup_error(:extra_bytes_after_reply, _opts), do: {:stop, :extra_bytes_after_reply}
+  defp setup_error(reason, _opts), do: {:error, reason}
 
   # Public for testing DNS and connection failures without replacing OTP modules.
   @doc false
@@ -185,10 +198,16 @@ defmodule Redix.Connector do
   end
 
   defp auth_and_select(transport, socket, opts, timeout) do
-    with :ok <- maybe_auth(transport, socket, opts, timeout),
+    with :ok <- auth(transport, socket, opts, timeout),
          :ok <- maybe_select(transport, socket, opts, timeout),
          :ok <- maybe_readonly(transport, socket, opts, timeout),
          do: :ok
+  end
+
+  defp auth(transport, socket, opts, timeout) do
+    with {:error, %Redix.Error{} = error} <- maybe_auth(transport, socket, opts, timeout) do
+      {:error, {:auth_error, error}}
+    end
   end
 
   defp maybe_auth(transport, socket, opts, timeout) do
