@@ -412,11 +412,18 @@ defmodule Redix.Connector do
         :replica -> "slave"
       end
 
-    case sync_command(transport, server_socket, ["ROLE"], timeout) do
-      {:ok, [^expected_role | _]} -> :ok
-      {:ok, [role | _]} -> {:error, {:wrong_role, role}}
-      {:error, _reason_or_redis_error} = error -> error
-    end
+    result =
+      case sync_command(transport, server_socket, ["ROLE"], timeout) do
+        {:ok, [^expected_role | _]} -> :ok
+        {:ok, [role | _]} -> {:error, {:wrong_role, role}}
+        {:error, _reason_or_redis_error} = error -> error
+      end
+
+    # The caller only gets the socket on success, so we close it here. Otherwise it
+    # leaks when the connection moves on to the next sentinel.
+    if result != :ok, do: _ = transport.close(server_socket)
+
+    result
   end
 
   # Public for testing: building the final socket options (and especially merging
