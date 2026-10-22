@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.10.0
+
+  * Add the `:retry_on_auth_error` connection option, which lets you retry connection attempts even when the Redis server returns an authentication error. This is useful when credentials are not static and need to be fetched dynamically from somewhere (think of a temporary token); in those cases, retrying is helpful as credentials "become ready". A good use ase is described in [issue #354](https://github.com/whatyouhide/redix/issues/354).
+  * Fix a bug where we would leak TCP/TLS sockets in some specific closed-connection cases.
+  * Raise semantic errors on some more malformed RESP packets that non-compliant Redis servers could send to the client.
+
 ## v1.9.2
 
   * Use "least-busy" routing in `Redix.Cluster` pools. This is considered a bug fix because "sticky routing" (routing to a pool member based on the caller's PID hash) means potentially sticking with a degraded pool member. If you were relying on *connection affinity*, please stop. When you need to do things such as `CLIENT REPLY OFF`, open dedicated connections or use pipelines/transactions.
