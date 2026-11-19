@@ -135,7 +135,8 @@ defmodule Redix do
   Passwords that can be passed to the `:password` option (see `start_link/1`).
   """
   @typedoc since: "1.3.0"
-  @type password() :: String.t() | {module(), function_name :: atom(), arguments :: [term()]}
+  @type password() ::
+          String.t() | {module(), function_name :: atom(), arguments :: [term()]} | nil
 
   @typedoc """
   The possible role of a Redis sentinel (see `start_link/1`).

@@ -40,16 +40,13 @@ defmodule Redix.StartOptions do
       """
     ],
     password: [
-      type: {:or, [:string, :mfa]},
+      type: {:or, [:string, :mfa, {:in, [nil]}]},
+      default: nil,
       type_doc: "`t:Redix.password/0`",
       doc: """
-      the password used to connect to Redis. Defaults to
-      `nil`, meaning no password is used. When this option is provided, all Redix
-      does is issue an `AUTH` command to Redis in order to authenticate. MFAs are also
-      supported in the form of `{module, function, arguments}`. This can be used
-      to fetch the password dynamically on every reconnection but most importantly to
-      hide the password from crash reports in case the Redix connection crashes for
-      any reason. For example, you can set this option to:
+      the password used to connect to Redis. Redix skips `AUTH` when the password is `nil`.
+      You can pass a `{module, function, arguments}` tuple to fetch the password on each
+      connection attempt and keep it out of crash reports. For example, use
       `{System, :fetch_env!, ["REDIX_PASSWORD"]}`.
       """
     ],
@@ -314,7 +311,8 @@ defmodule Redix.StartOptions do
           """
         ],
         password: [
-          type: {:or, [:string, :mfa]},
+          type: {:or, [:string, :mfa, {:in, [nil]}]},
+          default: nil,
           type_doc: "`t:Redix.password/0`",
           doc: """
           if you don't want to specify a password for each sentinel you

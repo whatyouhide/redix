@@ -13,6 +13,12 @@ defmodule Redix.StartOptionsTest do
       assert opts[:address_selection] == :system
       assert opts[:connect_timeout_allocation] == :remaining
       assert opts[:retry_on_auth_error] == false
+      assert {:ok, nil} = Keyword.fetch(opts, :password)
+    end
+
+    test "accepts an explicit nil password" do
+      assert {:ok, nil} = Keyword.fetch(StartOptions.sanitize(:redix, password: nil), :password)
+      assert {:ok, nil} = Keyword.fetch(sanitize(password: nil), :password)
     end
 
     test "validates address selection" do
@@ -78,6 +84,7 @@ defmodule Redix.StartOptionsTest do
       assert [sentinel] = opts[:sentinel][:sentinels]
       assert sentinel[:host] == ~c"localhost"
       assert sentinel[:port] == 26379
+      assert {:ok, nil} = Keyword.fetch(sentinel, :password)
 
       assert opts[:sentinel][:group] == "foo"
     end
@@ -151,6 +158,20 @@ defmodule Redix.StartOptionsTest do
       assert Enum.count(sentinels) == 2
       assert Enum.find(sentinels, &(&1[:host] == ~c"host1"))[:password] == "secret1"
       assert Enum.find(sentinels, &(&1[:host] == ~c"host2"))[:password] == "secret2"
+    end
+
+    test "accepts an explicit nil default for sentinel passwords" do
+      opts =
+        sanitize(
+          sentinel: [
+            sentinels: [[host: "localhost", port: 26379]],
+            group: "mygroup",
+            password: nil
+          ]
+        )
+
+      assert [sentinel] = opts[:sentinel][:sentinels]
+      assert {:ok, nil} = Keyword.fetch(sentinel, :password)
     end
 
     test "sentinel password mfa" do
