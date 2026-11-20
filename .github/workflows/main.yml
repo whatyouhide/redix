@@ -9,22 +9,26 @@ on:
 jobs:
   test:
     name: Test (Elixir ${{matrix.elixir}} | Erlang/OTP ${{matrix.otp}})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - otp: "29"
             elixir: "1.20"
+            os: ubuntu-latest
             dialyzer: trueos
             lint: true
 
           - otp: "27.2"
             elixir: "1.18"
+            os: ubuntu-latest
             dialyzer: trueos
 
           - otp: "25.3"
             elixir: "1.15.8"
+            # Ubuntu 26.04 has no OTP 25 builds.
+            os: ubuntu-24.04
             coverage: true
 
     env:
