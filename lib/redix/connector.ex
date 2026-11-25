@@ -314,7 +314,7 @@ defmodule Redix.Connector do
                  String.to_integer(server_port),
                  opts
                ),
-             :ok <- verify_server_role(server_socket, opts, sentinel_opts) do
+             :ok <- maybe_verify_server_role(server_socket, opts, sentinel_opts) do
           :ok = transport.close(sent_socket)
           {:ok, server_socket, address}
         else
@@ -399,6 +399,14 @@ defmodule Redix.Connector do
           {:error, reason} ->
             {:error, reason}
         end
+    end
+  end
+
+  defp maybe_verify_server_role(server_socket, opts, sentinel_opts) do
+    if Keyword.get(sentinel_opts, :verify_role_check, true) do
+      verify_server_role(server_socket, opts, sentinel_opts)
+    else
+      :ok
     end
   end
 

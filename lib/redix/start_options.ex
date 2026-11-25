@@ -285,6 +285,17 @@ defmodule Redix.StartOptions do
           **at random**.
           """
         ],
+        verify_role_check: [
+          type: :boolean,
+          default: true,
+          doc: """
+          whether Redix verifies the Redis server's role with the `ROLE` command after
+          connecting. This applies to both `:primary` and `:replica` connections, including
+          when reconnecting. With `false`, Redix trusts the address reported by Sentinel.
+          If Sentinel reports a stale address during failover, Redix may connect to a
+          server whose role differs from the requested role.
+          """
+        ],
         socket_opts: [
           type: :keyword_list,
           default: [],

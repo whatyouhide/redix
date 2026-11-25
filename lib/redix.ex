@@ -36,9 +36,9 @@ defmodule Redix do
   (see `start_link/1` for more detailed information on these options). When connecting, Redix will
   attempt to connect to each of the specified sentinels in the given order. When it manages to
   connect to a sentinel, it will ask that sentinel for the address of the primary for the given
-  primary group. Then, it will connect to that primary and ask it for confirmation that it is
-  indeed a primary. If anything in this process doesn't go right, the next sentinel in the list
-  will be tried.
+  primary group. Then, it will connect to the reported address. By default, Redix confirms the
+  server's role with the `ROLE` command. Set `verify_role_check: false` in the `:sentinel` options to
+  skip this check for either role. If an attempt fails, Redix tries the next sentinel in the list.
 
   All of this happens in case of disconnections as well. If there's a disconnection, the whole
   process of asking sentinels for a primary is executed again.
