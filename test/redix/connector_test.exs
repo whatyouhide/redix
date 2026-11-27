@@ -209,10 +209,49 @@ defmodule Redix.ConnectorTest do
 
       # Sockets are linked to the process that owns them.
       ports_before = self() |> Process.info(:links) |> elem(1) |> Enum.filter(&is_port/1)
-      assert {:ok, socket, _address} = Connector.connect(opts, self())
+      assert {:ok, socket, address} = Connector.connect(opts, self())
+      assert address == "localhost:#{primary.port}"
       ports_after = self() |> Process.info(:links) |> elem(1) |> Enum.filter(&is_port/1)
       assert ports_after -- ports_before == [socket]
       :gen_tcp.close(socket)
+    end
+
+    for role <- [:primary, :replica] do
+      @tag sentinel_role: role
+      test "skips ROLE for a Sentinel #{role} when configured", %{sentinel_role: role} do
+        node =
+          FakeNode.start(fn
+            ["PING"] -> "+PONG\r\n"
+            ["ROLE"] -> "-NOPERM ROLE is disabled\r\n"
+          end)
+
+        {subcommand, reply} =
+          case role do
+            :primary ->
+              {"get-master-addr-by-name", Redix.Protocol.pack([node.host, node.port])}
+
+            :replica ->
+              replica = Redix.Protocol.pack(["name", node.id, "ip", node.host, "port", node.port])
+              {"slaves", ["*1\r\n", replica]}
+          end
+
+        sentinel =
+          FakeNode.start(fn ["SENTINEL", ^subcommand, "main"] -> reply end)
+
+        conn =
+          start_supervised!(
+            {Redix,
+             sync_connect: true,
+             sentinel: [
+               sentinels: [[host: sentinel.host, port: sentinel.port]],
+               group: "main",
+               role: role,
+               verify_role_check: false
+             ]}
+          )
+
+        assert Redix.command!(conn, ["PING"]) == "PONG"
+      end
     end
   end
 
